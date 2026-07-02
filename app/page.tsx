@@ -54,7 +54,53 @@ export default function Home() {
                 </div>
 
       </section>
+      {/* Features */}
 
+      <section className="px-10 py-24">
+
+        <h2 className="text-center text-4xl font-bold">
+          Everything Your Salon Needs
+        </h2>
+
+        <p className="mt-4 text-center text-gray-400">
+          AnaAI handles calls so you can focus on your clients.
+        </p>
+
+        <div className="mt-16 grid gap-8 md:grid-cols-3">
+
+          <div className="rounded-2xl bg-gray-900 p-6">
+            <h3 className="text-xl font-bold text-cyan-400">
+              📞 24/7 Call Answering
+            </h3>
+
+            <p className="mt-3 text-gray-300">
+              Never miss another customer, even after business hours.
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-gray-900 p-6">
+            <h3 className="text-xl font-bold text-cyan-400">
+              📅 Appointment Booking
+            </h3>
+
+            <p className="mt-3 text-gray-300">
+              Automatically schedules appointments into your calendar.
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-gray-900 p-6">
+            <h3 className="text-xl font-bold text-cyan-400">
+              🤖 AI Customer Support
+            </h3>
+
+            <p className="mt-3 text-gray-300">
+              Answers FAQs about pricing, services, and availability.
+            </p>
+          </div>
+
+        </div>
+
+      </section>
     </main>
   );
 }
