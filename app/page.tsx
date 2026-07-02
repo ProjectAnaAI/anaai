@@ -57,4 +57,54 @@ export default function Home() {
 
     </main>
   );
-}
+}<section className="bg-black py-24 px-10">
+
+  <h2 className="text-center text-4xl font-bold">
+    Why Salons Choose AnaAI
+  </h2>
+
+  <div className="mt-16 grid gap-8 md:grid-cols-2 lg:grid-cols-4">
+
+    <div className="rounded-2xl bg-gray-900 p-6">
+      <h3 className="text-xl font-bold text-cyan-400">
+        📞 AI Receptionist
+      </h3>
+
+      <p className="mt-3 text-gray-300">
+        Answers every customer call 24/7.
+      </p>
+    </div>
+
+    <div className="rounded-2xl bg-gray-900 p-6">
+      <h3 className="text-xl font-bold text-cyan-400">
+        📅 Smart Booking
+      </h3>
+
+      <p className="mt-3 text-gray-300">
+        Books appointments automatically.
+      </p>
+    </div>
+
+    <div className="rounded-2xl bg-gray-900 p-6">
+      <h3 className="text-xl font-bold text-cyan-400">
+        👥 Customer History
+      </h3>
+
+      <p className="mt-3 text-gray-300">
+        Stores customer information securely.
+      </p>
+    </div>
+
+    <div className="rounded-2xl bg-gray-900 p-6">
+      <h3 className="text-xl font-bold text-cyan-400">
+        📊 Business Dashboard
+      </h3>
+
+      <p className="mt-3 text-gray-300">
+        View bookings and appointments in real time.
+      </p>
+    </div>
+
+  </div>
+
+</section>
