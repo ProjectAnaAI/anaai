@@ -15,7 +15,7 @@ export default function Home() {
           <a href="#">Contact</a>
         </div>
 
-        <button className="rounded-xl bg-cyan-500 px-5 py-2 font-semibold text-black hover:bg-cyan-400">
+        <button className="rounded-xl bg-cyan-500 px-5 py-2 font-semibold text-black hover:bg-cyan-400 transition">
           Book Demo
         </button>
       </nav>
@@ -36,14 +36,14 @@ export default function Home() {
         </p>
 
         <div className="mt-12 flex gap-5">
-  <button className="rounded-xl bg-cyan-500 px-8 py-4 font-bold text-black hover:bg-cyan-400 transition">
-    Get Started
-  </button>
+          <button className="rounded-xl bg-cyan-500 px-8 py-4 font-bold text-black hover:bg-cyan-400 transition">
+            Get Started
+          </button>
 
-  <button className="rounded-xl border border-gray-600 px-8 py-4 hover:border-white transition">
-    Watch Demo
-  </button>
-</div>
+          <button className="rounded-xl border border-gray-600 px-8 py-4 hover:border-white transition">
+            Watch Demo
+          </button>
+        </div>
       </section>
 
       {/* FEATURES */}
@@ -83,6 +83,36 @@ export default function Home() {
 
         </div>
       </section>
+
+      {/* CTA */}
+      <section className="px-10 py-32 text-center bg-black border-t border-gray-800">
+        <h2 className="text-4xl font-bold">
+          Ready to automate your salon?
+        </h2>
+
+        <p className="mt-4 text-gray-400">
+          Join salons using AnaAI to never miss a customer call again.
+        </p>
+
+        <div className="mt-10 flex justify-center gap-5">
+          <button className="rounded-xl bg-cyan-500 px-8 py-4 font-bold text-black hover:bg-cyan-400 transition">
+            Start Free Trial
+          </button>
+
+          <button className="rounded-xl border border-gray-600 px-8 py-4 hover:border-white transition">
+            Book Demo
+          </button>
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="px-10 py-16 text-center text-gray-500 border-t border-gray-800">
+        <p className="text-lg font-semibold text-white">AnaAI</p>
+        <p className="mt-2">AI Receptionist for Modern Salons</p>
+        <p className="mt-6 text-sm">
+          © {new Date().getFullYear()} AnaAI. All rights reserved.
+        </p>
+      </footer>
 
     </main>
   );
