@@ -1,13 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  async function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -17,9 +20,10 @@ export default function LoginPage() {
 
     if (error) {
       alert(error.message);
-    } else {
-      alert("Login successful!");
+      return;
     }
+
+    router.push("/dashboard");
   }
 
   return (
@@ -35,8 +39,10 @@ export default function LoginPage() {
         <input
           className="p-3 rounded bg-gray-800"
           placeholder="Email"
+          type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          required
         />
 
         <input
@@ -45,9 +51,13 @@ export default function LoginPage() {
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          required
         />
 
-        <button className="bg-cyan-500 text-black font-bold p-3 rounded">
+        <button
+          type="submit"
+          className="bg-cyan-500 text-black font-bold p-3 rounded hover:bg-cyan-400"
+        >
           Login
         </button>
       </form>
