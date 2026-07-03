@@ -11,20 +11,26 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  e.preventDefault();
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-    if (error) {
-      alert(error.message);
-      return;
-    }
+  console.log("Login Result:", data);
+  console.log("Login Error:", error);
 
-    router.push("/dashboard");
+  if (error) {
+    alert(error.message);
+    return;
   }
+
+  const session = await supabase.auth.getSession();
+  console.log("Current Session:", session);
+
+  router.push("/dashboard");
+}
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
