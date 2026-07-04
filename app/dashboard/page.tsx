@@ -2,13 +2,32 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Building2, Calendar, LogOut } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+type BusinessProfile = {
+  business_name: string;
+  owner_name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  business_hours: string | null;
+};
 
 export default function DashboardPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
-  const [business, setBusiness] = useState<any>(null);
+  const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -29,11 +48,8 @@ export default function DashboardPage() {
         .select("*")
         .eq("user_id", user.id);
 
-      if (error) {
-        console.log("Database Error:", error.message);
-        setBusiness(null);
-      } else {
-        setBusiness(data?.[0] || null);
+      if (!error && data) {
+        setBusiness(data[0] || null);
       }
 
       setLoading(false);
@@ -49,96 +65,124 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <h2 className="text-xl">Loading Dashboard...</h2>
+      <main className="min-h-screen bg-white text-gray-900 flex items-center justify-center">
+        Loading dashboard...
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-10">
-      {/* HEADER */}
-      <h1 className="text-4xl font-bold text-cyan-400">
-        AnaAI Dashboard
-      </h1>
-
-      <p className="mt-2 text-gray-400">
-        Welcome back, {email}
-      </p>
-
-      {/* BUSINESS PROFILE */}
-      <div className="mt-8 bg-gray-900 rounded-xl p-6 shadow-lg">
-        <h2 className="text-2xl font-semibold text-cyan-400 mb-4">
-          Business Profile
-        </h2>
-
-        {business ? (
-          <div className="space-y-2 text-gray-300">
-            <p>
-              <span className="font-bold text-white">Business:</span>{" "}
-              {business.business_name}
+    <main className="min-h-screen bg-white text-gray-900">
+      <div className="mx-auto max-w-7xl px-8 py-10">
+        <header className="flex items-center justify-between border-b border-gray-200 pb-6">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-wide text-green-600">
+              AnaAI
             </p>
-
-            <p>
-              <span className="font-bold text-white">Owner:</span>{" "}
-              {business.owner_name}
-            </p>
-
-            <p>
-              <span className="font-bold text-white">Phone:</span>{" "}
-              {business.phone}
-            </p>
-
-            <p>
-              <span className="font-bold text-white">Email:</span>{" "}
-              {business.email}
-            </p>
-
-            <p>
-              <span className="font-bold text-white">Address:</span>{" "}
-              {business.address}
-            </p>
-
-            <p>
-              <span className="font-bold text-white">Business Hours:</span>{" "}
-              {business.business_hours}
+            <h1 className="mt-2 text-4xl font-semibold tracking-tight">
+              Dashboard
+            </h1>
+            <p className="mt-2 text-gray-500">
+              Welcome back, {email}
             </p>
           </div>
-        ) : (
-          <p className="text-red-400">
-            No business profile found.
-          </p>
-        )}
-      </div>
 
-      {/* QUICK ACTIONS */}
-      <div className="mt-10">
-        <h2 className="text-2xl font-semibold text-cyan-400 mb-4">
-          Quick Actions
-        </h2>
+          <Button variant="outline" onClick={handleLogout}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Logout
+          </Button>
+        </header>
 
-        <div className="flex flex-wrap gap-4">
-          <button
-            onClick={() => router.push("/appointments")}
-            className="bg-green-500 hover:bg-green-400 text-black font-bold px-6 py-3 rounded-lg transition"
-          >
-            📅 Appointments
-          </button>
+        <section className="mt-8 grid gap-6 md:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-green-600" />
+                Business
+              </CardTitle>
+            </CardHeader>
 
-          <button
-            onClick={() => router.push("/business")}
-            className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-6 py-3 rounded-lg transition"
-          >
-            🏢 Edit Business
-          </button>
+            <CardContent>
+              {business ? (
+                <div className="space-y-3 text-sm">
+                  <div>
+                    <p className="text-gray-500">Business name</p>
+                    <p className="font-medium text-gray-900">
+                      {business.business_name}
+                    </p>
+                  </div>
 
-          <button
-            onClick={handleLogout}
-            className="bg-red-500 hover:bg-red-600 text-white font-bold px-6 py-3 rounded-lg transition"
-          >
-            🚪 Logout
-          </button>
-        </div>
+                  <div>
+                    <p className="text-gray-500">Owner</p>
+                    <p className="font-medium text-gray-900">
+                      {business.owner_name}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-gray-500">Phone</p>
+                    <p className="font-medium text-gray-900">
+                      {business.phone || "Not provided"}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  No business profile found.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>AI Receptionist</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
+                Online
+              </Badge>
+              <p className="mt-4 text-sm text-gray-500">
+                AI call handling will be connected in a later milestone.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Appointments</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-semibold tracking-tight">Active</p>
+              <p className="mt-2 text-sm text-gray-500">
+                Manage bookings and customer schedule.
+              </p>
+            </CardContent>
+          </Card>
+        </section>
+
+        <section className="mt-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Quick actions</CardTitle>
+            </CardHeader>
+
+            <CardContent className="flex flex-wrap gap-3">
+              <Button onClick={() => router.push("/appointments")}>
+                <Calendar className="mr-2 h-4 w-4" />
+                Appointments
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => router.push("/business")}
+              >
+                <Building2 className="mr-2 h-4 w-4" />
+                Business profile
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
       </div>
     </main>
   );
