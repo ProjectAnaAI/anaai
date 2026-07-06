@@ -167,6 +167,20 @@ export default function AppointmentsPage() {
 
     loadAppointments();
   }
+  
+  async function updateAppointmentStatus(id: string, status: string) {
+  const { error } = await supabase
+    .from("appointments")
+    .update({ status })
+    .eq("id", id);
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  loadAppointments();
+}
 
   return (
     <AppLayout>
@@ -330,12 +344,42 @@ export default function AppointmentsPage() {
                       )}
                     </div>
 
-                    <Button
-                      variant="destructive"
-                      onClick={() => deleteAppointment(appointment.id)}
-                    >
-                      Delete
-                    </Button>
+                    <div className="flex flex-wrap gap-2 md:justify-end">
+                      <Button
+                        variant={appointment.status === "Booked" ? "default" : "outline"}
+                        onClick={() => updateAppointmentStatus(appointment.id, "Booked")}
+                      >
+                        Booked
+                      </Button>
+
+                      <Button
+                        variant={appointment.status === "Confirmed" ? "default" : "outline"}
+                        onClick={() => updateAppointmentStatus(appointment.id, "Confirmed")}
+                      >
+                        Confirmed
+                      </Button>
+
+                      <Button
+                        variant={appointment.status === "Completed" ? "default" : "outline"}
+                        onClick={() => updateAppointmentStatus(appointment.id, "Completed")}
+                      >
+                        Completed
+                      </Button>
+
+                      <Button
+                        variant={appointment.status === "Cancelled" ? "default" : "outline"}
+                        onClick={() => updateAppointmentStatus(appointment.id, "Cancelled")}
+                      >
+                        Cancelled
+                      </Button>
+
+                      <Button
+                        variant="destructive"
+                        onClick={() => deleteAppointment(appointment.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}
