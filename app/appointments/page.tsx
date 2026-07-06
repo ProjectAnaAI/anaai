@@ -15,9 +15,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-
 type Appointment = {
   id: string;
+  customer_id: string | null;
+  service_id: string | null;
   customer_name: string;
   customer_phone: string;
   customer_email: string;
@@ -28,16 +29,28 @@ type Appointment = {
   notes: string;
 };
 
+type Customer = {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+};
+
+type Service = {
+  id: string;
+  name: string;
+};
+
 export default function AppointmentsPage() {
   const router = useRouter();
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [service, setService] = useState("");
+  const [customerId, setCustomerId] = useState("");
+  const [serviceId, setServiceId] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("");
   const [notes, setNotes] = useState("");
@@ -55,6 +68,22 @@ export default function AppointmentsPage() {
       router.push("/login");
       return;
     }
+
+    const { data: customerData } = await supabase
+      .from("customers")
+      .select("id, full_name, phone, email")
+      .eq("user_id", user.id)
+      .order("full_name");
+
+    setCustomers(customerData || []);
+
+    const { data: serviceData } = await supabase
+      .from("services")
+      .select("id, name")
+      .eq("user_id", user.id)
+      .order("name");
+
+    setServices(serviceData || []);
 
     const { data, error } = await supabase
       .from("appointments")
@@ -79,12 +108,32 @@ export default function AppointmentsPage() {
 
     if (!user) return;
 
+    const selectedCustomer = customers.find(
+      (customer) => customer.id === customerId
+    );
+
+    const selectedService = services.find(
+      (service) => service.id === serviceId
+    );
+
+    if (!selectedCustomer) {
+      alert("Please select a customer.");
+      return;
+    }
+
+    if (!selectedService) {
+      alert("Please select a service.");
+      return;
+    }
+
     const { error } = await supabase.from("appointments").insert({
       user_id: user.id,
-      customer_name: customerName,
-      customer_phone: customerPhone,
-      customer_email: customerEmail,
-      service,
+      customer_id: selectedCustomer.id,
+      service_id: selectedService.id,
+      customer_name: selectedCustomer.full_name,
+      customer_phone: selectedCustomer.phone,
+      customer_email: selectedCustomer.email,
+      service: selectedService.name,
       appointment_date: appointmentDate,
       appointment_time: appointmentTime,
       notes,
@@ -96,10 +145,8 @@ export default function AppointmentsPage() {
       return;
     }
 
-    setCustomerName("");
-    setCustomerPhone("");
-    setCustomerEmail("");
-    setService("");
+    setCustomerId("");
+    setServiceId("");
     setAppointmentDate("");
     setAppointmentTime("");
     setNotes("");
@@ -134,7 +181,7 @@ export default function AppointmentsPage() {
           </h1>
 
           <p className="mt-2 text-gray-500">
-            Create and manage customer bookings.
+            Create bookings by selecting an existing customer and service.
           </p>
         </header>
 
@@ -146,31 +193,35 @@ export default function AppointmentsPage() {
           <CardContent>
             <form onSubmit={handleSubmit}>
               <div className="grid gap-4 md:grid-cols-2">
-                <Input
-                  placeholder="Customer name"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
+                <select
+                  className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
                   required
-                />
+                >
+                  <option value="">Select customer</option>
 
-                <Input
-                  placeholder="Phone number"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                />
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.full_name}
+                    </option>
+                  ))}
+                </select>
 
-                <Input
-                  type="email"
-                  placeholder="Email address"
-                  value={customerEmail}
-                  onChange={(e) => setCustomerEmail(e.target.value)}
-                />
+                <select
+                  className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  value={serviceId}
+                  onChange={(e) => setServiceId(e.target.value)}
+                  required
+                >
+                  <option value="">Select service</option>
 
-                <Input
-                  placeholder="Service"
-                  value={service}
-                  onChange={(e) => setService(e.target.value)}
-                />
+                  {services.map((service) => (
+                    <option key={service.id} value={service.id}>
+                      {service.name}
+                    </option>
+                  ))}
+                </select>
 
                 <Input
                   type="date"
