@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, Calendar } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import {
+  CalendarDays,
+  Users,
+  Scissors,
+  Bot,
+} from "lucide-react";
 
 import AppLayout from "@/components/layout/AppLayout";
-import { Button } from "@/components/ui/button";
+import StatsCard from "@/components/dashboard/StatsCard";
+import QuickActions from "@/components/dashboard/QuickActions";
+import { supabase } from "@/lib/supabase";
+
 import {
   Card,
   CardContent,
@@ -29,10 +36,13 @@ export default function DashboardPage() {
 
   const [email, setEmail] = useState("");
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
+  const [appointmentCount, setAppointmentCount] = useState(0);
+  const [customerCount, setCustomerCount] = useState(0);
+  const [serviceCount, setServiceCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function loadData() {
+    async function loadDashboard() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -44,24 +54,44 @@ export default function DashboardPage() {
 
       setEmail(user.email || "");
 
-      const { data, error } = await supabase
+      const { data: businessData } = await supabase
         .from("business_profiles")
         .select("*")
         .eq("user_id", user.id);
 
-      if (!error && data) {
-        setBusiness(data[0] || null);
-      }
+      setBusiness(businessData?.[0] || null);
+
+      const today = new Date().toISOString().split("T")[0];
+
+      const { count: todayAppointments } = await supabase
+        .from("appointments")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("appointment_date", today);
+
+      const { count: customers } = await supabase
+        .from("customers")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id);
+
+      const { count: services } = await supabase
+        .from("services")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id);
+
+      setAppointmentCount(todayAppointments || 0);
+      setCustomerCount(customers || 0);
+      setServiceCount(services || 0);
 
       setLoading(false);
     }
 
-    loadData();
+    loadDashboard();
   }, [router]);
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-white text-gray-900 flex items-center justify-center">
+      <main className="flex min-h-screen items-center justify-center bg-white text-gray-900">
         Loading dashboard...
       </main>
     );
@@ -74,7 +104,7 @@ export default function DashboardPage() {
           AnaAI
         </p>
 
-        <h1 className="mt-2 text-4xl font-semibold tracking-tight">
+        <h1 className="mt-2 text-4xl font-semibold tracking-tight text-gray-900">
           Dashboard
         </h1>
 
@@ -83,18 +113,45 @@ export default function DashboardPage() {
         </p>
       </header>
 
-      <section className="mt-8 grid gap-6 md:grid-cols-3">
+      <section className="mt-8 grid gap-6 md:grid-cols-4">
+        <StatsCard
+          title="Today's appointments"
+          value={appointmentCount}
+          description="Bookings scheduled for today"
+          icon={CalendarDays}
+        />
+
+        <StatsCard
+          title="Customers"
+          value={customerCount}
+          description="Total saved customers"
+          icon={Users}
+        />
+
+        <StatsCard
+          title="Services"
+          value={serviceCount}
+          description="Active service catalog"
+          icon={Scissors}
+        />
+
+        <StatsCard
+          title="AI receptionist"
+          value="Online"
+          description="Ready for future call handling"
+          icon={Bot}
+        />
+      </section>
+
+      <section className="mt-8 grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-green-600" />
-              Business
-            </CardTitle>
+            <CardTitle>Business overview</CardTitle>
           </CardHeader>
 
           <CardContent>
             {business ? (
-              <div className="space-y-3 text-sm">
+              <div className="space-y-4 text-sm">
                 <div>
                   <p className="text-gray-500">Business name</p>
                   <p className="font-medium text-gray-900">
@@ -115,6 +172,13 @@ export default function DashboardPage() {
                     {business.phone || "Not provided"}
                   </p>
                 </div>
+
+                <div>
+                  <p className="text-gray-500">Business hours</p>
+                  <p className="font-medium text-gray-900">
+                    {business.business_hours || "Not provided"}
+                  </p>
+                </div>
               </div>
             ) : (
               <p className="text-sm text-gray-500">
@@ -126,7 +190,7 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>AI Receptionist</CardTitle>
+            <CardTitle>AI status</CardTitle>
           </CardHeader>
 
           <CardContent>
@@ -135,47 +199,15 @@ export default function DashboardPage() {
             </Badge>
 
             <p className="mt-4 text-sm text-gray-500">
-              AI call handling will be connected in a later milestone.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Appointments</CardTitle>
-          </CardHeader>
-
-          <CardContent>
-            <p className="text-3xl font-semibold tracking-tight">Active</p>
-
-            <p className="mt-2 text-sm text-gray-500">
-              Manage bookings and customer schedule.
+              The AI receptionist module will connect to business services,
+              appointments, and customer history in a later milestone.
             </p>
           </CardContent>
         </Card>
       </section>
 
       <section className="mt-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick actions</CardTitle>
-          </CardHeader>
-
-          <CardContent className="flex flex-wrap gap-3">
-            <Button onClick={() => router.push("/appointments")}>
-              <Calendar className="mr-2 h-4 w-4" />
-              Appointments
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={() => router.push("/business")}
-            >
-              <Building2 className="mr-2 h-4 w-4" />
-              Business profile
-            </Button>
-          </CardContent>
-        </Card>
+        <QuickActions />
       </section>
     </AppLayout>
   );
