@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Users,
   Building2,
+  Scissors, 
   BarChart3,
   Bot,
   Settings,
@@ -31,6 +32,11 @@ const navItems = [
     label: "Business",
     href: "/business",
     icon: Building2,
+  },
+  {
+  label: "Services",
+  href: "/services",
+  icon: Scissors,
   },
   {
     label: "Analytics",
