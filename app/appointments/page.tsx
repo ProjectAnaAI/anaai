@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 
 import AppLayout from "@/components/layout/AppLayout";
@@ -20,13 +21,13 @@ type Appointment = {
   customer_id: string | null;
   service_id: string | null;
   customer_name: string;
-  customer_phone: string;
-  customer_email: string;
+  customer_phone: string | null;
+  customer_email: string | null;
   service: string;
   appointment_date: string;
   appointment_time: string;
   status: string;
-  notes: string;
+  notes: string | null;
 };
 
 type Customer = {
@@ -48,6 +49,7 @@ export default function AppointmentsPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
   const [customerId, setCustomerId] = useState("");
   const [serviceId, setServiceId] = useState("");
@@ -92,39 +94,53 @@ export default function AppointmentsPage() {
       .order("appointment_date", { ascending: true })
       .order("appointment_time", { ascending: true });
 
-    if (!error && data) {
-      setAppointments(data);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      setAppointments(data || []);
     }
 
     setLoading(false);
   }
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit() {
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) return;
+    if (!user) {
+      router.push("/login");
+      return;
+    }
 
     const selectedCustomer = customers.find(
       (customer) => customer.id === customerId
     );
 
-    const selectedService = services.find(
-      (service) => service.id === serviceId
-    );
+    const selectedService = services.find((service) => service.id === serviceId);
 
     if (!selectedCustomer) {
-      alert("Please select a customer.");
+      toast.warning("Please select a customer.");
       return;
     }
 
     if (!selectedService) {
-      alert("Please select a service.");
+      toast.warning("Please select a service.");
       return;
     }
+
+    if (!appointmentDate) {
+      toast.warning("Please select an appointment date.");
+      return;
+    }
+
+    if (!appointmentTime) {
+      toast.warning("Please select an appointment time.");
+      return;
+    }
+
+    setSubmitting(true);
 
     const { error } = await supabase.from("appointments").insert({
       user_id: user.id,
@@ -140,10 +156,14 @@ export default function AppointmentsPage() {
       status: "Booked",
     });
 
+    setSubmitting(false);
+
     if (error) {
-      alert(error.message);
+      toast.error(error.message);
       return;
     }
+
+    toast.success("Appointment created successfully.");
 
     setCustomerId("");
     setServiceId("");
@@ -161,26 +181,28 @@ export default function AppointmentsPage() {
       .eq("id", id);
 
     if (error) {
-      alert(error.message);
+      toast.error(error.message);
       return;
     }
 
+    toast.success("Appointment deleted.");
     loadAppointments();
   }
-  
+
   async function updateAppointmentStatus(id: string, status: string) {
-  const { error } = await supabase
-    .from("appointments")
-    .update({ status })
-    .eq("id", id);
+    const { error } = await supabase
+      .from("appointments")
+      .update({ status })
+      .eq("id", id);
 
-  if (error) {
-    alert(error.message);
-    return;
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success(`Appointment marked as ${status}.`);
+    loadAppointments();
   }
-
-  loadAppointments();
-}
 
   return (
     <AppLayout>
@@ -205,13 +227,12 @@ export default function AppointmentsPage() {
           </CardHeader>
 
           <CardContent>
-            <form onSubmit={handleSubmit}>
+            <div>
               <div className="grid gap-4 md:grid-cols-2">
                 <select
                   className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                   value={customerId}
                   onChange={(e) => setCustomerId(e.target.value)}
-                  required
                 >
                   <option value="">Select customer</option>
 
@@ -226,7 +247,6 @@ export default function AppointmentsPage() {
                   className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                   value={serviceId}
                   onChange={(e) => setServiceId(e.target.value)}
-                  required
                 >
                   <option value="">Select service</option>
 
@@ -241,14 +261,12 @@ export default function AppointmentsPage() {
                   type="date"
                   value={appointmentDate}
                   onChange={(e) => setAppointmentDate(e.target.value)}
-                  required
                 />
 
                 <Input
                   type="time"
                   value={appointmentTime}
                   onChange={(e) => setAppointmentTime(e.target.value)}
-                  required
                 />
               </div>
 
@@ -259,10 +277,15 @@ export default function AppointmentsPage() {
                 onChange={(e) => setNotes(e.target.value)}
               />
 
-              <Button type="submit" className="mt-5">
-                Save appointment
-              </Button>
-            </form>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="mt-5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submitting ? "Saving..." : "Save appointment"}
+              </button>
+            </div>
           </CardContent>
         </Card>
 
@@ -346,29 +369,51 @@ export default function AppointmentsPage() {
 
                     <div className="flex flex-wrap gap-2 md:justify-end">
                       <Button
-                        variant={appointment.status === "Booked" ? "default" : "outline"}
-                        onClick={() => updateAppointmentStatus(appointment.id, "Booked")}
+                        variant={
+                          appointment.status === "Booked" ? "default" : "outline"
+                        }
+                        onClick={() =>
+                          updateAppointmentStatus(appointment.id, "Booked")
+                        }
                       >
                         Booked
                       </Button>
 
                       <Button
-                        variant={appointment.status === "Confirmed" ? "default" : "outline"}
-                        onClick={() => updateAppointmentStatus(appointment.id, "Confirmed")}
+                        variant={
+                          appointment.status === "Confirmed"
+                            ? "default"
+                            : "outline"
+                        }
+                        onClick={() =>
+                          updateAppointmentStatus(appointment.id, "Confirmed")
+                        }
                       >
                         Confirmed
                       </Button>
 
                       <Button
-                        variant={appointment.status === "Completed" ? "default" : "outline"}
-                        onClick={() => updateAppointmentStatus(appointment.id, "Completed")}
+                        variant={
+                          appointment.status === "Completed"
+                            ? "default"
+                            : "outline"
+                        }
+                        onClick={() =>
+                          updateAppointmentStatus(appointment.id, "Completed")
+                        }
                       >
                         Completed
                       </Button>
 
                       <Button
-                        variant={appointment.status === "Cancelled" ? "default" : "outline"}
-                        onClick={() => updateAppointmentStatus(appointment.id, "Cancelled")}
+                        variant={
+                          appointment.status === "Cancelled"
+                            ? "default"
+                            : "outline"
+                        }
+                        onClick={() =>
+                          updateAppointmentStatus(appointment.id, "Cancelled")
+                        }
                       >
                         Cancelled
                       </Button>
