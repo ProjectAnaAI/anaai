@@ -56,6 +56,21 @@ export default function AppointmentsPage() {
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("");
   const [notes, setNotes] = useState("");
+  const [notice, setNotice] = useState<{
+    type: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
+
+  function showNotice(
+    type: "success" | "warning" | "error",
+    message: string
+  ) {
+    setNotice({ type, message });
+
+    if (type === "success") toast.success(message);
+    if (type === "warning") toast.warning(message);
+    if (type === "error") toast.error(message);
+  }
 
   useEffect(() => {
     loadAppointments();
@@ -95,7 +110,7 @@ export default function AppointmentsPage() {
       .order("appointment_time", { ascending: true });
 
     if (error) {
-      toast.error(error.message);
+      showNotice("error", error.message);
     } else {
       setAppointments(data || []);
     }
@@ -104,7 +119,6 @@ export default function AppointmentsPage() {
   }
 
   async function handleSubmit() {
-
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -121,22 +135,22 @@ export default function AppointmentsPage() {
     const selectedService = services.find((service) => service.id === serviceId);
 
     if (!selectedCustomer) {
-      toast.warning("Please select a customer.");
+      showNotice("warning", "Please select a customer.");
       return;
     }
 
     if (!selectedService) {
-      toast.warning("Please select a service.");
+      showNotice("warning", "Please select a service.");
       return;
     }
 
     if (!appointmentDate) {
-      toast.warning("Please select an appointment date.");
+      showNotice("warning", "Please select an appointment date.");
       return;
     }
 
     if (!appointmentTime) {
-      toast.warning("Please select an appointment time.");
+      showNotice("warning", "Please select an appointment time.");
       return;
     }
 
@@ -159,11 +173,11 @@ export default function AppointmentsPage() {
     setSubmitting(false);
 
     if (error) {
-      toast.error(error.message);
+      showNotice("error", error.message);
       return;
     }
 
-    toast.success("Appointment created successfully.");
+    showNotice("success", "Appointment created successfully.");
 
     setCustomerId("");
     setServiceId("");
@@ -181,11 +195,11 @@ export default function AppointmentsPage() {
       .eq("id", id);
 
     if (error) {
-      toast.error(error.message);
+      showNotice("error", error.message);
       return;
     }
 
-    toast.success("Appointment deleted.");
+    showNotice("success", "Appointment deleted.");
     loadAppointments();
   }
 
@@ -196,11 +210,11 @@ export default function AppointmentsPage() {
       .eq("id", id);
 
     if (error) {
-      toast.error(error.message);
+      showNotice("error", error.message);
       return;
     }
 
-    toast.success(`Appointment marked as ${status}.`);
+    showNotice("success", `Appointment marked as ${status}.`);
     loadAppointments();
   }
 
@@ -220,6 +234,20 @@ export default function AppointmentsPage() {
             Create bookings by selecting an existing customer and service.
           </p>
         </header>
+
+        {notice && (
+          <div
+            className={`mt-6 rounded-xl border px-4 py-3 text-sm font-medium ${
+              notice.type === "success"
+                ? "border-green-200 bg-green-50 text-green-700"
+                : notice.type === "warning"
+                ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+          >
+            {notice.message}
+          </div>
+        )}
 
         <Card className="mt-8">
           <CardHeader>
