@@ -1,12 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   CalendarDays,
   Users,
   Building2,
-  Scissors, 
+  Scissors,
   BarChart3,
   Bot,
   Settings,
@@ -34,9 +34,9 @@ const navItems = [
     icon: Building2,
   },
   {
-  label: "Services",
-  href: "/services",
-  icon: Scissors,
+    label: "Services",
+    href: "/services",
+    icon: Scissors,
   },
   {
     label: "Analytics",
@@ -45,7 +45,7 @@ const navItems = [
   },
   {
     label: "AI Receptionist",
-    href: "/ai-receptionist",
+    href: "/ai",
     icon: Bot,
   },
   {
@@ -57,6 +57,7 @@ const navItems = [
 
 export default function Sidebar() {
   const router = useRouter();
+  const pathname = usePathname();
 
   return (
     <aside className="hidden min-h-screen w-72 border-r border-gray-200 bg-white px-5 py-6 lg:block">
@@ -64,6 +65,7 @@ export default function Sidebar() {
         <h1 className="text-2xl font-semibold tracking-tight text-green-600">
           AnaAI
         </h1>
+
         <p className="mt-1 text-sm text-gray-500">
           AI receptionist platform
         </p>
@@ -72,14 +74,28 @@ export default function Sidebar() {
       <nav className="mt-8 space-y-1">
         {navItems.map((item) => {
           const Icon = item.icon;
+          const isActive =
+            pathname === item.href ||
+            (item.href !== "/dashboard" &&
+              pathname.startsWith(`${item.href}/`));
 
           return (
             <button
               key={item.href}
+              type="button"
               onClick={() => router.push(item.href)}
-              className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium text-gray-700 transition hover:bg-green-50 hover:text-green-700"
+              className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium transition ${
+                isActive
+                  ? "bg-green-50 text-green-700"
+                  : "text-gray-700 hover:bg-green-50 hover:text-green-700"
+              }`}
             >
-              <Icon className="h-4 w-4" />
+              <Icon
+                className={`h-4 w-4 ${
+                  isActive ? "text-green-600" : ""
+                }`}
+              />
+
               {item.label}
             </button>
           );
