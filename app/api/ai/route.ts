@@ -47,18 +47,37 @@ type AvailabilityArgs = {
   time: string;
 };
 
+type TimeInterval = {
+  start: number;
+  end: number;
+};
+
 function timeToMinutes(value: string) {
   const normalized = value.slice(0, 5);
   const [hours, minutes] = normalized.split(":").map(Number);
 
   if (
     Number.isNaN(hours) ||
-    Number.isNaN(minutes)
+    Number.isNaN(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
   ) {
     return null;
   }
 
   return hours * 60 + minutes;
+}
+
+function minutesToTime(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+    2,
+    "0"
+  )}`;
 }
 
 function getDayKey(date: string) {
@@ -91,10 +110,7 @@ function parseBusinessHours(
   try {
     const parsed = JSON.parse(value);
 
-    if (
-      !parsed ||
-      typeof parsed !== "object"
-    ) {
+    if (!parsed || typeof parsed !== "object") {
       return null;
     }
 
@@ -105,15 +121,83 @@ function parseBusinessHours(
 }
 
 function normalizeTime(value: string) {
-  const match = value.match(
-    /^(\d{1,2}):(\d{2})/
-  );
+  const match = value.match(/^(\d{1,2}):(\d{2})/);
 
   if (!match) {
     return value;
   }
 
   return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function intervalsOverlap(
+  firstStart: number,
+  firstEnd: number,
+  secondStart: number,
+  secondEnd: number
+) {
+  return firstStart < secondEnd && firstEnd > secondStart;
+}
+
+function findNearbyAvailableTimes({
+  requestedStart,
+  durationMinutes,
+  openMinutes,
+  closeMinutes,
+  blockedIntervals,
+  stepMinutes = 15,
+  limit = 3,
+}: {
+  requestedStart: number;
+  durationMinutes: number;
+  openMinutes: number;
+  closeMinutes: number;
+  blockedIntervals: TimeInterval[];
+  stepMinutes?: number;
+  limit?: number;
+}) {
+  const availableCandidates: number[] = [];
+
+  for (
+    let candidateStart = openMinutes;
+    candidateStart + durationMinutes <= closeMinutes;
+    candidateStart += stepMinutes
+  ) {
+    if (candidateStart === requestedStart) {
+      continue;
+    }
+
+    const candidateEnd =
+      candidateStart + durationMinutes;
+
+    const conflicts = blockedIntervals.some((interval) =>
+      intervalsOverlap(
+        candidateStart,
+        candidateEnd,
+        interval.start,
+        interval.end
+      )
+    );
+
+    if (!conflicts) {
+      availableCandidates.push(candidateStart);
+    }
+  }
+
+  availableCandidates.sort((a, b) => {
+    const distanceA = Math.abs(a - requestedStart);
+    const distanceB = Math.abs(b - requestedStart);
+
+    if (distanceA !== distanceB) {
+      return distanceA - distanceB;
+    }
+
+    return a - b;
+  });
+
+  return availableCandidates
+    .slice(0, limit)
+    .map(minutesToTime);
 }
 
 export async function POST(request: Request) {
@@ -146,12 +230,6 @@ export async function POST(request: Request) {
         }
       );
     }
-
-    /*
-     * ---------------------------------------------------
-     * Authenticate dashboard user
-     * ---------------------------------------------------
-     */
 
     const authorization =
       request.headers.get("authorization");
@@ -221,19 +299,7 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * Store the authenticated user ID as a plain string.
-     *
-     * This also keeps TypeScript happy inside nested
-     * functions such as checkAvailability().
-     */
     const userId = user.id;
-
-    /*
-     * ---------------------------------------------------
-     * Authenticated Supabase client
-     * ---------------------------------------------------
-     */
 
     const supabase = createClient(
       supabaseUrl,
@@ -250,12 +316,6 @@ export async function POST(request: Request) {
         },
       }
     );
-
-    /*
-     * ---------------------------------------------------
-     * Read customer message
-     * ---------------------------------------------------
-     */
 
     const body = await request.json();
 
@@ -275,12 +335,6 @@ export async function POST(request: Request) {
         }
       );
     }
-
-    /*
-     * ---------------------------------------------------
-     * Load trusted business data
-     * ---------------------------------------------------
-     */
 
     const [
       settingsResult,
@@ -384,14 +438,7 @@ export async function POST(request: Request) {
       businessResult.data;
 
     const services =
-      (servicesResult.data ??
-        []) as ServiceRow[];
-
-    /*
-     * ---------------------------------------------------
-     * AI personality
-     * ---------------------------------------------------
-     */
+      (servicesResult.data ?? []) as ServiceRow[];
 
     const receptionistName =
       settings?.receptionist_name?.trim() ||
@@ -413,12 +460,6 @@ export async function POST(request: Request) {
       settings?.transfer_instructions?.trim() ||
       "None";
 
-    /*
-     * ---------------------------------------------------
-     * Business knowledge
-     * ---------------------------------------------------
-     */
-
     const knowledgeText =
       knowledgeItems.length === 0
         ? "No additional business knowledge has been provided."
@@ -432,12 +473,6 @@ Answer: ${item.answer}
             )
             .join("\n");
 
-    /*
-     * ---------------------------------------------------
-     * Services
-     * ---------------------------------------------------
-     */
-
     const servicesText =
       services.length === 0
         ? "No active services have been configured."
@@ -450,9 +485,7 @@ Answer: ${item.answer}
 
               const price =
                 service.price != null
-                  ? `$${Number(
-                      service.price
-                    ).toFixed(2)}`
+                  ? `$${Number(service.price).toFixed(2)}`
                   : "Price not configured";
 
               return `
@@ -466,12 +499,6 @@ Description: ${
 `;
             })
             .join("\n");
-
-    /*
-     * ---------------------------------------------------
-     * Business profile
-     * ---------------------------------------------------
-     */
 
     const businessProfileText = `
 Business name:
@@ -490,20 +517,8 @@ Address:
 ${business?.address || "Not provided"}
 `;
 
-    /*
-     * ---------------------------------------------------
-     * Current date
-     * ---------------------------------------------------
-     */
-
     const today =
       new Date().toISOString().slice(0, 10);
-
-    /*
-     * ---------------------------------------------------
-     * READ-ONLY AVAILABILITY FUNCTION
-     * ---------------------------------------------------
-     */
 
     async function checkAvailability(
       args: AvailabilityArgs
@@ -528,14 +543,9 @@ ${business?.address || "Not provided"}
           available: false,
           reason:
             "Service, date, and time are all required to check availability.",
+          suggested_times: [],
         };
       }
-
-      /*
-       * -----------------------------------------------
-       * Find requested service
-       * -----------------------------------------------
-       */
 
       const service =
         services.find(
@@ -555,24 +565,29 @@ ${business?.address || "Not provided"}
         return {
           available: false,
           reason: `The service "${serviceName}" could not be found in the active service list.`,
+          suggested_times: [],
         };
       }
 
       if (
-        !service.duration_minutes ||
+        service.duration_minutes == null ||
         service.duration_minutes <= 0
       ) {
         return {
           available: false,
           reason: `The duration for ${service.name} has not been configured, so availability cannot be checked safely.`,
+          suggested_times: [],
         };
       }
 
       /*
-       * -----------------------------------------------
-       * Read structured business hours
-       * -----------------------------------------------
+       * Capture validated values in plain variables.
+       * This avoids TypeScript losing type narrowing
+       * inside nested helper functions.
        */
+      const selectedService = service;
+      const durationMinutes =
+        service.duration_minutes;
 
       const parsedBusinessHours =
         parseBusinessHours(
@@ -584,6 +599,7 @@ ${business?.address || "Not provided"}
           available: false,
           reason:
             "Business hours have not been configured in a valid format.",
+          suggested_times: [],
         };
       }
 
@@ -595,6 +611,7 @@ ${business?.address || "Not provided"}
           available: false,
           reason:
             "The requested appointment date is invalid.",
+          suggested_times: [],
         };
       }
 
@@ -606,6 +623,7 @@ ${business?.address || "Not provided"}
           available: false,
           reason:
             "Business hours have not been configured for that day.",
+          suggested_times: [],
         };
       }
 
@@ -614,76 +632,53 @@ ${business?.address || "Not provided"}
           available: false,
           reason:
             "The business is closed on that day.",
-          service: service.name,
+          service: selectedService.name,
           date,
           time: requestedTime,
+          duration_minutes:
+            durationMinutes,
+          suggested_times: [],
         };
       }
 
-      const openMinutes =
+      const parsedOpenMinutes =
         timeToMinutes(dayHours.open);
 
-      const closeMinutes =
+      const parsedCloseMinutes =
         timeToMinutes(dayHours.close);
 
-      const requestedStart =
+      const parsedRequestedStart =
         timeToMinutes(requestedTime);
 
       if (
-        openMinutes == null ||
-        closeMinutes == null ||
-        requestedStart == null
+        parsedOpenMinutes == null ||
+        parsedCloseMinutes == null ||
+        parsedRequestedStart == null
       ) {
         return {
           available: false,
           reason:
             "The business hours or requested time could not be interpreted.",
+          suggested_times: [],
         };
       }
+
+      /*
+       * These variables are guaranteed numbers from
+       * this point forward.
+       */
+      const openMinutes =
+        parsedOpenMinutes;
+
+      const closeMinutes =
+        parsedCloseMinutes;
+
+      const requestedStart =
+        parsedRequestedStart;
 
       const requestedEnd =
         requestedStart +
-        service.duration_minutes;
-
-      /*
-       * -----------------------------------------------
-       * Check business opening hours
-       * -----------------------------------------------
-       */
-
-      if (
-        requestedStart < openMinutes
-      ) {
-        return {
-          available: false,
-          reason: `${service.name} cannot start at ${requestedTime} because the business opens at ${dayHours.open}.`,
-          service: service.name,
-          date,
-          time: requestedTime,
-          duration_minutes:
-            service.duration_minutes,
-        };
-      }
-
-      if (
-        requestedEnd > closeMinutes
-      ) {
-        return {
-          available: false,
-          reason: `${service.name} takes ${service.duration_minutes} minutes and would finish after the business closes at ${dayHours.close}.`,
-          service: service.name,
-          date,
-          time: requestedTime,
-          duration_minutes:
-            service.duration_minutes,
-        };
-      }
-
-      /*
-       * -----------------------------------------------
-       * Load blocking appointments
-       * -----------------------------------------------
-       */
+        durationMinutes;
 
       const {
         data: appointmentData,
@@ -716,18 +711,14 @@ ${business?.address || "Not provided"}
           available: false,
           reason:
             "The appointment calendar could not be checked.",
+          suggested_times: [],
         };
       }
 
       const appointments =
-        (appointmentData ??
-          []) as AppointmentRow[];
+        (appointmentData ?? []) as AppointmentRow[];
 
-      /*
-       * -----------------------------------------------
-       * Check appointment overlap
-       * -----------------------------------------------
-       */
+      const blockedIntervals: TimeInterval[] = [];
 
       for (const appointment of appointments) {
         const existingStart =
@@ -765,60 +756,115 @@ ${business?.address || "Not provided"}
         }
 
         if (
-          !existingService?.duration_minutes
+          existingService?.duration_minutes == null ||
+          existingService.duration_minutes <= 0
         ) {
           return {
             available: false,
             reason:
               "An existing appointment on that day does not have a configured service duration, so AnaAI cannot safely confirm availability.",
+            suggested_times: [],
           };
         }
 
-        const existingEnd =
-          existingStart +
+        const existingDuration =
           existingService.duration_minutes;
 
-        const overlaps =
-          requestedStart < existingEnd &&
-          requestedEnd > existingStart;
+        blockedIntervals.push({
+          start: existingStart,
+          end:
+            existingStart +
+            existingDuration,
+        });
+      }
 
-        if (overlaps) {
-          return {
-            available: false,
-            reason:
-              "That time overlaps an existing appointment.",
-            service: service.name,
-            date,
-            time: requestedTime,
-            duration_minutes:
-              service.duration_minutes,
-          };
-        }
+      function getSuggestions() {
+        return findNearbyAvailableTimes({
+          requestedStart,
+          durationMinutes,
+          openMinutes,
+          closeMinutes,
+          blockedIntervals,
+          stepMinutes: 15,
+          limit: 3,
+        });
+      }
+
+      if (
+        requestedStart < openMinutes
+      ) {
+        return {
+          available: false,
+          reason: `${selectedService.name} cannot start at ${requestedTime} because the business opens at ${dayHours.open}.`,
+          service: selectedService.name,
+          date,
+          time: requestedTime,
+          duration_minutes:
+            durationMinutes,
+          suggested_times:
+            getSuggestions(),
+        };
+      }
+
+      if (
+        requestedEnd > closeMinutes
+      ) {
+        return {
+          available: false,
+          reason: `${selectedService.name} takes ${durationMinutes} minutes and would finish after the business closes at ${dayHours.close}.`,
+          service: selectedService.name,
+          date,
+          time: requestedTime,
+          duration_minutes:
+            durationMinutes,
+          suggested_times:
+            getSuggestions(),
+        };
+      }
+
+      const requestedConflicts =
+        blockedIntervals.some((interval) =>
+          intervalsOverlap(
+            requestedStart,
+            requestedEnd,
+            interval.start,
+            interval.end
+          )
+        );
+
+      if (requestedConflicts) {
+        return {
+          available: false,
+          reason:
+            "That time overlaps an existing appointment.",
+          service: selectedService.name,
+          date,
+          time: requestedTime,
+          duration_minutes:
+            durationMinutes,
+          suggested_times:
+            getSuggestions(),
+        };
       }
 
       return {
         available: true,
         reason:
           "The requested appointment fits within business hours and does not overlap any existing booked or confirmed appointment.",
-        service: service.name,
+        service: selectedService.name,
         date,
         time: requestedTime,
         duration_minutes:
-          service.duration_minutes,
+          durationMinutes,
+        suggested_times: [],
       };
     }
-
-    /*
-     * ---------------------------------------------------
-     * OpenAI tool definition
-     * ---------------------------------------------------
-     */
 
     const availabilityTool = {
       type: "function" as const,
       name: "check_availability",
       description:
-        "Check whether a specific service is available at a specific date and start time. Use this whenever a customer asks whether they can book, schedule, or come in for a service at a particular date and time.",
+        "Check whether a specific service is available at a specific date and start time. If the requested time is unavailable, the tool may also return nearby available start times on the same day.",
       strict: true,
       parameters: {
         type: "object",
@@ -826,7 +872,7 @@ ${business?.address || "Not provided"}
           service_name: {
             type: "string",
             description:
-              "The exact business service the customer wants, using the service list when possible.",
+              "The exact business service the customer wants, using the active service list when possible.",
           },
           date: {
             type: "string",
@@ -847,12 +893,6 @@ ${business?.address || "Not provided"}
         additionalProperties: false,
       },
     };
-
-    /*
-     * ---------------------------------------------------
-     * AI instructions
-     * ---------------------------------------------------
-     */
 
     const instructions = `
 You are ${receptionistName}, the AI receptionist for this business.
@@ -903,6 +943,9 @@ APPOINTMENT AVAILABILITY RULES
 - If the customer did not provide the service, ask which service they want.
 - If the customer did not provide a date, ask which date they want.
 - If the customer did not provide a time, ask what time they prefer.
+- If check_availability says the requested time is unavailable and provides suggested_times, tell the customer the requested time is unavailable and naturally offer the suggested times.
+- Only offer suggested appointment times returned by the tool.
+- Never invent an alternative appointment time.
 - Do not claim an appointment has been booked.
 - You currently have READ-ONLY calendar access.
 - You cannot create, cancel, confirm, reschedule, or modify appointments yet.
@@ -929,12 +972,6 @@ GENERAL RULES
 - Speak directly to the customer like a professional receptionist.
 `;
 
-    /*
-     * ---------------------------------------------------
-     * First AI response
-     * ---------------------------------------------------
-     */
-
     const firstResponse =
       await openai.responses.create({
         model: "gpt-5.6-terra",
@@ -952,12 +989,6 @@ GENERAL RULES
           item.type ===
           "function_call"
       );
-
-    /*
-     * ---------------------------------------------------
-     * No tool call needed
-     * ---------------------------------------------------
-     */
 
     if (functionCalls.length === 0) {
       const reply =
@@ -979,12 +1010,6 @@ GENERAL RULES
         reply,
       });
     }
-
-    /*
-     * ---------------------------------------------------
-     * Execute read-only tool calls
-     * ---------------------------------------------------
-     */
 
     const toolOutputs: {
       type: "function_call_output";
@@ -1015,6 +1040,7 @@ GENERAL RULES
             available: false,
             reason:
               "The availability request could not be interpreted.",
+            suggested_times: [],
           }),
         });
 
@@ -1040,12 +1066,6 @@ GENERAL RULES
           JSON.stringify(result),
       });
     }
-
-    /*
-     * ---------------------------------------------------
-     * Give tool result back to AI
-     * ---------------------------------------------------
-     */
 
     const finalResponse =
       await openai.responses.create({
