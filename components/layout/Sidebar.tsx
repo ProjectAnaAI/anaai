@@ -8,6 +8,7 @@ import {
   Building2,
   Scissors,
   BarChart3,
+  BookOpen,
   Bot,
   Settings,
 } from "lucide-react";
@@ -44,6 +45,11 @@ const navItems = [
     icon: BarChart3,
   },
   {
+    label: "Business Knowledge",
+    href: "/knowledge",
+    icon: BookOpen,
+  },
+  {
     label: "AI Receptionist",
     href: "/ai",
     icon: Bot,
@@ -74,6 +80,7 @@ export default function Sidebar() {
       <nav className="mt-8 space-y-1">
         {navItems.map((item) => {
           const Icon = item.icon;
+
           const isActive =
             pathname === item.href ||
             (item.href !== "/dashboard" &&

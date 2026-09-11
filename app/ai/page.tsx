@@ -1,11 +1,31 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Save, Sparkles } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
+import {
+  ArrowRight,
+  BookOpen,
+  Bot,
+  MessageCircle,
+  Save,
+  Send,
+  Sparkles,
+} from "lucide-react";
+import { toast } from "sonner";
+
 import AppLayout from "@/components/layout/AppLayout";
+import { supabase } from "@/lib/supabase";
+
+type KnowledgeItem = {
+  id: string;
+  category: string;
+  question: string;
+  answer: string;
+};
 
 export default function AIReceptionistPage() {
+  const router = useRouter();
+
   const [receptionistName, setReceptionistName] = useState("Ana");
   const [greeting, setGreeting] = useState(
     "Thanks for calling! How can I help you today?"
@@ -14,95 +34,312 @@ export default function AIReceptionistPage() {
   const [instructions, setInstructions] = useState("");
   const [transferInstructions, setTransferInstructions] = useState("");
 
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
+  const [knowledgeCount, setKnowledgeCount] = useState(0);
+
+  const [testMessage, setTestMessage] = useState("");
+  const [aiReply, setAiReply] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
-    async function loadSettings() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    async function loadPage() {
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
 
-      if (!user) {
+        if (sessionError) {
+          console.error("Session error:", sessionError);
+          toast.error("Unable to read your login session.");
+          router.push("/login");
+          return;
+        }
+
+        if (!session?.user) {
+          router.push("/login");
+          return;
+        }
+
+        const user = session.user;
+
+        const [settingsResult, knowledgeResult] = await Promise.all([
+          supabase
+            .from("ai_settings")
+            .select(
+              "receptionist_name, greeting, tone, custom_instructions, transfer_instructions"
+            )
+            .eq("user_id", user.id)
+            .maybeSingle(),
+
+          supabase
+            .from("business_knowledge")
+            .select("id, category, question, answer")
+            .eq("user_id", user.id)
+            .order("created_at", {
+              ascending: false,
+            }),
+        ]);
+
+        if (settingsResult.error) {
+          console.error(
+            "AI settings load error:",
+            settingsResult.error
+          );
+
+          toast.error(settingsResult.error.message);
+        }
+
+        if (knowledgeResult.error) {
+          console.error(
+            "Knowledge load error:",
+            knowledgeResult.error
+          );
+
+          toast.error(knowledgeResult.error.message);
+        }
+
+        const settings = settingsResult.data;
+
+        if (settings) {
+          setReceptionistName(
+            settings.receptionist_name || "Ana"
+          );
+
+          setGreeting(
+            settings.greeting ||
+              "Thanks for calling! How can I help you today?"
+          );
+
+          setTone(
+            settings.tone ||
+              "Friendly and professional"
+          );
+
+          setInstructions(
+            settings.custom_instructions || ""
+          );
+
+          setTransferInstructions(
+            settings.transfer_instructions || ""
+          );
+        }
+
+        const items = knowledgeResult.data ?? [];
+
+        setKnowledgeItems(items);
+        setKnowledgeCount(items.length);
+      } finally {
         setLoading(false);
-        return;
       }
-
-      const { data, error } = await supabase
-        .from("ai_settings")
-        .select(
-          "receptionist_name, greeting, tone, custom_instructions, transfer_instructions"
-        )
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (error) {
-        alert(error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (data) {
-        setReceptionistName(data.receptionist_name ?? "Ana");
-        setGreeting(
-          data.greeting ??
-            "Thanks for calling! How can I help you today?"
-        );
-        setTone(data.tone ?? "Friendly and professional");
-        setInstructions(data.custom_instructions ?? "");
-        setTransferInstructions(data.transfer_instructions ?? "");
-      }
-
-      setLoading(false);
     }
 
-    loadSettings();
-  }, []);
+    loadPage();
+  }, [router]);
+
+  async function getValidAccessToken() {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error) {
+      console.error("getSession error:", error);
+      return null;
+    }
+
+    if (session?.access_token) {
+      return session.access_token;
+    }
+
+    const {
+      data: refreshedData,
+      error: refreshError,
+    } = await supabase.auth.refreshSession();
+
+    if (refreshError) {
+      console.error(
+        "refreshSession error:",
+        refreshError
+      );
+
+      return null;
+    }
+
+    return refreshedData.session?.access_token ?? null;
+  }
+
+  async function handleAskAI() {
+    const message = testMessage.trim();
+
+    if (!message) {
+      toast.warning(
+        "Enter a customer question first."
+      );
+      return;
+    }
+
+    setAsking(true);
+    setAiReply("");
+
+    try {
+      const accessToken =
+        await getValidAccessToken();
+
+      if (!accessToken) {
+        toast.error(
+          "Your login session has expired. Please log in again."
+        );
+
+        router.push("/login");
+        return;
+      }
+
+      console.log(
+        "AnaAI authenticated request:",
+        Boolean(accessToken)
+      );
+
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          message,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error(
+          "AnaAI API response:",
+          response.status,
+          data
+        );
+
+        if (response.status === 401) {
+          toast.error(
+            data.error ||
+              "Your login session could not be verified."
+          );
+
+          return;
+        }
+
+        throw new Error(
+          data.error ||
+            "Unable to generate an AI response."
+        );
+      }
+
+      setAiReply(
+        data.reply ||
+          "AnaAI did not return a response."
+      );
+    } catch (error) {
+      console.error(
+        "Ask AnaAI error:",
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to generate an AI response.";
+
+      toast.error(message);
+    } finally {
+      setAsking(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-    if (!user) {
-      alert("Please login first.");
-      setSaving(false);
-      return;
-    }
+      if (userError || !user) {
+        toast.error(
+          "Please log in again."
+        );
 
-    const { error } = await supabase.from("ai_settings").upsert(
-      {
-        user_id: user.id,
-        receptionist_name: receptionistName,
-        greeting,
-        tone,
-        custom_instructions: instructions,
-        transfer_instructions: transferInstructions,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "user_id",
+        router.push("/login");
+        return;
       }
-    );
 
-    setSaving(false);
+      const { error } = await supabase
+        .from("ai_settings")
+        .upsert(
+          {
+            user_id: user.id,
+            receptionist_name:
+              receptionistName.trim() || "Ana",
+            greeting: greeting.trim(),
+            tone,
+            custom_instructions:
+              instructions.trim(),
+            transfer_instructions:
+              transferInstructions.trim(),
+            updated_at:
+              new Date().toISOString(),
+          },
+          {
+            onConflict: "user_id",
+          }
+        );
 
-    if (error) {
-      alert(error.message);
-      return;
+      if (error) {
+        throw error;
+      }
+
+      toast.success(
+        "AI receptionist settings saved."
+      );
+    } catch (error) {
+      console.error(
+        "Save AI settings error:",
+        error
+      );
+
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to save AI settings."
+      );
+    } finally {
+      setSaving(false);
     }
+  }
 
-    alert("AI receptionist settings saved successfully!");
+  function handleKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>
+  ) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+
+      if (!asking) {
+        void handleAskAI();
+      }
+    }
   }
 
   return (
     <AppLayout>
-      <div className="min-h-screen bg-gray-50 px-8 py-10">
+      <div className="min-h-screen bg-gray-50 px-6 py-8 md:px-8 md:py-10">
         <div className="mx-auto max-w-6xl">
-
-          {/* Header */}
           <div className="mb-8 border-b border-gray-200 pb-8">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-green-600">
               AnaAI
@@ -115,8 +352,9 @@ export default function AIReceptionistPage() {
                 </h1>
 
                 <p className="mt-3 max-w-2xl text-base leading-7 text-gray-500">
-                  Configure how AnaAI speaks with customers, answers questions,
-                  and handles incoming calls for your business.
+                  Configure how AnaAI speaks with
+                  customers and test responses using
+                  your saved business knowledge.
                 </p>
               </div>
 
@@ -127,29 +365,127 @@ export default function AIReceptionistPage() {
           </div>
 
           {loading ? (
-            <div className="rounded-2xl border border-gray-200 bg-white p-8">
-              <p className="text-gray-500">Loading AI settings...</p>
+            <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+              <p className="text-gray-500">
+                Loading AI receptionist...
+              </p>
             </div>
           ) : (
             <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-
-              {/* Main settings */}
               <div className="space-y-6">
+                <section className="rounded-2xl border border-green-200 bg-white p-7 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-xl bg-green-50 p-2.5">
+                      <MessageCircle className="h-5 w-5 text-green-600" />
+                    </div>
 
-                {/* Voice & personality */}
-                <section className="rounded-2xl border border-gray-200 bg-white p-7 shadow-sm">
-                  <div className="mb-6">
-                    <h2 className="text-xl font-semibold text-gray-950">
-                      Voice & Personality
-                    </h2>
+                    <div>
+                      <h2 className="text-xl font-semibold text-gray-950">
+                        Test AnaAI
+                      </h2>
 
-                    <p className="mt-1 text-sm text-gray-500">
-                      Set the identity and communication style of your AI
-                      receptionist.
-                    </p>
+                      <p className="mt-1 text-sm leading-6 text-gray-500">
+                        Ask a question as if you were a
+                        customer contacting your
+                        business.
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="space-y-6">
+                  <div className="mt-6">
+                    <label className="mb-2 block text-sm font-medium text-gray-700">
+                      Customer question
+                    </label>
+
+                    <textarea
+                      value={testMessage}
+                      onChange={(event) =>
+                        setTestMessage(
+                          event.target.value
+                        )
+                      }
+                      onKeyDown={handleKeyDown}
+                      rows={4}
+                      placeholder="Example: What time do you close on Saturday?"
+                      className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                    />
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs text-gray-400">
+                        Enter sends. Shift + Enter adds
+                        a new line.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleAskAI()
+                        }
+                        disabled={
+                          asking ||
+                          !testMessage.trim()
+                        }
+                        className="flex items-center gap-2 rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Send className="h-4 w-4" />
+
+                        {asking
+                          ? "AnaAI is thinking..."
+                          : "Ask AnaAI"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {asking && (
+                    <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-xl bg-green-100 p-2">
+                          <Bot className="h-4 w-4 text-green-700" />
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {receptionistName}
+                          </p>
+
+                          <p className="mt-1 text-sm text-gray-500">
+                            Thinking...
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!asking && aiReply && (
+                    <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-xl bg-green-100 p-2">
+                          <Bot className="h-4 w-4 text-green-700" />
+                        </div>
+
+                        <p className="text-sm font-semibold text-gray-900">
+                          {receptionistName}
+                        </p>
+                      </div>
+
+                      <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-gray-700">
+                        {aiReply}
+                      </p>
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-2xl border border-gray-200 bg-white p-7 shadow-sm">
+                  <h2 className="text-xl font-semibold text-gray-950">
+                    Voice & Personality
+                  </h2>
+
+                  <p className="mt-1 text-sm text-gray-500">
+                    Set the identity and communication
+                    style of your AI receptionist.
+                  </p>
+
+                  <div className="mt-6 space-y-6">
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700">
                         Receptionist Name
@@ -157,11 +493,12 @@ export default function AIReceptionistPage() {
 
                       <input
                         value={receptionistName}
-                        onChange={(e) =>
-                          setReceptionistName(e.target.value)
+                        onChange={(event) =>
+                          setReceptionistName(
+                            event.target.value
+                          )
                         }
-                        placeholder="Ana"
-                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
                       />
                     </div>
 
@@ -172,8 +509,12 @@ export default function AIReceptionistPage() {
 
                       <select
                         value={tone}
-                        onChange={(e) => setTone(e.target.value)}
-                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                        onChange={(event) =>
+                          setTone(
+                            event.target.value
+                          )
+                        }
+                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
                       >
                         <option value="Friendly and professional">
                           Friendly and professional
@@ -191,87 +532,83 @@ export default function AIReceptionistPage() {
                   </div>
                 </section>
 
-                {/* Greeting */}
                 <section className="rounded-2xl border border-gray-200 bg-white p-7 shadow-sm">
-                  <div className="mb-6">
-                    <h2 className="text-xl font-semibold text-gray-950">
-                      Call Greeting
-                    </h2>
+                  <h2 className="text-xl font-semibold text-gray-950">
+                    Call Greeting
+                  </h2>
 
-                    <p className="mt-1 text-sm text-gray-500">
-                      This is how AnaAI will greet customers when answering a
-                      call.
-                    </p>
-                  </div>
+                  <p className="mt-1 text-sm text-gray-500">
+                    This is how AnaAI should greet
+                    customers.
+                  </p>
 
                   <textarea
                     value={greeting}
-                    onChange={(e) => setGreeting(e.target.value)}
+                    onChange={(event) =>
+                      setGreeting(
+                        event.target.value
+                      )
+                    }
                     rows={4}
-                    className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                    className="mt-6 w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
                   />
                 </section>
 
-                {/* Instructions */}
                 <section className="rounded-2xl border border-gray-200 bg-white p-7 shadow-sm">
-                  <div className="mb-6">
-                    <h2 className="text-xl font-semibold text-gray-950">
-                      Custom Instructions
-                    </h2>
-
-                    <p className="mt-1 text-sm text-gray-500">
-                      Give AnaAI additional rules to follow during customer
-                      conversations.
-                    </p>
-                  </div>
+                  <h2 className="text-xl font-semibold text-gray-950">
+                    Custom Instructions
+                  </h2>
 
                   <textarea
                     value={instructions}
-                    onChange={(e) => setInstructions(e.target.value)}
+                    onChange={(event) =>
+                      setInstructions(
+                        event.target.value
+                      )
+                    }
                     rows={6}
-                    placeholder="Example: Always confirm the customer's name, phone number, service, date, and time before booking."
-                    className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                    placeholder="Add additional rules for AnaAI..."
+                    className="mt-6 w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
                   />
                 </section>
 
-                {/* Human transfer */}
                 <section className="rounded-2xl border border-gray-200 bg-white p-7 shadow-sm">
-                  <div className="mb-6">
-                    <h2 className="text-xl font-semibold text-gray-950">
-                      Human Transfer
-                    </h2>
-
-                    <p className="mt-1 text-sm text-gray-500">
-                      Define situations where AnaAI should hand the call to a
-                      person.
-                    </p>
-                  </div>
+                  <h2 className="text-xl font-semibold text-gray-950">
+                    Human Transfer
+                  </h2>
 
                   <textarea
-                    value={transferInstructions}
-                    onChange={(e) =>
-                      setTransferInstructions(e.target.value)
+                    value={
+                      transferInstructions
+                    }
+                    onChange={(event) =>
+                      setTransferInstructions(
+                        event.target.value
+                      )
                     }
                     rows={5}
-                    placeholder="Example: Transfer the call if the customer asks for a manager or has a complaint that AnaAI cannot resolve."
-                    className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                    placeholder="When should AnaAI transfer to a human?"
+                    className="mt-6 w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
                   />
                 </section>
 
                 <button
                   type="button"
-                  onClick={handleSave}
+                  onClick={() =>
+                    void handleSave()
+                  }
                   disabled={saving}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3.5 font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3.5 font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:opacity-50"
                 >
                   <Save className="h-5 w-5" />
-                  {saving ? "Saving..." : "Save AI Settings"}
+
+                  {saving
+                    ? "Saving..."
+                    : "Save AI Settings"}
                 </button>
               </div>
 
-              {/* Right sidebar */}
               <div className="space-y-6">
-
                 <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="flex items-center justify-between">
                     <h2 className="font-semibold text-gray-950">
@@ -285,13 +622,61 @@ export default function AIReceptionistPage() {
 
                   <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700">
                     <span className="h-2 w-2 rounded-full bg-green-500" />
-                    Online
+                    Connected
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="font-semibold text-gray-950">
+                        Business Knowledge
+                      </h2>
+
+                      <p className="mt-1 text-sm text-gray-500">
+                        {knowledgeCount}{" "}
+                        {knowledgeCount === 1
+                          ? "entry"
+                          : "entries"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-green-50 p-2">
+                      <BookOpen className="h-5 w-5 text-green-600" />
+                    </div>
                   </div>
 
-                  <p className="mt-4 text-sm leading-6 text-gray-500">
-                    Your AI receptionist configuration is connected to your
-                    AnaAI account and ready for future call handling.
-                  </p>
+                  <div className="mt-5 space-y-3">
+                    {knowledgeItems
+                      .slice(0, 3)
+                      .map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-xl border border-gray-100 bg-gray-50 p-3"
+                        >
+                          <span className="text-xs font-semibold uppercase tracking-wide text-green-600">
+                            {item.category}
+                          </span>
+
+                          <p className="mt-1 text-sm font-medium text-gray-800">
+                            {item.question}
+                          </p>
+                        </div>
+                      ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(
+                        "/knowledge"
+                      )
+                    }
+                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-green-50 hover:text-green-700"
+                  >
+                    Manage Business Knowledge
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
                 </section>
 
                 <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -301,16 +686,16 @@ export default function AIReceptionistPage() {
                     </div>
 
                     <h2 className="font-semibold text-gray-950">
-                      Coming Next
+                      Secure Context
                     </h2>
                   </div>
 
                   <p className="mt-4 text-sm leading-6 text-gray-500">
-                    Business knowledge, FAQs, booking tools, call handling,
-                    and phone integration will connect to these settings.
+                    Your business information is loaded
+                    on the server after AnaAI verifies
+                    your Supabase login.
                   </p>
                 </section>
-
               </div>
             </div>
           )}
