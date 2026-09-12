@@ -75,7 +75,13 @@ type AppointmentFormValues = {
   appointmentDate: string;
   appointmentTime: string;
   notes: string;
-  status: string;
+};
+
+type AppointmentUpdateResponse = {
+  success?: boolean;
+  error?: string;
+  sms_sent?: boolean;
+  sms_error?: string | null;
 };
 
 const emptyForm: AppointmentFormValues = {
@@ -84,7 +90,6 @@ const emptyForm: AppointmentFormValues = {
   appointmentDate: "",
   appointmentTime: "",
   notes: "",
-  status: "Booked",
 };
 
 function normalizeTime(value: string | null) {
@@ -139,7 +144,9 @@ function getDayKey(date: string) {
   return dayKeys[parsed.getUTCDay()];
 }
 
-function parseBusinessHours(value: string | null): BusinessHours | null {
+function parseBusinessHours(
+  value: string | null
+): BusinessHours | null {
   if (!value) {
     return null;
   }
@@ -163,17 +170,24 @@ function intervalsOverlap(
   secondStart: number,
   secondEnd: number
 ) {
-  return firstStart < secondEnd && firstEnd > secondStart;
+  return (
+    firstStart < secondEnd &&
+    firstEnd > secondStart
+  );
 }
 
-function formatTimeForDisplay(value: string | null) {
+function formatTimeForDisplay(
+  value: string | null
+) {
   const normalized = normalizeTime(value);
 
   if (!normalized) {
     return "Not specified";
   }
 
-  const [hourText, minuteText] = normalized.split(":");
+  const [hourText, minuteText] =
+    normalized.split(":");
+
   const hour = Number(hourText);
   const minute = Number(minuteText);
 
@@ -184,16 +198,18 @@ function formatTimeForDisplay(value: string | null) {
     return value || "Not specified";
   }
 
-  const date = new Date();
-  date.setHours(hour, minute, 0, 0);
+  const period = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
 
-  return date.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return `${displayHour}:${String(minute).padStart(
+    2,
+    "0"
+  )} ${period}`;
 }
 
-function statusBadgeClasses(status: string | null) {
+function statusBadgeClasses(
+  status: string | null
+) {
   switch (status) {
     case "Confirmed":
       return "border-green-200 bg-green-50 text-green-700";
@@ -212,27 +228,50 @@ function statusBadgeClasses(status: string | null) {
 export default function AppointmentsPage() {
   const router = useRouter();
 
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [services, setServices] = useState<Service[]>([]);
-  const [businessProfile, setBusinessProfile] =
-    useState<BusinessProfile | null>(null);
+  const [appointments, setAppointments] =
+    useState<Appointment[]>([]);
 
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [actionAppointmentId, setActionAppointmentId] =
-    useState<string | null>(null);
+  const [customers, setCustomers] =
+    useState<Customer[]>([]);
+
+  const [services, setServices] =
+    useState<Service[]>([]);
+
+  const [
+    businessProfile,
+    setBusinessProfile,
+  ] = useState<BusinessProfile | null>(
+    null
+  );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [submitting, setSubmitting] =
+    useState(false);
+
+  const [
+    actionAppointmentId,
+    setActionAppointmentId,
+  ] = useState<string | null>(null);
 
   const [createForm, setCreateForm] =
-    useState<AppointmentFormValues>(emptyForm);
+    useState<AppointmentFormValues>(
+      emptyForm
+    );
 
-  const [editingAppointmentId, setEditingAppointmentId] =
-    useState<string | null>(null);
+  const [
+    editingAppointmentId,
+    setEditingAppointmentId,
+  ] = useState<string | null>(null);
 
   const [editForm, setEditForm] =
-    useState<AppointmentFormValues>(emptyForm);
+    useState<AppointmentFormValues>(
+      emptyForm
+    );
 
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] =
+    useState<Notice | null>(null);
 
   useEffect(() => {
     loadAppointments();
@@ -242,7 +281,10 @@ export default function AppointmentsPage() {
     type: "success" | "warning" | "error",
     message: string
   ) {
-    setNotice({ type, message });
+    setNotice({
+      type,
+      message,
+    });
 
     if (type === "success") {
       toast.success(message);
@@ -271,6 +313,20 @@ export default function AppointmentsPage() {
     return user;
   }
 
+  async function getAccessToken() {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error || !session?.access_token) {
+      router.push("/login");
+      return null;
+    }
+
+    return session.access_token;
+  }
+
   async function loadAppointments() {
     setLoading(true);
 
@@ -289,13 +345,17 @@ export default function AppointmentsPage() {
     ] = await Promise.all([
       supabase
         .from("customers")
-        .select("id, full_name, phone, email")
+        .select(
+          "id, full_name, phone, email"
+        )
         .eq("user_id", user.id)
         .order("full_name"),
 
       supabase
         .from("services")
-        .select("id, name, duration_minutes")
+        .select(
+          "id, name, duration_minutes"
+        )
         .eq("user_id", user.id)
         .eq("is_active", true)
         .order("name"),
@@ -315,7 +375,9 @@ export default function AppointmentsPage() {
 
       supabase
         .from("business_profiles")
-        .select("id, business_hours")
+        .select(
+          "id, business_hours"
+        )
         .eq("user_id", user.id)
         .order("created_at", {
           ascending: false,
@@ -325,27 +387,47 @@ export default function AppointmentsPage() {
     ]);
 
     if (customerResult.error) {
-      showNotice("error", customerResult.error.message);
+      showNotice(
+        "error",
+        customerResult.error.message
+      );
     } else {
-      setCustomers(customerResult.data || []);
+      setCustomers(
+        customerResult.data || []
+      );
     }
 
     if (serviceResult.error) {
-      showNotice("error", serviceResult.error.message);
+      showNotice(
+        "error",
+        serviceResult.error.message
+      );
     } else {
-      setServices(serviceResult.data || []);
+      setServices(
+        serviceResult.data || []
+      );
     }
 
     if (appointmentResult.error) {
-      showNotice("error", appointmentResult.error.message);
+      showNotice(
+        "error",
+        appointmentResult.error.message
+      );
     } else {
-      setAppointments(appointmentResult.data || []);
+      setAppointments(
+        appointmentResult.data || []
+      );
     }
 
     if (businessResult.error) {
-      showNotice("error", businessResult.error.message);
+      showNotice(
+        "error",
+        businessResult.error.message
+      );
     } else {
-      setBusinessProfile(businessResult.data || null);
+      setBusinessProfile(
+        businessResult.data || null
+      );
     }
 
     setLoading(false);
@@ -356,43 +438,31 @@ export default function AppointmentsPage() {
     serviceId,
     appointmentDate,
     appointmentTime,
-    status,
     excludeAppointmentId,
   }: {
     userId: string;
     serviceId: string;
     appointmentDate: string;
     appointmentTime: string;
-    status: string;
     excludeAppointmentId?: string;
   }) {
-    /*
-     * Cancelled and completed appointments are not active scheduling
-     * reservations, so we do not need to reject their time slot.
-     */
-    if (
-      status === "Cancelled" ||
-      status === "Completed"
-    ) {
-      return {
-        valid: true,
-        message: "",
-      };
-    }
-
-    const selectedService = services.find(
-      (service) => service.id === serviceId
-    );
+    const selectedService =
+      services.find(
+        (service) =>
+          service.id === serviceId
+      );
 
     if (!selectedService) {
       return {
         valid: false,
-        message: "Please select a valid service.",
+        message:
+          "Please select a valid service.",
       };
     }
 
     if (
-      selectedService.duration_minutes == null ||
+      selectedService.duration_minutes ==
+        null ||
       selectedService.duration_minutes <= 0
     ) {
       return {
@@ -401,22 +471,31 @@ export default function AppointmentsPage() {
       };
     }
 
-    const durationMinutes = selectedService.duration_minutes;
+    const durationMinutes =
+      selectedService.duration_minutes;
 
-    const requestedStart = timeToMinutes(appointmentTime);
+    const requestedStart =
+      timeToMinutes(
+        appointmentTime
+      );
 
     if (requestedStart == null) {
       return {
         valid: false,
-        message: "The appointment time is invalid.",
+        message:
+          "The appointment time is invalid.",
       };
     }
 
-    const requestedEnd = requestedStart + durationMinutes;
+    const requestedEnd =
+      requestedStart +
+      durationMinutes;
 
-    const businessHours = parseBusinessHours(
-      businessProfile?.business_hours ?? null
-    );
+    const businessHours =
+      parseBusinessHours(
+        businessProfile?.business_hours ??
+          null
+      );
 
     if (!businessHours) {
       return {
@@ -426,16 +505,21 @@ export default function AppointmentsPage() {
       };
     }
 
-    const dayKey = getDayKey(appointmentDate);
+    const dayKey =
+      getDayKey(
+        appointmentDate
+      );
 
     if (!dayKey) {
       return {
         valid: false,
-        message: "The appointment date is invalid.",
+        message:
+          "The appointment date is invalid.",
       };
     }
 
-    const dayHours = businessHours[dayKey];
+    const dayHours =
+      businessHours[dayKey];
 
     if (!dayHours) {
       return {
@@ -448,12 +532,20 @@ export default function AppointmentsPage() {
     if (dayHours.closed) {
       return {
         valid: false,
-        message: "The business is closed on the selected day.",
+        message:
+          "The business is closed on the selected day.",
       };
     }
 
-    const openMinutes = timeToMinutes(dayHours.open);
-    const closeMinutes = timeToMinutes(dayHours.close);
+    const openMinutes =
+      timeToMinutes(
+        dayHours.open
+      );
+
+    const closeMinutes =
+      timeToMinutes(
+        dayHours.close
+      );
 
     if (
       openMinutes == null ||
@@ -466,14 +558,20 @@ export default function AppointmentsPage() {
       };
     }
 
-    if (requestedStart < openMinutes) {
+    if (
+      requestedStart <
+      openMinutes
+    ) {
       return {
         valid: false,
         message: `The appointment cannot start before the business opens at ${dayHours.open}.`,
       };
     }
 
-    if (requestedEnd > closeMinutes) {
+    if (
+      requestedEnd >
+      closeMinutes
+    ) {
       return {
         valid: false,
         message: `${selectedService.name} takes ${durationMinutes} minutes and would finish after closing time at ${dayHours.close}.`,
@@ -481,7 +579,8 @@ export default function AppointmentsPage() {
     }
 
     const {
-      data: sameDayAppointments,
+      data:
+        sameDayAppointments,
       error,
     } = await supabase
       .from("appointments")
@@ -489,8 +588,14 @@ export default function AppointmentsPage() {
         "id, service_id, service, appointment_time, status"
       )
       .eq("user_id", userId)
-      .eq("appointment_date", appointmentDate)
-      .in("status", ["Booked", "Confirmed"]);
+      .eq(
+        "appointment_date",
+        appointmentDate
+      )
+      .in("status", [
+        "Booked",
+        "Confirmed",
+      ]);
 
     if (error) {
       return {
@@ -499,45 +604,52 @@ export default function AppointmentsPage() {
       };
     }
 
-    const blockingAppointments =
-      sameDayAppointments || [];
-
-    for (const existingAppointment of blockingAppointments) {
+    for (const existingAppointment of
+      sameDayAppointments || []) {
       if (
         excludeAppointmentId &&
-        existingAppointment.id === excludeAppointmentId
+        existingAppointment.id ===
+          excludeAppointmentId
       ) {
         continue;
       }
 
-      const existingStart = timeToMinutes(
-        existingAppointment.appointment_time
-      );
+      const existingStart =
+        timeToMinutes(
+          existingAppointment.appointment_time
+        );
 
-      if (existingStart == null) {
+      if (
+        existingStart == null
+      ) {
         continue;
       }
 
-      let existingService = services.find(
-        (service) =>
-          service.id === existingAppointment.service_id
-      );
+      let existingService =
+        services.find(
+          (service) =>
+            service.id ===
+            existingAppointment.service_id
+        );
 
       if (
         !existingService &&
         existingAppointment.service
       ) {
-        existingService = services.find(
-          (service) =>
-            service.name.toLowerCase() ===
-            existingAppointment.service.toLowerCase()
-        );
+        existingService =
+          services.find(
+            (service) =>
+              service.name.toLowerCase() ===
+              existingAppointment.service.toLowerCase()
+          );
       }
 
       if (
         !existingService ||
-        existingService.duration_minutes == null ||
-        existingService.duration_minutes <= 0
+        existingService.duration_minutes ==
+          null ||
+        existingService.duration_minutes <=
+          0
       ) {
         return {
           valid: false,
@@ -572,22 +684,80 @@ export default function AppointmentsPage() {
     };
   }
 
+  async function sendAppointmentUpdate({
+    appointmentId,
+    updates,
+    notificationType,
+  }: {
+    appointmentId: string;
+    updates: Record<
+      string,
+      string | null
+    >;
+    notificationType:
+      | "confirm"
+      | "reschedule"
+      | "cancel"
+      | "none";
+  }) {
+    const accessToken =
+      await getAccessToken();
+
+    if (!accessToken) {
+      return null;
+    }
+
+    const response = await fetch(
+      "/api/appointments",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type":
+            "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          appointmentId,
+          ...updates,
+          notificationType,
+        }),
+      }
+    );
+
+    const result =
+      (await response.json()) as AppointmentUpdateResponse;
+
+    if (!response.ok) {
+      throw new Error(
+        result.error ||
+          "Appointment update failed."
+      );
+    }
+
+    return result;
+  }
+
   async function handleCreateAppointment() {
-    const user = await getCurrentUser();
+    const user =
+      await getCurrentUser();
 
     if (!user) {
       return;
     }
 
-    const selectedCustomer = customers.find(
-      (customer) =>
-        customer.id === createForm.customerId
-    );
+    const selectedCustomer =
+      customers.find(
+        (customer) =>
+          customer.id ===
+          createForm.customerId
+      );
 
-    const selectedService = services.find(
-      (service) =>
-        service.id === createForm.serviceId
-    );
+    const selectedService =
+      services.find(
+        (service) =>
+          service.id ===
+          createForm.serviceId
+      );
 
     if (!selectedCustomer) {
       showNotice(
@@ -605,7 +775,9 @@ export default function AppointmentsPage() {
       return;
     }
 
-    if (!createForm.appointmentDate) {
+    if (
+      !createForm.appointmentDate
+    ) {
       showNotice(
         "warning",
         "Please select an appointment date."
@@ -613,7 +785,9 @@ export default function AppointmentsPage() {
       return;
     }
 
-    if (!createForm.appointmentTime) {
+    if (
+      !createForm.appointmentTime
+    ) {
       showNotice(
         "warning",
         "Please select an appointment time."
@@ -626,48 +800,59 @@ export default function AppointmentsPage() {
     const availability =
       await validateAppointmentAvailability({
         userId: user.id,
-        serviceId: selectedService.id,
+        serviceId:
+          selectedService.id,
         appointmentDate:
           createForm.appointmentDate,
         appointmentTime:
           createForm.appointmentTime,
-        status: "Booked",
       });
 
     if (!availability.valid) {
       setSubmitting(false);
+
       showNotice(
         "warning",
         availability.message
       );
+
       return;
     }
 
-    const { error } = await supabase
-      .from("appointments")
-      .insert({
-        user_id: user.id,
-        customer_id: selectedCustomer.id,
-        service_id: selectedService.id,
-        customer_name:
-          selectedCustomer.full_name,
-        customer_phone:
-          selectedCustomer.phone,
-        customer_email:
-          selectedCustomer.email,
-        service: selectedService.name,
-        appointment_date:
-          createForm.appointmentDate,
-        appointment_time:
-          createForm.appointmentTime,
-        notes: createForm.notes.trim() || null,
-        status: "Booked",
-      });
+    const { error } =
+      await supabase
+        .from("appointments")
+        .insert({
+          user_id: user.id,
+          customer_id:
+            selectedCustomer.id,
+          service_id:
+            selectedService.id,
+          customer_name:
+            selectedCustomer.full_name,
+          customer_phone:
+            selectedCustomer.phone,
+          customer_email:
+            selectedCustomer.email,
+          service:
+            selectedService.name,
+          appointment_date:
+            createForm.appointmentDate,
+          appointment_time:
+            createForm.appointmentTime,
+          notes:
+            createForm.notes.trim() ||
+            null,
+          status: "Booked",
+        });
 
     setSubmitting(false);
 
     if (error) {
-      showNotice("error", error.message);
+      showNotice(
+        "error",
+        error.message
+      );
       return;
     }
 
@@ -684,18 +869,24 @@ export default function AppointmentsPage() {
   function startEditingAppointment(
     appointment: Appointment
   ) {
-    setEditingAppointmentId(appointment.id);
+    setEditingAppointmentId(
+      appointment.id
+    );
 
     setEditForm({
-      customerId: appointment.customer_id || "",
-      serviceId: appointment.service_id || "",
+      customerId:
+        appointment.customer_id || "",
+      serviceId:
+        appointment.service_id || "",
       appointmentDate:
-        appointment.appointment_date || "",
-      appointmentTime: normalizeTime(
-        appointment.appointment_time
-      ),
-      notes: appointment.notes || "",
-      status: appointment.status || "Booked",
+        appointment.appointment_date ||
+        "",
+      appointmentTime:
+        normalizeTime(
+          appointment.appointment_time
+        ),
+      notes:
+        appointment.notes || "",
     });
 
     setNotice(null);
@@ -707,23 +898,28 @@ export default function AppointmentsPage() {
   }
 
   async function saveAppointmentChanges(
-    appointmentId: string
+    appointment: Appointment
   ) {
-    const user = await getCurrentUser();
+    const user =
+      await getCurrentUser();
 
     if (!user) {
       return;
     }
 
-    const selectedCustomer = customers.find(
-      (customer) =>
-        customer.id === editForm.customerId
-    );
+    const selectedCustomer =
+      customers.find(
+        (customer) =>
+          customer.id ===
+          editForm.customerId
+      );
 
-    const selectedService = services.find(
-      (service) =>
-        service.id === editForm.serviceId
-    );
+    const selectedService =
+      services.find(
+        (service) =>
+          service.id ===
+          editForm.serviceId
+      );
 
     if (!selectedCustomer) {
       showNotice(
@@ -741,7 +937,9 @@ export default function AppointmentsPage() {
       return;
     }
 
-    if (!editForm.appointmentDate) {
+    if (
+      !editForm.appointmentDate
+    ) {
       showNotice(
         "warning",
         "Please select an appointment date."
@@ -749,7 +947,9 @@ export default function AppointmentsPage() {
       return;
     }
 
-    if (!editForm.appointmentTime) {
+    if (
+      !editForm.appointmentTime
+    ) {
       showNotice(
         "warning",
         "Please select an appointment time."
@@ -757,193 +957,267 @@ export default function AppointmentsPage() {
       return;
     }
 
-    setActionAppointmentId(appointmentId);
-
-    const availability =
-      await validateAppointmentAvailability({
-        userId: user.id,
-        serviceId: selectedService.id,
-        appointmentDate:
-          editForm.appointmentDate,
-        appointmentTime:
-          editForm.appointmentTime,
-        status: editForm.status,
-        excludeAppointmentId: appointmentId,
-      });
-
-    if (!availability.valid) {
-      setActionAppointmentId(null);
-
-      showNotice(
-        "warning",
-        availability.message
-      );
-
-      return;
-    }
-
-    const { error } = await supabase
-      .from("appointments")
-      .update({
-        customer_id: selectedCustomer.id,
-        service_id: selectedService.id,
-        customer_name:
-          selectedCustomer.full_name,
-        customer_phone:
-          selectedCustomer.phone,
-        customer_email:
-          selectedCustomer.email,
-        service: selectedService.name,
-        appointment_date:
-          editForm.appointmentDate,
-        appointment_time:
-          editForm.appointmentTime,
-        notes: editForm.notes.trim() || null,
-        status: editForm.status,
-      })
-      .eq("id", appointmentId)
-      .eq("user_id", user.id);
-
-    setActionAppointmentId(null);
-
-    if (error) {
-      showNotice("error", error.message);
-      return;
-    }
-
-    showNotice(
-      "success",
-      "Appointment updated successfully."
+    setActionAppointmentId(
+      appointment.id
     );
 
-    setEditingAppointmentId(null);
-    setEditForm(emptyForm);
-
-    await loadAppointments();
-  }
-
-  async function updateAppointmentStatus(
-    appointment: Appointment,
-    status: string
-  ) {
-    const user = await getCurrentUser();
-
-    if (!user) {
-      return;
-    }
-
-    setActionAppointmentId(appointment.id);
-
-    /*
-     * Moving a cancelled/completed appointment back into an active
-     * state must re-check availability because its old time may now
-     * be occupied.
-     */
-    if (
-      status === "Booked" ||
-      status === "Confirmed"
-    ) {
-      if (
-        !appointment.service_id ||
-        !appointment.appointment_date ||
-        !appointment.appointment_time
-      ) {
-        setActionAppointmentId(null);
-
-        showNotice(
-          "warning",
-          "This appointment is missing scheduling information. Edit it before changing it to an active status."
-        );
-
-        return;
-      }
-
+    try {
       const availability =
         await validateAppointmentAvailability({
           userId: user.id,
-          serviceId: appointment.service_id,
+          serviceId:
+            selectedService.id,
           appointmentDate:
-            appointment.appointment_date,
+            editForm.appointmentDate,
           appointmentTime:
-            appointment.appointment_time,
-          status,
+            editForm.appointmentTime,
           excludeAppointmentId:
             appointment.id,
         });
 
       if (!availability.valid) {
-        setActionAppointmentId(null);
-
         showNotice(
           "warning",
           availability.message
         );
-
         return;
       }
+
+      const dateChanged =
+        appointment.appointment_date !==
+        editForm.appointmentDate;
+
+      const timeChanged =
+        normalizeTime(
+          appointment.appointment_time
+        ) !==
+        normalizeTime(
+          editForm.appointmentTime
+        );
+
+      const serviceChanged =
+        appointment.service_id !==
+        selectedService.id;
+
+      const wasRescheduled =
+        dateChanged ||
+        timeChanged ||
+        serviceChanged;
+
+      const result =
+        await sendAppointmentUpdate({
+          appointmentId:
+            appointment.id,
+          updates: {
+            customerId:
+              selectedCustomer.id,
+            serviceId:
+              selectedService.id,
+            customerName:
+              selectedCustomer.full_name,
+            customerPhone:
+              selectedCustomer.phone,
+            customerEmail:
+              selectedCustomer.email,
+            service:
+              selectedService.name,
+            appointmentDate:
+              editForm.appointmentDate,
+            appointmentTime:
+              editForm.appointmentTime,
+            notes:
+              editForm.notes.trim() ||
+              null,
+          },
+          notificationType:
+            wasRescheduled
+              ? "reschedule"
+              : "none",
+        });
+
+      if (
+        wasRescheduled &&
+        result?.sms_sent
+      ) {
+        showNotice(
+          "success",
+          "Appointment rescheduled and customer SMS sent."
+        );
+      } else if (
+        wasRescheduled &&
+        !result?.sms_sent
+      ) {
+        showNotice(
+          "warning",
+          "Appointment rescheduled successfully, but the customer SMS could not be sent."
+        );
+      } else {
+        showNotice(
+          "success",
+          "Appointment updated successfully."
+        );
+      }
+
+      setEditingAppointmentId(
+        null
+      );
+
+      setEditForm(emptyForm);
+
+      await loadAppointments();
+    } catch (error) {
+      showNotice(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Appointment update failed."
+      );
+    } finally {
+      setActionAppointmentId(
+        null
+      );
     }
-
-    const { error } = await supabase
-      .from("appointments")
-      .update({ status })
-      .eq("id", appointment.id)
-      .eq("user_id", user.id);
-
-    setActionAppointmentId(null);
-
-    if (error) {
-      showNotice("error", error.message);
-      return;
-    }
-
-    showNotice(
-      "success",
-      `Appointment marked as ${status}.`
-    );
-
-    await loadAppointments();
   }
 
-  async function deleteAppointment(id: string) {
-    const user = await getCurrentUser();
+  async function confirmAppointment(
+    appointment: Appointment
+  ) {
+    const user =
+      await getCurrentUser();
 
     if (!user) {
       return;
     }
 
-    const confirmed = window.confirm(
-      "Delete this appointment permanently? This cannot be undone."
+    if (
+      !appointment.service_id ||
+      !appointment.appointment_date ||
+      !appointment.appointment_time
+    ) {
+      showNotice(
+        "warning",
+        "This appointment is missing scheduling information."
+      );
+      return;
+    }
+
+    setActionAppointmentId(
+      appointment.id
     );
+
+    try {
+      const availability =
+        await validateAppointmentAvailability({
+          userId: user.id,
+          serviceId:
+            appointment.service_id,
+          appointmentDate:
+            appointment.appointment_date,
+          appointmentTime:
+            appointment.appointment_time,
+          excludeAppointmentId:
+            appointment.id,
+        });
+
+      if (!availability.valid) {
+        showNotice(
+          "warning",
+          availability.message
+        );
+        return;
+      }
+
+      const result =
+        await sendAppointmentUpdate({
+          appointmentId:
+            appointment.id,
+          updates: {
+            status: "Confirmed",
+          },
+          notificationType:
+            "confirm",
+        });
+
+      if (result?.sms_sent) {
+        showNotice(
+          "success",
+          "Appointment confirmed and customer SMS sent."
+        );
+      } else {
+        showNotice(
+          "warning",
+          "Appointment confirmed successfully, but the customer SMS could not be sent."
+        );
+      }
+
+      await loadAppointments();
+    } catch (error) {
+      showNotice(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not confirm appointment."
+      );
+    } finally {
+      setActionAppointmentId(
+        null
+      );
+    }
+  }
+
+  async function cancelAppointment(
+    appointment: Appointment
+  ) {
+    const confirmed =
+      window.confirm(
+        `Cancel the appointment for ${appointment.customer_name}?`
+      );
 
     if (!confirmed) {
       return;
     }
 
-    setActionAppointmentId(id);
-
-    const { error } = await supabase
-      .from("appointments")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id);
-
-    setActionAppointmentId(null);
-
-    if (error) {
-      showNotice("error", error.message);
-      return;
-    }
-
-    if (editingAppointmentId === id) {
-      cancelEditing();
-    }
-
-    showNotice(
-      "success",
-      "Appointment deleted."
+    setActionAppointmentId(
+      appointment.id
     );
 
-    await loadAppointments();
+    try {
+      const result =
+        await sendAppointmentUpdate({
+          appointmentId:
+            appointment.id,
+          updates: {
+            status: "Cancelled",
+          },
+          notificationType:
+            "cancel",
+        });
+
+      if (result?.sms_sent) {
+        showNotice(
+          "success",
+          "Appointment cancelled and customer SMS sent."
+        );
+      } else {
+        showNotice(
+          "warning",
+          "Appointment cancelled successfully, but the customer SMS could not be sent."
+        );
+      }
+
+      await loadAppointments();
+    } catch (error) {
+      showNotice(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not cancel appointment."
+      );
+    } finally {
+      setActionAppointmentId(
+        null
+      );
+    }
   }
 
   return (
@@ -966,9 +1240,11 @@ export default function AppointmentsPage() {
         {notice && (
           <div
             className={`mt-6 rounded-xl border px-4 py-3 text-sm font-medium ${
-              notice.type === "success"
+              notice.type ===
+              "success"
                 ? "border-green-200 bg-green-50 text-green-700"
-                : notice.type === "warning"
+                : notice.type ===
+                  "warning"
                 ? "border-yellow-200 bg-yellow-50 text-yellow-800"
                 : "border-red-200 bg-red-50 text-red-700"
             }`}
@@ -979,83 +1255,121 @@ export default function AppointmentsPage() {
 
         <Card className="mt-8">
           <CardHeader>
-            <CardTitle>New appointment</CardTitle>
+            <CardTitle>
+              New appointment
+            </CardTitle>
           </CardHeader>
 
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2">
               <select
-                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                value={createForm.customerId}
+                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
+                value={
+                  createForm.customerId
+                }
                 onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    customerId: event.target.value,
-                  }))
+                  setCreateForm(
+                    (current) => ({
+                      ...current,
+                      customerId:
+                        event.target
+                          .value,
+                    })
+                  )
                 }
               >
                 <option value="">
                   Select customer
                 </option>
 
-                {customers.map((customer) => (
-                  <option
-                    key={customer.id}
-                    value={customer.id}
-                  >
-                    {customer.full_name}
-                  </option>
-                ))}
+                {customers.map(
+                  (customer) => (
+                    <option
+                      key={
+                        customer.id
+                      }
+                      value={
+                        customer.id
+                      }
+                    >
+                      {
+                        customer.full_name
+                      }
+                    </option>
+                  )
+                )}
               </select>
 
               <select
-                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                value={createForm.serviceId}
+                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
+                value={
+                  createForm.serviceId
+                }
                 onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    serviceId: event.target.value,
-                  }))
+                  setCreateForm(
+                    (current) => ({
+                      ...current,
+                      serviceId:
+                        event.target
+                          .value,
+                    })
+                  )
                 }
               >
                 <option value="">
                   Select service
                 </option>
 
-                {services.map((service) => (
-                  <option
-                    key={service.id}
-                    value={service.id}
-                  >
-                    {service.name}
-                    {service.duration_minutes
-                      ? ` · ${service.duration_minutes} min`
-                      : ""}
-                  </option>
-                ))}
+                {services.map(
+                  (service) => (
+                    <option
+                      key={
+                        service.id
+                      }
+                      value={
+                        service.id
+                      }
+                    >
+                      {service.name}
+                      {service.duration_minutes
+                        ? ` · ${service.duration_minutes} min`
+                        : ""}
+                    </option>
+                  )
+                )}
               </select>
 
               <Input
                 type="date"
-                value={createForm.appointmentDate}
+                value={
+                  createForm.appointmentDate
+                }
                 onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    appointmentDate:
-                      event.target.value,
-                  }))
+                  setCreateForm(
+                    (current) => ({
+                      ...current,
+                      appointmentDate:
+                        event.target
+                          .value,
+                    })
+                  )
                 }
               />
 
               <Input
                 type="time"
-                value={createForm.appointmentTime}
+                value={
+                  createForm.appointmentTime
+                }
                 onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    appointmentTime:
-                      event.target.value,
-                  }))
+                  setCreateForm(
+                    (current) => ({
+                      ...current,
+                      appointmentTime:
+                        event.target
+                          .value,
+                    })
+                  )
                 }
               />
             </div>
@@ -1063,20 +1377,28 @@ export default function AppointmentsPage() {
             <Textarea
               className="mt-4"
               placeholder="Internal notes"
-              value={createForm.notes}
+              value={
+                createForm.notes
+              }
               onChange={(event) =>
-                setCreateForm((current) => ({
-                  ...current,
-                  notes: event.target.value,
-                }))
+                setCreateForm(
+                  (current) => ({
+                    ...current,
+                    notes:
+                      event.target
+                        .value,
+                  })
+                )
               }
             />
 
             <button
               type="button"
-              onClick={handleCreateAppointment}
+              onClick={
+                handleCreateAppointment
+              }
               disabled={submitting}
-              className="mt-5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:opacity-50"
             >
               {submitting
                 ? "Checking availability..."
@@ -1092,7 +1414,9 @@ export default function AppointmentsPage() {
             </h2>
 
             <p className="mt-1 text-sm text-gray-500">
-              Confirm, edit, complete, cancel, or remove appointments.
+              Confirm, reschedule,
+              or cancel customer
+              appointments.
             </p>
           </div>
 
@@ -1100,388 +1424,372 @@ export default function AppointmentsPage() {
             <p className="mt-4 text-gray-500">
               Loading appointments...
             </p>
-          ) : appointments.length === 0 ? (
+          ) : appointments.length ===
+            0 ? (
             <div className="mt-4 rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
               <p className="font-medium text-gray-900">
                 No appointments yet
               </p>
 
               <p className="mt-2 text-sm text-gray-500">
-                New bookings will appear here once they are created.
+                New bookings will
+                appear here once they
+                are created.
               </p>
             </div>
           ) : (
             <div className="mt-5 space-y-4">
-              {appointments.map((appointment) => {
-                const isEditing =
-                  editingAppointmentId === appointment.id;
+              {appointments.map(
+                (appointment) => {
+                  const isEditing =
+                    editingAppointmentId ===
+                    appointment.id;
 
-                const actionInProgress =
-                  actionAppointmentId === appointment.id;
+                  const actionInProgress =
+                    actionAppointmentId ===
+                    appointment.id;
 
-                return (
-                  <Card
-                    key={appointment.id}
-                    className="overflow-hidden"
-                  >
-                    <CardContent className="p-5">
-                      {isEditing ? (
-                        <div>
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="text-sm font-medium text-green-600">
-                                Editing appointment
-                              </p>
+                  return (
+                    <Card
+                      key={
+                        appointment.id
+                      }
+                      className="overflow-hidden"
+                    >
+                      <CardContent className="p-5">
+                        {isEditing ? (
+                          <div>
+                            <p className="text-sm font-medium text-green-600">
+                              Reschedule
+                              appointment
+                            </p>
 
-                              <h3 className="mt-1 text-lg font-semibold text-gray-900">
-                                {appointment.customer_name}
-                              </h3>
-                            </div>
+                            <h3 className="mt-1 text-lg font-semibold text-gray-900">
+                              {
+                                appointment.customer_name
+                              }
+                            </h3>
 
-                            <span
-                              className={`w-fit rounded-full border px-3 py-1 text-xs font-medium ${statusBadgeClasses(
-                                editForm.status
-                              )}`}
-                            >
-                              {editForm.status}
-                            </span>
-                          </div>
-
-                          <div className="mt-5 grid gap-4 md:grid-cols-2">
-                            <div>
-                              <label className="mb-2 block text-sm font-medium text-gray-700">
-                                Customer
-                              </label>
-
+                            <div className="mt-5 grid gap-4 md:grid-cols-2">
                               <select
-                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                                value={editForm.customerId}
-                                onChange={(event) =>
-                                  setEditForm((current) => ({
-                                    ...current,
-                                    customerId:
-                                      event.target.value,
-                                  }))
+                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
+                                value={
+                                  editForm.customerId
+                                }
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      customerId:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
                                 }
                               >
-                                <option value="">
-                                  Select customer
-                                </option>
-
-                                {customers.map((customer) => (
-                                  <option
-                                    key={customer.id}
-                                    value={customer.id}
-                                  >
-                                    {customer.full_name}
-                                  </option>
-                                ))}
+                                {customers.map(
+                                  (
+                                    customer
+                                  ) => (
+                                    <option
+                                      key={
+                                        customer.id
+                                      }
+                                      value={
+                                        customer.id
+                                      }
+                                    >
+                                      {
+                                        customer.full_name
+                                      }
+                                    </option>
+                                  )
+                                )}
                               </select>
-                            </div>
-
-                            <div>
-                              <label className="mb-2 block text-sm font-medium text-gray-700">
-                                Service
-                              </label>
 
                               <select
-                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                                value={editForm.serviceId}
-                                onChange={(event) =>
-                                  setEditForm((current) => ({
-                                    ...current,
-                                    serviceId:
-                                      event.target.value,
-                                  }))
+                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
+                                value={
+                                  editForm.serviceId
+                                }
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      serviceId:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
                                 }
                               >
-                                <option value="">
-                                  Select service
-                                </option>
-
-                                {services.map((service) => (
-                                  <option
-                                    key={service.id}
-                                    value={service.id}
-                                  >
-                                    {service.name}
-                                    {service.duration_minutes
-                                      ? ` · ${service.duration_minutes} min`
-                                      : ""}
-                                  </option>
-                                ))}
+                                {services.map(
+                                  (
+                                    service
+                                  ) => (
+                                    <option
+                                      key={
+                                        service.id
+                                      }
+                                      value={
+                                        service.id
+                                      }
+                                    >
+                                      {
+                                        service.name
+                                      }
+                                    </option>
+                                  )
+                                )}
                               </select>
-                            </div>
-
-                            <div>
-                              <label className="mb-2 block text-sm font-medium text-gray-700">
-                                Date
-                              </label>
 
                               <Input
                                 type="date"
                                 value={
                                   editForm.appointmentDate
                                 }
-                                onChange={(event) =>
-                                  setEditForm((current) => ({
-                                    ...current,
-                                    appointmentDate:
-                                      event.target.value,
-                                  }))
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      appointmentDate:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
                                 }
                               />
-                            </div>
-
-                            <div>
-                              <label className="mb-2 block text-sm font-medium text-gray-700">
-                                Time
-                              </label>
 
                               <Input
                                 type="time"
                                 value={
                                   editForm.appointmentTime
                                 }
-                                onChange={(event) =>
-                                  setEditForm((current) => ({
-                                    ...current,
-                                    appointmentTime:
-                                      event.target.value,
-                                  }))
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      appointmentTime:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
                                 }
                               />
                             </div>
 
-                            <div>
-                              <label className="mb-2 block text-sm font-medium text-gray-700">
-                                Status
-                              </label>
-
-                              <select
-                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                                value={editForm.status}
-                                onChange={(event) =>
-                                  setEditForm((current) => ({
-                                    ...current,
-                                    status:
-                                      event.target.value,
-                                  }))
-                                }
-                              >
-                                <option value="Booked">
-                                  Booked
-                                </option>
-
-                                <option value="Confirmed">
-                                  Confirmed
-                                </option>
-
-                                <option value="Completed">
-                                  Completed
-                                </option>
-
-                                <option value="Cancelled">
-                                  Cancelled
-                                </option>
-                              </select>
-                            </div>
-                          </div>
-
-                          <div className="mt-4">
-                            <label className="mb-2 block text-sm font-medium text-gray-700">
-                              Internal notes
-                            </label>
-
                             <Textarea
+                              className="mt-4"
+                              value={
+                                editForm.notes
+                              }
+                              onChange={(
+                                event
+                              ) =>
+                                setEditForm(
+                                  (
+                                    current
+                                  ) => ({
+                                    ...current,
+                                    notes:
+                                      event
+                                        .target
+                                        .value,
+                                  })
+                                )
+                              }
                               placeholder="Internal notes"
-                              value={editForm.notes}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  notes:
-                                    event.target.value,
-                                }))
-                              }
                             />
-                          </div>
 
-                          <div className="mt-5 flex flex-wrap gap-2">
-                            <Button
-                              onClick={() =>
-                                saveAppointmentChanges(
-                                  appointment.id
-                                )
-                              }
-                              disabled={actionInProgress}
-                              className="bg-green-600 text-white hover:bg-green-700"
-                            >
-                              {actionInProgress
-                                ? "Checking..."
-                                : "Save changes"}
-                            </Button>
-
-                            <Button
-                              variant="outline"
-                              onClick={cancelEditing}
-                              disabled={actionInProgress}
-                            >
-                              Cancel editing
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <h3 className="text-lg font-semibold text-gray-900">
-                                {appointment.customer_name}
-                              </h3>
-
-                              <span
-                                className={`rounded-full border px-3 py-1 text-xs font-medium ${statusBadgeClasses(
-                                  appointment.status
-                                )}`}
-                              >
-                                {appointment.status || "Booked"}
-                              </span>
-                            </div>
-
-                            <div className="mt-4 grid gap-x-8 gap-y-2 text-sm text-gray-600 md:grid-cols-2">
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Phone:
-                                </span>{" "}
-                                {appointment.customer_phone ||
-                                  "Not provided"}
-                              </p>
-
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Email:
-                                </span>{" "}
-                                {appointment.customer_email ||
-                                  "Not provided"}
-                              </p>
-
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Service:
-                                </span>{" "}
-                                {appointment.service ||
-                                  "Not specified"}
-                              </p>
-
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Date:
-                                </span>{" "}
-                                {appointment.appointment_date ||
-                                  "Not specified"}
-                              </p>
-
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Time:
-                                </span>{" "}
-                                {formatTimeForDisplay(
-                                  appointment.appointment_time
-                                )}
-                              </p>
-                            </div>
-
-                            {appointment.notes && (
-                              <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
-                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                  Internal notes
-                                </p>
-
-                                <p className="mt-1 text-sm text-gray-700">
-                                  {appointment.notes}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-sm lg:justify-end">
-                            <Button
-                              variant="outline"
-                              onClick={() =>
-                                startEditingAppointment(
-                                  appointment
-                                )
-                              }
-                              disabled={actionInProgress}
-                            >
-                              Edit
-                            </Button>
-
-                            {appointment.status !==
-                              "Confirmed" && (
+                            <div className="mt-5 flex gap-2">
                               <Button
                                 onClick={() =>
-                                  updateAppointmentStatus(
-                                    appointment,
-                                    "Confirmed"
+                                  saveAppointmentChanges(
+                                    appointment
                                   )
                                 }
-                                disabled={actionInProgress}
+                                disabled={
+                                  actionInProgress
+                                }
                                 className="bg-green-600 text-white hover:bg-green-700"
                               >
-                                Confirm
+                                {actionInProgress
+                                  ? "Saving..."
+                                  : "Save changes"}
                               </Button>
-                            )}
 
-                            {appointment.status !==
-                              "Completed" && (
                               <Button
                                 variant="outline"
-                                onClick={() =>
-                                  updateAppointmentStatus(
-                                    appointment,
-                                    "Completed"
-                                  )
+                                onClick={
+                                  cancelEditing
                                 }
-                                disabled={actionInProgress}
-                              >
-                                Complete
-                              </Button>
-                            )}
-
-                            {appointment.status !==
-                              "Cancelled" && (
-                              <Button
-                                variant="outline"
-                                onClick={() =>
-                                  updateAppointmentStatus(
-                                    appointment,
-                                    "Cancelled"
-                                  )
+                                disabled={
+                                  actionInProgress
                                 }
-                                disabled={actionInProgress}
                               >
-                                Cancel
+                                Cancel editing
                               </Button>
-                            )}
-
-                            <Button
-                              variant="destructive"
-                              onClick={() =>
-                                deleteAppointment(
-                                  appointment.id
-                                )
-                              }
-                              disabled={actionInProgress}
-                            >
-                              Delete
-                            </Button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                        ) : (
+                          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <h3 className="text-lg font-semibold text-gray-900">
+                                  {
+                                    appointment.customer_name
+                                  }
+                                </h3>
+
+                                <span
+                                  className={`rounded-full border px-3 py-1 text-xs font-medium ${statusBadgeClasses(
+                                    appointment.status
+                                  )}`}
+                                >
+                                  {appointment.status ||
+                                    "Booked"}
+                                </span>
+                              </div>
+
+                              <div className="mt-4 grid gap-x-8 gap-y-2 text-sm text-gray-600 md:grid-cols-2">
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Phone:
+                                  </span>{" "}
+                                  {appointment.customer_phone ||
+                                    "Not provided"}
+                                </p>
+
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Email:
+                                  </span>{" "}
+                                  {appointment.customer_email ||
+                                    "Not provided"}
+                                </p>
+
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Service:
+                                  </span>{" "}
+                                  {appointment.service ||
+                                    "Not specified"}
+                                </p>
+
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Date:
+                                  </span>{" "}
+                                  {appointment.appointment_date ||
+                                    "Not specified"}
+                                </p>
+
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Time:
+                                  </span>{" "}
+                                  {formatTimeForDisplay(
+                                    appointment.appointment_time
+                                  )}
+                                </p>
+                              </div>
+
+                              {appointment.notes && (
+                                <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
+                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Internal
+                                    notes
+                                  </p>
+
+                                  <p className="mt-1 text-sm text-gray-700">
+                                    {
+                                      appointment.notes
+                                    }
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-sm lg:justify-end">
+                              <Button
+                                variant="outline"
+                                onClick={() =>
+                                  startEditingAppointment(
+                                    appointment
+                                  )
+                                }
+                                disabled={
+                                  actionInProgress ||
+                                  appointment.status ===
+                                    "Cancelled"
+                                }
+                              >
+                                Reschedule
+                              </Button>
+
+                              {appointment.status !==
+                                "Confirmed" &&
+                                appointment.status !==
+                                  "Cancelled" && (
+                                  <Button
+                                    onClick={() =>
+                                      confirmAppointment(
+                                        appointment
+                                      )
+                                    }
+                                    disabled={
+                                      actionInProgress
+                                    }
+                                    className="bg-green-600 text-white hover:bg-green-700"
+                                  >
+                                    Confirm
+                                  </Button>
+                                )}
+
+                              {appointment.status !==
+                                "Cancelled" && (
+                                <Button
+                                  variant="outline"
+                                  onClick={() =>
+                                    cancelAppointment(
+                                      appointment
+                                    )
+                                  }
+                                  disabled={
+                                    actionInProgress
+                                  }
+                                >
+                                  Cancel
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                }
+              )}
             </div>
           )}
         </section>
