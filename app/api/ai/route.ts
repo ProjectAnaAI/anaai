@@ -2,6 +2,8 @@ import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+import { sendSms } from "@/lib/twilio";
+
 export const runtime = "nodejs";
 
 const openai = new OpenAI({
@@ -122,6 +124,69 @@ function normalizeTime(value: string) {
   }
 
   return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function formatSmsDate(date: string) {
+  const parsed = new Date(`${date}T12:00:00Z`);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+function formatSmsTime(time: string) {
+  const normalized = normalizeTime(time);
+  const parsedMinutes = timeToMinutes(normalized);
+
+  if (parsedMinutes == null) {
+    return time;
+  }
+
+  const hours = Math.floor(parsedMinutes / 60);
+  const minutes = parsedMinutes % 60;
+
+  const period = hours >= 12 ? "PM" : "AM";
+  const displayHour = hours % 12 || 12;
+
+  return `${displayHour}:${String(minutes).padStart(2, "0")} ${period}`;
+}
+
+function buildBookingConfirmationSms({
+  customerName,
+  businessName,
+  businessAddress,
+  service,
+  date,
+  time,
+}: {
+  customerName: string;
+  businessName: string;
+  businessAddress: string | null;
+  service: string;
+  date: string;
+  time: string;
+}) {
+  const lines = [
+    `Hi ${customerName}, your appointment with ${businessName} is booked.`,
+    `Service: ${service}`,
+    `Date: ${formatSmsDate(date)}`,
+    `Time: ${formatSmsTime(time)}`,
+  ];
+
+  if (businessAddress?.trim()) {
+    lines.push(`Location: ${businessAddress.trim()}`);
+  }
+
+  lines.push("Thank you!");
+
+  return lines.join("\n");
 }
 
 function getDayKey(date: string) {
@@ -822,20 +887,6 @@ ${business?.address || "Not provided"}
         };
       }
 
-      /*
-       * This RPC is now the source of truth for creating bookings.
-       *
-       * Supabase performs the final:
-       * - authentication check
-       * - service ownership check
-       * - business-hours check
-       * - overlap check
-       * - concurrency lock
-       * - customer create/update
-       * - appointment insert
-       *
-       * inside one database transaction.
-       */
       const { data, error } = await supabase.rpc(
         "book_appointment_atomic",
         {
@@ -869,11 +920,6 @@ ${business?.address || "Not provided"}
         };
       }
 
-      /*
-       * If the database rejected the booking because the time
-       * became unavailable, run the read-only availability helper
-       * so AnaAI can offer verified nearby alternatives.
-       */
       if (!result.success) {
         const availability = await checkAvailability({
           service_name: selectedService.name,
@@ -900,21 +946,66 @@ ${business?.address || "Not provided"}
 
       console.log("AnaAI atomic appointment booked:", result);
 
+      /*
+       * Booking is already complete at this point.
+       *
+       * SMS is intentionally attempted afterward so a Twilio failure
+       * never rolls back or destroys a valid appointment.
+       */
+      const bookedCustomerName =
+        result.customer_name || customerName;
+
+      const bookedCustomerPhone =
+        result.customer_phone || customerPhone;
+
+      const bookedService =
+        result.service || selectedService.name;
+
+      const bookedDate = result.date || date;
+      const bookedTime = normalizeTime(result.time || time);
+
+      const businessName =
+        business?.business_name?.trim() || "the business";
+
+      const smsBody = buildBookingConfirmationSms({
+        customerName: bookedCustomerName,
+        businessName,
+        businessAddress: business?.address?.trim() || null,
+        service: bookedService,
+        date: bookedDate,
+        time: bookedTime,
+      });
+
+      const smsResult = await sendSms({
+        to: bookedCustomerPhone,
+        body: smsBody,
+      });
+
+      if (smsResult.success) {
+        console.log("AnaAI booking confirmation SMS sent:", {
+          appointmentId: result.appointment_id,
+          messageSid: smsResult.messageSid,
+        });
+      } else {
+        console.error("AnaAI booking created but SMS failed:", {
+          appointmentId: result.appointment_id,
+          error: smsResult.error,
+        });
+      }
+
       return {
         success: true,
         appointment_id: result.appointment_id,
         customer_id: result.customer_id,
-        customer_name:
-          result.customer_name || customerName,
-        customer_phone:
-          result.customer_phone || customerPhone,
-        service:
-          result.service || selectedService.name,
+        customer_name: bookedCustomerName,
+        customer_phone: bookedCustomerPhone,
+        service: bookedService,
         service_id:
           result.service_id || selectedService.id,
-        date: result.date || date,
-        time: result.time || time,
+        date: bookedDate,
+        time: bookedTime,
         status: result.status || "Booked",
+        sms_sent: smsResult.success,
       };
     }
 
@@ -1067,7 +1158,9 @@ BOOKING RULES
 - If booking fails because the time is unavailable, explain that and offer only suggested times returned by the tool.
 - Do not create multiple appointments unless the customer clearly requests multiple appointments.
 - Never claim an appointment was created unless the booking tool confirms success.
-- Do not claim an SMS confirmation was sent. SMS is not connected yet.
+- If book_appointment returns sms_sent true, you may tell the customer that a confirmation text was sent.
+- If book_appointment returns sms_sent false, do not claim that a confirmation text was sent.
+- SMS failure does not mean the booking failed. If success is true and sms_sent is false, tell the customer the appointment is booked without claiming that a text was sent.
 
 GENERAL RULES
 
