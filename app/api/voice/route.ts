@@ -38,7 +38,6 @@ function getPublicRequestUrl(request: Request) {
 
 function getVoiceUrl(request: Request, mode?: string) {
   const publicRequestUrl = new URL(getPublicRequestUrl(request));
-
   const url = new URL("/api/voice", publicRequestUrl.origin);
 
   if (mode) {
@@ -58,6 +57,12 @@ function formDataToTwilioParams(formData: FormData) {
   }
 
   return params;
+}
+
+function logIncomingHeaderNames(request: Request) {
+  const headerNames = Array.from(request.headers.keys()).sort();
+
+  console.log("AnaAI incoming voice header names:", headerNames);
 }
 
 function validateTwilioWebhook({
@@ -240,6 +245,8 @@ export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
     const mode = url.searchParams.get("mode") || "";
+
+    logIncomingHeaderNames(request);
 
     const formData = await request.formData();
     const twilioParams = formDataToTwilioParams(formData);
