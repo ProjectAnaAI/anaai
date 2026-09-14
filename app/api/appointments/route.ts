@@ -9,7 +9,9 @@ export const runtime = "nodejs";
 type AppointmentUpdateBody = {
   appointmentId?: string;
   customerId?: string;
+  customer_id?: string;
   serviceId?: string;
+  service_id?: string;
   customerName?: string;
   customerPhone?: string | null;
   customerEmail?: string | null;
@@ -189,6 +191,7 @@ export async function PATCH(request: Request) {
 
     const businessContextResult = await resolveBusinessContext({
       accessToken,
+      requestedBusinessId: request.headers.get("x-anaai-business-id")?.trim() || null,
     });
 
     if (!businessContextResult.success) {
@@ -267,12 +270,64 @@ export async function PATCH(request: Request) {
 
     const updates: Record<string, string | null> = {};
 
-    if (typeof body.customerId === "string") {
-      updates.customer_id = body.customerId;
-    }
+    // Validate every supplied alias before applying any appointment changes.
+    for (const [camelKey, snakeKey, table, label] of [
+      ["customerId", "customer_id", "customers", "Customer"],
+      ["serviceId", "service_id", "services", "Service"],
+    ] as const) {
+      const suppliedKeys = [camelKey, snakeKey].filter((key) =>
+        Object.prototype.hasOwnProperty.call(body, key)
+      );
 
-    if (typeof body.serviceId === "string") {
-      updates.service_id = body.serviceId;
+      if (suppliedKeys.length === 0) continue;
+
+      const ids: string[] = [];
+      for (const key of suppliedKeys) {
+        const value = body[key];
+        if (
+          typeof value !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
+        ) {
+          return NextResponse.json(
+            { error: `${label} reference must be a valid UUID.` },
+            { status: 400 }
+          );
+        }
+        ids.push(value.trim().toLowerCase());
+      }
+
+      if (ids.some((id) => id !== ids[0])) {
+        return NextResponse.json(
+          { error: `${label} reference aliases must match.` },
+          { status: 400 }
+        );
+      }
+
+      const referenceId = ids[0];
+      const { data: reference, error: referenceError } = await supabase
+        .from(table)
+        .select("id")
+        .eq("id", referenceId)
+        .eq("business_id", businessId)
+        .maybeSingle();
+
+      if (referenceError) {
+        console.error(`Appointment ${table} reference validation failed:`, referenceError);
+        return NextResponse.json(
+          { error: `Unable to validate ${label.toLowerCase()} reference.` },
+          { status: 500 }
+        );
+      }
+
+      // Missing, inaccessible, and other-business rows have the same response.
+      if (!reference) {
+        return NextResponse.json(
+          { error: `${label} reference is not available for this business.` },
+          { status: 400 }
+        );
+      }
+
+      updates[snakeKey] = referenceId;
     }
 
     if (typeof body.customerName === "string") {
