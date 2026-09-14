@@ -12,6 +12,15 @@ function twimlResponse(xml: string) {
   });
 }
 
+function forbiddenResponse() {
+  return new NextResponse("Forbidden", {
+    status: 403,
+    headers: {
+      "Content-Type": "text/plain",
+    },
+  });
+}
+
 function getVoiceUrl(request: Request, mode?: string) {
   const url = new URL("/api/voice", request.url);
 
@@ -20,6 +29,58 @@ function getVoiceUrl(request: Request, mode?: string) {
   }
 
   return url.toString();
+}
+
+function formDataToTwilioParams(formData: FormData) {
+  const params: Record<string, string> = {};
+
+  for (const [key, value] of formData.entries()) {
+    if (typeof value === "string") {
+      params[key] = value;
+    }
+  }
+
+  return params;
+}
+
+function validateTwilioWebhook({
+  request,
+  params,
+}: {
+  request: Request;
+  params: Record<string, string>;
+}) {
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+  if (!authToken) {
+    console.error("TWILIO_AUTH_TOKEN is missing.");
+    return false;
+  }
+
+  const signature = request.headers.get("x-twilio-signature");
+
+  if (!signature) {
+    console.warn("AnaAI voice request missing Twilio signature.");
+    return false;
+  }
+
+  try {
+    const isValid = twilio.validateRequest(
+      authToken,
+      signature,
+      request.url,
+      params
+    );
+
+    if (!isValid) {
+      console.warn("AnaAI rejected invalid Twilio signature.");
+    }
+
+    return isValid;
+  } catch (error: unknown) {
+    console.error("Twilio signature validation error:", error);
+    return false;
+  }
 }
 
 function addMainMenu(
@@ -160,16 +221,27 @@ export async function POST(request: Request) {
     const mode = url.searchParams.get("mode") || "";
 
     const formData = await request.formData();
+    const twilioParams = formDataToTwilioParams(formData);
+
+    const isValidTwilioRequest = validateTwilioWebhook({
+      request,
+      params: twilioParams,
+    });
+
+    if (!isValidTwilioRequest) {
+      return forbiddenResponse();
+    }
 
     const digits = String(formData.get("Digits") || "").trim();
+
     const speechResult = String(
       formData.get("SpeechResult") || ""
     ).trim();
 
-    console.log("AnaAI voice request:", {
+    console.log("Verified AnaAI Twilio voice request:", {
       mode,
-      digits,
-      speechResult,
+      hasDigits: Boolean(digits),
+      hasSpeech: Boolean(speechResult),
     });
 
     const response = new twilio.twiml.VoiceResponse();
