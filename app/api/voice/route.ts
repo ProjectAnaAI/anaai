@@ -59,31 +59,56 @@ function formDataToTwilioParams(formData: FormData) {
   return params;
 }
 
-function logIncomingHeaderNames(request: Request) {
-  const headerNames = Array.from(request.headers.keys()).sort();
+type TwilioVerificationResult =
+  | {
+      allowed: true;
+      verified: true;
+      reason: "verified";
+    }
+  | {
+      allowed: true;
+      verified: false;
+      reason: "trial-missing-signature";
+    }
+  | {
+      allowed: false;
+      verified: false;
+      reason:
+        | "invalid-signature"
+        | "missing-auth-token"
+        | "validation-error";
+    };
 
-  console.log("AnaAI incoming voice header names:", headerNames);
-}
-
-function validateTwilioWebhook({
+function verifyTwilioWebhook({
   request,
   params,
 }: {
   request: Request;
   params: Record<string, string>;
-}) {
+}): TwilioVerificationResult {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-  if (!authToken) {
-    console.error("TWILIO_AUTH_TOKEN is missing.");
-    return false;
-  }
-
   const signature = request.headers.get("x-twilio-signature");
 
   if (!signature) {
-    console.warn("AnaAI voice request missing Twilio signature.");
-    return false;
+    console.warn(
+      "AnaAI voice request has no Twilio signature. Allowing temporary trial-mode access."
+    );
+
+    return {
+      allowed: true,
+      verified: false,
+      reason: "trial-missing-signature",
+    };
+  }
+
+  if (!authToken) {
+    console.error("TWILIO_AUTH_TOKEN is missing.");
+
+    return {
+      allowed: false,
+      verified: false,
+      reason: "missing-auth-token",
+    };
   }
 
   try {
@@ -100,12 +125,27 @@ function validateTwilioWebhook({
       console.warn("AnaAI rejected invalid Twilio signature.", {
         validationUrl: publicUrl,
       });
+
+      return {
+        allowed: false,
+        verified: false,
+        reason: "invalid-signature",
+      };
     }
 
-    return isValid;
+    return {
+      allowed: true,
+      verified: true,
+      reason: "verified",
+    };
   } catch (error: unknown) {
     console.error("Twilio signature validation error:", error);
-    return false;
+
+    return {
+      allowed: false,
+      verified: false,
+      reason: "validation-error",
+    };
   }
 }
 
@@ -246,17 +286,15 @@ export async function POST(request: Request) {
     const url = new URL(request.url);
     const mode = url.searchParams.get("mode") || "";
 
-    logIncomingHeaderNames(request);
-
     const formData = await request.formData();
     const twilioParams = formDataToTwilioParams(formData);
 
-    const isValidTwilioRequest = validateTwilioWebhook({
+    const verification = verifyTwilioWebhook({
       request,
       params: twilioParams,
     });
 
-    if (!isValidTwilioRequest) {
+    if (!verification.allowed) {
       return forbiddenResponse();
     }
 
@@ -266,8 +304,10 @@ export async function POST(request: Request) {
       formData.get("SpeechResult") || ""
     ).trim();
 
-    console.log("Verified AnaAI Twilio voice request:", {
+    console.log("AnaAI voice request accepted:", {
       mode,
+      verifiedTwilioRequest: verification.verified,
+      verificationReason: verification.reason,
       hasDigits: Boolean(digits),
       hasSpeech: Boolean(speechResult),
     });
