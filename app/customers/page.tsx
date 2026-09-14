@@ -6,7 +6,12 @@ import AppLayout from "@/components/layout/AppLayout";
 import { supabase } from "@/lib/supabase";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -18,11 +23,24 @@ type Customer = {
   notes: string | null;
 };
 
+type CurrentBusinessResponse = {
+  success: boolean;
+  error?: string;
+  business?: {
+    id: string;
+    name: string;
+    timezone: string;
+    role: "owner" | "manager" | "staff";
+  };
+};
+
 export default function CustomersPage() {
   const router = useRouter();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -30,47 +48,105 @@ export default function CustomersPage() {
   const [notes, setNotes] = useState("");
 
   useEffect(() => {
-    loadCustomers();
+    initializePage();
   }, []);
 
-  async function loadCustomers() {
+  async function getAuthenticatedContext() {
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
 
-    if (!user) {
+    if (sessionError || !session?.access_token || !session.user) {
+      return null;
+    }
+
+    const response = await fetch("/api/current-business", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    const data = (await response.json()) as CurrentBusinessResponse;
+
+    if (!response.ok || !data.success || !data.business) {
+      console.error("Could not resolve current business:", data.error);
+      return null;
+    }
+
+    return {
+      userId: session.user.id,
+      businessId: data.business.id,
+    };
+  }
+
+  async function initializePage() {
+    setLoading(true);
+
+    const context = await getAuthenticatedContext();
+
+    if (!context) {
       router.push("/login");
+      return;
+    }
+
+    setUserId(context.userId);
+    setBusinessId(context.businessId);
+
+    await loadCustomers(context.businessId);
+
+    setLoading(false);
+  }
+
+  async function loadCustomers(selectedBusinessId?: string) {
+    const activeBusinessId = selectedBusinessId ?? businessId;
+
+    if (!activeBusinessId) {
       return;
     }
 
     const { data, error } = await supabase
       .from("customers")
-      .select("*")
-      .eq("user_id", user.id)
+      .select("id, full_name, phone, email, notes")
+      .eq("business_id", activeBusinessId)
       .order("created_at", { ascending: false });
 
-    if (!error && data) {
-      setCustomers(data);
+    if (error) {
+      console.error("Could not load customers:", error);
+      alert(error.message);
+      return;
     }
 
-    setLoading(false);
+    setCustomers(data ?? []);
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId || !userId) {
+      alert("Business context is not available.");
+      return;
+    }
 
-    if (!user) return;
+    const trimmedFullName = fullName.trim();
+
+    if (!trimmedFullName) {
+      alert("Customer name is required.");
+      return;
+    }
 
     const { error } = await supabase.from("customers").insert({
-      user_id: user.id,
-      full_name: fullName,
-      phone,
-      email,
-      notes,
+      business_id: businessId,
+
+      // Temporary compatibility during the user_id → business_id migration.
+      // We will remove this once AnaAI is fully business-scoped.
+      user_id: userId,
+
+      full_name: trimmedFullName,
+      phone: phone.trim() || null,
+      email: email.trim() || null,
+      notes: notes.trim() || null,
     });
 
     if (error) {
@@ -83,18 +159,27 @@ export default function CustomersPage() {
     setEmail("");
     setNotes("");
 
-    loadCustomers();
+    await loadCustomers();
   }
 
   async function deleteCustomer(id: string) {
-    const { error } = await supabase.from("customers").delete().eq("id", id);
+    if (!businessId) {
+      alert("Business context is not available.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("customers")
+      .delete()
+      .eq("id", id)
+      .eq("business_id", businessId);
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    loadCustomers();
+    await loadCustomers();
   }
 
   return (
@@ -150,7 +235,11 @@ export default function CustomersPage() {
                 onChange={(e) => setNotes(e.target.value)}
               />
 
-              <Button type="submit" className="mt-5">
+              <Button
+                type="submit"
+                className="mt-5"
+                disabled={!businessId || !userId}
+              >
                 Save customer
               </Button>
             </form>
@@ -166,7 +255,10 @@ export default function CustomersPage() {
             <p className="mt-4 text-gray-500">Loading customers...</p>
           ) : customers.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
-              <p className="font-medium text-gray-900">No customers yet</p>
+              <p className="font-medium text-gray-900">
+                No customers yet
+              </p>
+
               <p className="mt-2 text-sm text-gray-500">
                 New customers will appear here once they are created.
               </p>

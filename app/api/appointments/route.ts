@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+import { resolveBusinessContext } from "@/lib/business-context";
 import { sendSms } from "@/lib/twilio";
 
 export const runtime = "nodejs";
@@ -162,20 +163,7 @@ export async function PATCH(request: Request) {
 
     const authorization = request.headers.get("authorization");
 
-    if (!authorization) {
-      return NextResponse.json(
-        {
-          error: "Authorization header is missing.",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
-
-    const [scheme, accessToken] = authorization.split(" ");
-
-    if (scheme?.toLowerCase() !== "bearer" || !accessToken) {
+    if (!authorization?.startsWith("Bearer ")) {
       return NextResponse.json(
         {
           error: "Invalid authorization header.",
@@ -186,28 +174,36 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
+    const accessToken = authorization.slice("Bearer ".length).trim();
 
-    const {
-      data: { user },
-      error: userError,
-    } = await authClient.auth.getUser(accessToken);
-
-    if (userError || !user) {
+    if (!accessToken) {
       return NextResponse.json(
         {
-          error: "Your session could not be verified.",
+          error: "Authorization token is missing.",
         },
         {
           status: 401,
         }
       );
     }
+
+    const businessContextResult = await resolveBusinessContext({
+      accessToken,
+    });
+
+    if (!businessContextResult.success) {
+      return NextResponse.json(
+        {
+          error: businessContextResult.error,
+          code: businessContextResult.code,
+        },
+        {
+          status: businessContextResult.status,
+        }
+      );
+    }
+
+    const { businessId } = businessContextResult.context;
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
@@ -242,7 +238,7 @@ export async function PATCH(request: Request) {
         "id, customer_name, customer_phone, customer_email, service, appointment_date, appointment_time, status"
       )
       .eq("id", appointmentId)
-      .eq("user_id", user.id)
+      .eq("business_id", businessId)
       .maybeSingle();
 
     if (existingError) {
@@ -337,7 +333,7 @@ export async function PATCH(request: Request) {
       .from("appointments")
       .update(updates)
       .eq("id", appointmentId)
-      .eq("user_id", user.id)
+      .eq("business_id", businessId)
       .select(
         "id, customer_name, customer_phone, customer_email, service, appointment_date, appointment_time, status"
       )
@@ -369,18 +365,28 @@ export async function PATCH(request: Request) {
       if (!customerPhone) {
         smsError = "Customer phone number is missing.";
       } else {
-        const { data: businessData } = await supabase
-          .from("business_profiles")
-          .select("business_name, address")
-          .eq("user_id", user.id)
-          .order("created_at", {
-            ascending: false,
-          })
-          .limit(1)
-          .maybeSingle();
+        const { data: businessData, error: businessError } =
+          await supabase
+            .from("business_profiles")
+            .select("business_name, address")
+            .eq("business_id", businessId)
+            .order("created_at", {
+              ascending: false,
+            })
+            .limit(1)
+            .maybeSingle();
+
+        if (businessError) {
+          console.error(
+            "AnaAI business profile lookup failed during SMS:",
+            businessError
+          );
+        }
 
         const businessName =
-          businessData?.business_name?.trim() || "the business";
+          businessData?.business_name?.trim() ||
+          businessContextResult.context.businessName ||
+          "the business";
 
         const smsBody = buildSms({
           notificationType,

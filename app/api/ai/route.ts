@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+import { resolveBusinessContext } from "@/lib/business-context";
 import { sendSms } from "@/lib/twilio";
 
 export const runtime = "nodejs";
@@ -83,6 +84,7 @@ type AtomicBookingResult = {
   customer_phone?: string;
   service?: string;
   service_id?: string;
+  business_id?: string;
   date?: string;
   time?: string;
   status?: string;
@@ -294,6 +296,25 @@ function findNearbyAvailableTimes({
   return availableCandidates.slice(0, limit).map(minutesToTime);
 }
 
+function getTodayInTimezone(timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
 export async function POST(request: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -323,20 +344,7 @@ export async function POST(request: Request) {
 
     const authorization = request.headers.get("authorization");
 
-    if (!authorization) {
-      return NextResponse.json(
-        {
-          error: "Authorization header is missing.",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
-
-    const [scheme, accessToken] = authorization.split(" ");
-
-    if (scheme?.toLowerCase() !== "bearer" || !accessToken) {
+    if (!authorization?.startsWith("Bearer ")) {
       return NextResponse.json(
         {
           error: "Invalid authorization header.",
@@ -347,25 +355,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
+    const accessToken = authorization.slice("Bearer ".length).trim();
 
-    const {
-      data: { user },
-      error: userError,
-    } = await authClient.auth.getUser(accessToken);
-
-    if (userError || !user) {
-      console.error("Supabase authentication error:", userError);
-
+    if (!accessToken) {
       return NextResponse.json(
         {
-          error:
-            "Your session could not be verified. Please log in again.",
+          error: "Authorization token is missing.",
         },
         {
           status: 401,
@@ -373,7 +368,32 @@ export async function POST(request: Request) {
       );
     }
 
-    const userId = user.id;
+    const requestedBusinessId =
+      request.headers.get("x-anaai-business-id")?.trim() || null;
+
+    const businessContextResult = await resolveBusinessContext({
+      accessToken,
+      requestedBusinessId,
+    });
+
+    if (!businessContextResult.success) {
+      return NextResponse.json(
+        {
+          error: businessContextResult.error,
+          code: businessContextResult.code,
+        },
+        {
+          status: businessContextResult.status,
+        }
+      );
+    }
+
+    const {
+      userId,
+      businessId,
+      businessName: resolvedBusinessName,
+      timezone,
+    } = businessContextResult.context;
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
@@ -414,13 +434,13 @@ export async function POST(request: Request) {
         .select(
           "receptionist_name, greeting, tone, custom_instructions, transfer_instructions"
         )
-        .eq("user_id", userId)
+        .eq("business_id", businessId)
         .maybeSingle(),
 
       supabase
         .from("business_knowledge")
         .select("category, question, answer")
-        .eq("user_id", userId)
+        .eq("business_id", businessId)
         .order("created_at", {
           ascending: false,
         }),
@@ -430,7 +450,7 @@ export async function POST(request: Request) {
         .select(
           "id, business_name, owner_name, phone, email, address, business_hours"
         )
-        .eq("user_id", userId)
+        .eq("business_id", businessId)
         .order("created_at", {
           ascending: false,
         })
@@ -442,7 +462,7 @@ export async function POST(request: Request) {
         .select(
           "id, name, duration_minutes, price, description, is_active"
         )
-        .eq("user_id", userId)
+        .eq("business_id", businessId)
         .eq("is_active", true)
         .order("name", {
           ascending: true,
@@ -551,9 +571,14 @@ Description: ${service.description || "No description"}
             })
             .join("\n");
 
+    const businessName =
+      business?.business_name?.trim() ||
+      resolvedBusinessName ||
+      "Not provided";
+
     const businessProfileText = `
 Business name:
-${business?.business_name || "Not provided"}
+${businessName}
 
 Owner:
 ${business?.owner_name || "Not provided"}
@@ -566,9 +591,12 @@ ${business?.email || "Not provided"}
 
 Address:
 ${business?.address || "Not provided"}
+
+Business timezone:
+${timezone}
 `;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayInTimezone(timezone);
 
     async function checkAvailability(
       args: AvailabilityArgs
@@ -694,7 +722,7 @@ ${business?.address || "Not provided"}
         .select(
           "id, appointment_time, service_id, service, status"
         )
-        .eq("user_id", userId)
+        .eq("business_id", businessId)
         .eq("appointment_date", date)
         .in("status", ["Booked", "Confirmed"])
         .order("appointment_time", {
@@ -888,8 +916,9 @@ ${business?.address || "Not provided"}
       }
 
       const { data, error } = await supabase.rpc(
-        "book_appointment_atomic",
+        "book_appointment_atomic_business",
         {
+          p_business_id: businessId,
           p_customer_name: customerName,
           p_customer_phone: customerPhone,
           p_customer_email: customerEmail,
@@ -901,7 +930,7 @@ ${business?.address || "Not provided"}
       );
 
       if (error) {
-        console.error("Atomic booking RPC error:", error);
+        console.error("Business atomic booking RPC error:", error);
 
         return {
           success: false,
@@ -928,6 +957,7 @@ ${business?.address || "Not provided"}
         });
 
         console.log("AnaAI atomic booking rejected:", {
+          businessId,
           args,
           result,
           availability,
@@ -944,13 +974,16 @@ ${business?.address || "Not provided"}
         };
       }
 
-      console.log("AnaAI atomic appointment booked:", result);
+      console.log("AnaAI atomic appointment booked:", {
+        businessId,
+        appointmentId: result.appointment_id,
+      });
 
       /*
-       * Booking is already complete at this point.
+       * The database booking is already complete here.
        *
-       * SMS is intentionally attempted afterward so a Twilio failure
-       * never rolls back or destroys a valid appointment.
+       * SMS is intentionally attempted afterward.
+       * A Twilio failure must never undo a valid appointment.
        */
       const bookedCustomerName =
         result.customer_name || customerName;
@@ -963,9 +996,6 @@ ${business?.address || "Not provided"}
 
       const bookedDate = result.date || date;
       const bookedTime = normalizeTime(result.time || time);
-
-      const businessName =
-        business?.business_name?.trim() || "the business";
 
       const smsBody = buildBookingConfirmationSms({
         customerName: bookedCustomerName,
@@ -983,11 +1013,13 @@ ${business?.address || "Not provided"}
 
       if (smsResult.success) {
         console.log("AnaAI booking confirmation SMS sent:", {
+          businessId,
           appointmentId: result.appointment_id,
           messageSid: smsResult.messageSid,
         });
       } else {
         console.error("AnaAI booking created but SMS failed:", {
+          businessId,
           appointmentId: result.appointment_id,
           error: smsResult.error,
         });
@@ -1096,6 +1128,12 @@ You are ${receptionistName}, the AI receptionist for this business.
 TODAY'S DATE
 
 ${today}
+
+BUSINESS TIMEZONE
+
+${timezone}
+
+Use the business timezone when interpreting dates and times.
 
 Use today's date when interpreting relative dates such as:
 - today
@@ -1239,6 +1277,7 @@ GENERAL RULES
         const result = await checkAvailability(args);
 
         console.log("AnaAI availability check:", {
+          businessId,
           args,
           result,
         });
@@ -1274,7 +1313,7 @@ GENERAL RULES
         const result = await bookAppointment(args);
 
         console.log("AnaAI booking result:", {
-          args,
+          businessId,
           result,
         });
 

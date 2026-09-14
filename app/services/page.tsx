@@ -6,7 +6,12 @@ import AppLayout from "@/components/layout/AppLayout";
 import { supabase } from "@/lib/supabase";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -19,11 +24,24 @@ type Service = {
   is_active: boolean;
 };
 
+type CurrentBusinessResponse = {
+  success: boolean;
+  error?: string;
+  business?: {
+    id: string;
+    name: string;
+    timezone: string;
+    role: "owner" | "manager" | "staff";
+  };
+};
+
 export default function ServicesPage() {
   const router = useRouter();
 
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
+  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [durationMinutes, setDurationMinutes] = useState("");
@@ -31,47 +49,109 @@ export default function ServicesPage() {
   const [description, setDescription] = useState("");
 
   useEffect(() => {
-    loadServices();
+    initializePage();
   }, []);
 
-  async function loadServices() {
+  async function getAuthenticatedContext() {
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
 
-    if (!user) {
+    if (sessionError || !session?.access_token || !session.user) {
+      return null;
+    }
+
+    const response = await fetch("/api/current-business", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    const data = (await response.json()) as CurrentBusinessResponse;
+
+    if (!response.ok || !data.success || !data.business) {
+      console.error("Could not resolve current business:", data.error);
+      return null;
+    }
+
+    return {
+      userId: session.user.id,
+      businessId: data.business.id,
+    };
+  }
+
+  async function initializePage() {
+    setLoading(true);
+
+    const context = await getAuthenticatedContext();
+
+    if (!context) {
       router.push("/login");
+      return;
+    }
+
+    setUserId(context.userId);
+    setBusinessId(context.businessId);
+
+    await loadServices(context.businessId);
+
+    setLoading(false);
+  }
+
+  async function loadServices(selectedBusinessId?: string) {
+    const activeBusinessId = selectedBusinessId ?? businessId;
+
+    if (!activeBusinessId) {
       return;
     }
 
     const { data, error } = await supabase
       .from("services")
-      .select("*")
-      .eq("user_id", user.id)
+      .select(
+        "id, name, duration_minutes, price, description, is_active"
+      )
+      .eq("business_id", activeBusinessId)
       .order("created_at", { ascending: false });
 
-    if (!error && data) {
-      setServices(data);
+    if (error) {
+      console.error("Could not load services:", error);
+      alert(error.message);
+      return;
     }
 
-    setLoading(false);
+    setServices(data ?? []);
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId || !userId) {
+      alert("Business context is not available.");
+      return;
+    }
 
-    if (!user) return;
+    const trimmedName = name.trim();
+
+    if (!trimmedName) {
+      alert("Service name is required.");
+      return;
+    }
 
     const { error } = await supabase.from("services").insert({
-      user_id: user.id,
-      name,
-      duration_minutes: durationMinutes ? Number(durationMinutes) : null,
+      business_id: businessId,
+
+      // Temporary compatibility during the user_id → business_id migration.
+      // We will remove this after every AnaAI feature is business-scoped.
+      user_id: userId,
+
+      name: trimmedName,
+      duration_minutes: durationMinutes
+        ? Number(durationMinutes)
+        : null,
       price: price ? Number(price) : null,
-      description,
+      description: description.trim() || null,
       is_active: true,
     });
 
@@ -85,18 +165,27 @@ export default function ServicesPage() {
     setPrice("");
     setDescription("");
 
-    loadServices();
+    await loadServices();
   }
 
   async function deleteService(id: string) {
-    const { error } = await supabase.from("services").delete().eq("id", id);
+    if (!businessId) {
+      alert("Business context is not available.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("services")
+      .delete()
+      .eq("id", id)
+      .eq("business_id", businessId);
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    loadServices();
+    await loadServices();
   }
 
   return (
@@ -133,6 +222,7 @@ export default function ServicesPage() {
 
                 <Input
                   type="number"
+                  min="1"
                   placeholder="Duration in minutes"
                   value={durationMinutes}
                   onChange={(e) => setDurationMinutes(e.target.value)}
@@ -140,6 +230,7 @@ export default function ServicesPage() {
 
                 <Input
                   type="number"
+                  min="0"
                   step="0.01"
                   placeholder="Price"
                   value={price}
@@ -154,7 +245,11 @@ export default function ServicesPage() {
                 onChange={(e) => setDescription(e.target.value)}
               />
 
-              <Button type="submit" className="mt-5">
+              <Button
+                type="submit"
+                className="mt-5"
+                disabled={!businessId || !userId}
+              >
                 Save service
               </Button>
             </form>
@@ -170,7 +265,10 @@ export default function ServicesPage() {
             <p className="mt-4 text-gray-500">Loading services...</p>
           ) : services.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
-              <p className="font-medium text-gray-900">No services yet</p>
+              <p className="font-medium text-gray-900">
+                No services yet
+              </p>
+
               <p className="mt-2 text-sm text-gray-500">
                 New services will appear here once they are created.
               </p>
