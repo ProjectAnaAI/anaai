@@ -153,9 +153,10 @@ export async function PATCH(request: Request) {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseAnonKey) {
+      console.error("Appointment API Supabase configuration is missing.");
       return NextResponse.json(
         {
-          error: "Supabase environment variables are missing.",
+          error: "Appointment updates are temporarily unavailable.",
         },
         {
           status: 500,
@@ -195,9 +196,14 @@ export async function PATCH(request: Request) {
     });
 
     if (!businessContextResult.success) {
+      if (businessContextResult.status >= 500) {
+        console.error("Appointment business context failed:", businessContextResult);
+      }
       return NextResponse.json(
         {
-          error: businessContextResult.error,
+          error: businessContextResult.status >= 500
+            ? "Unable to load appointment context. Please try again."
+            : businessContextResult.error,
           code: businessContextResult.code,
         },
         {
@@ -245,9 +251,10 @@ export async function PATCH(request: Request) {
       .maybeSingle();
 
     if (existingError) {
+      console.error("Appointment lookup failed:", existingError);
       return NextResponse.json(
         {
-          error: existingError.message,
+          error: "Unable to load the appointment. Please try again.",
         },
         {
           status: 500,
@@ -395,9 +402,10 @@ export async function PATCH(request: Request) {
       .single();
 
     if (updateError) {
+      console.error("Appointment update failed:", updateError);
       return NextResponse.json(
         {
-          error: updateError.message,
+          error: "Unable to update the appointment. Please try again.",
         },
         {
           status: 500,
@@ -472,7 +480,7 @@ export async function PATCH(request: Request) {
             messageSid: smsResult.messageSid,
           });
         } else {
-          smsError = smsResult.error;
+          smsError = "The appointment was saved, but the SMS could not be sent.";
 
           console.error(
             "AnaAI appointment updated but SMS failed:",
@@ -496,20 +504,9 @@ export async function PATCH(request: Request) {
   } catch (error: unknown) {
     console.error("Appointment update API error:", error);
 
-    if (error instanceof Error) {
-      return NextResponse.json(
-        {
-          error: error.message,
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
     return NextResponse.json(
       {
-        error: "An unexpected appointment update error occurred.",
+        error: "Unable to complete the appointment request. Please try again.",
       },
       {
         status: 500,

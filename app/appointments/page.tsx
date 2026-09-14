@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { activeBusinessHeaders } from "@/lib/active-business";
 import { supabase } from "@/lib/supabase";
 
 import AppLayout from "@/components/layout/AppLayout";
@@ -303,6 +304,7 @@ export default function AppointmentsPage() {
     const response = await fetch("/api/current-business", {
       method: "GET",
       headers: {
+        ...activeBusinessHeaders(),
         Authorization: `Bearer ${session.access_token}`,
       },
     });
@@ -616,15 +618,19 @@ export default function AppointmentsPage() {
       | "cancel"
       | "none";
   }) {
+    if (!businessId) throw new Error("Business context is unavailable.");
+
     const accessToken = await getAccessToken();
 
     if (!accessToken) {
-      return null;
+      throw new Error("Your session has expired. Please log in again.");
     }
 
     const response = await fetch("/api/appointments", {
       method: "PATCH",
       headers: {
+        ...activeBusinessHeaders(),
+        "x-anaai-business-id": businessId,
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
@@ -638,9 +644,9 @@ export default function AppointmentsPage() {
     const result =
       (await response.json()) as AppointmentUpdateResponse;
 
-    if (!response.ok) {
+    if (!response.ok || result?.success !== true) {
       throw new Error(
-        result.error || "Appointment update failed."
+        result?.error || "Appointment update failed."
       );
     }
 
@@ -861,12 +867,12 @@ export default function AppointmentsPage() {
           : "none",
       });
 
-      if (wasRescheduled && result?.sms_sent) {
+      if (wasRescheduled && result.sms_sent) {
         showNotice(
           "success",
           "Appointment rescheduled and customer SMS sent."
         );
-      } else if (wasRescheduled && !result?.sms_sent) {
+      } else if (wasRescheduled && !result.sms_sent) {
         showNotice(
           "warning",
           "Appointment rescheduled successfully, but the customer SMS could not be sent."
@@ -942,7 +948,7 @@ export default function AppointmentsPage() {
         notificationType: "confirm",
       });
 
-      if (result?.sms_sent) {
+      if (result.sms_sent) {
         showNotice(
           "success",
           "Appointment confirmed and customer SMS sent."
@@ -989,7 +995,7 @@ export default function AppointmentsPage() {
         notificationType: "cancel",
       });
 
-      if (result?.sms_sent) {
+      if (result.sms_sent) {
         showNotice(
           "success",
           "Appointment cancelled and customer SMS sent."

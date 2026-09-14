@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { Toaster } from "sonner";
 import "./globals.css";
+import ActiveBusinessProvider from "@/components/layout/ActiveBusinessProvider";
 
 export const metadata: Metadata = {
   title: "AnaAI",
@@ -13,7 +15,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ActiveBusinessProvider>{children}</ActiveBusinessProvider>
+        <Toaster />
+      </body>
     </html>
   );
 }

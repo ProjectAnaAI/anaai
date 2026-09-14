@@ -321,9 +321,10 @@ export async function POST(request: Request) {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!process.env.OPENAI_API_KEY) {
+      console.error("AnaAI OpenAI configuration is missing.");
       return NextResponse.json(
         {
-          error: "OPENAI_API_KEY is missing.",
+          error: "AnaAI is temporarily unavailable.",
         },
         {
           status: 500,
@@ -332,9 +333,10 @@ export async function POST(request: Request) {
     }
 
     if (!supabaseUrl || !supabaseAnonKey) {
+      console.error("AnaAI Supabase configuration is missing.");
       return NextResponse.json(
         {
-          error: "Supabase environment variables are missing.",
+          error: "AnaAI is temporarily unavailable.",
         },
         {
           status: 500,
@@ -377,9 +379,14 @@ export async function POST(request: Request) {
     });
 
     if (!businessContextResult.success) {
+      if (businessContextResult.status >= 500) {
+        console.error("AnaAI business context failed:", businessContextResult);
+      }
       return NextResponse.json(
         {
-          error: businessContextResult.error,
+          error: businessContextResult.status >= 500
+            ? "Unable to load your business context. Please try again."
+            : businessContextResult.error,
           code: businessContextResult.code,
         },
         {
@@ -470,9 +477,10 @@ export async function POST(request: Request) {
     ]);
 
     if (settingsResult.error) {
+      console.error("AnaAI AI settings lookup failed:", settingsResult.error);
       return NextResponse.json(
         {
-          error: `Unable to load AI settings: ${settingsResult.error.message}`,
+          error: "Unable to load AI settings. Please try again.",
         },
         {
           status: 500,
@@ -481,9 +489,10 @@ export async function POST(request: Request) {
     }
 
     if (knowledgeResult.error) {
+      console.error("AnaAI business knowledge lookup failed:", knowledgeResult.error);
       return NextResponse.json(
         {
-          error: `Unable to load business knowledge: ${knowledgeResult.error.message}`,
+          error: "Unable to load business knowledge. Please try again.",
         },
         {
           status: 500,
@@ -492,9 +501,10 @@ export async function POST(request: Request) {
     }
 
     if (businessResult.error) {
+      console.error("AnaAI business profile lookup failed:", businessResult.error);
       return NextResponse.json(
         {
-          error: `Unable to load business profile: ${businessResult.error.message}`,
+          error: "Unable to load business profile. Please try again.",
         },
         {
           status: 500,
@@ -503,9 +513,10 @@ export async function POST(request: Request) {
     }
 
     if (servicesResult.error) {
+      console.error("AnaAI services lookup failed:", servicesResult.error);
       return NextResponse.json(
         {
-          error: `Unable to load services: ${servicesResult.error.message}`,
+          error: "Unable to load services. Please try again.",
         },
         {
           status: 500,
@@ -965,10 +976,10 @@ ${timezone}
 
         return {
           success: false,
-          reason:
-            result.reason ||
-            availability.reason ||
-            "The appointment could not be booked.",
+          // RPC reason text may contain internal database diagnostics.
+          reason: availability.available
+            ? "The appointment could not be booked. Please try again."
+            : availability.reason,
           suggested_times:
             availability.suggested_times ?? [],
         };
@@ -1232,9 +1243,10 @@ GENERAL RULES
       const reply = firstResponse.output_text?.trim();
 
       if (!reply) {
+        console.error("AnaAI provider returned no initial text response.");
         return NextResponse.json(
           {
-            error: "OpenAI returned no text response.",
+            error: "AnaAI could not generate a response. Please try again.",
           },
           {
             status: 500,
@@ -1348,10 +1360,11 @@ GENERAL RULES
     const reply = finalResponse.output_text?.trim();
 
     if (!reply) {
+      console.error("AnaAI provider returned no final text response after tool execution.");
       return NextResponse.json(
         {
           error:
-            "OpenAI returned no final response after using AnaAI tools.",
+            "AnaAI could not complete its response. Please check your appointments before retrying a booking.",
         },
         {
           status: 500,
@@ -1368,7 +1381,7 @@ GENERAL RULES
     if (error instanceof OpenAI.APIError) {
       return NextResponse.json(
         {
-          error: `OpenAI API error: ${error.message}`,
+          error: "AnaAI could not complete its response. Please check your appointments before retrying a booking.",
         },
         {
           status: error.status || 500,
@@ -1376,20 +1389,9 @@ GENERAL RULES
       );
     }
 
-    if (error instanceof Error) {
-      return NextResponse.json(
-        {
-          error: error.message,
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
     return NextResponse.json(
       {
-        error: "An unexpected server error occurred.",
+        error: "AnaAI could not complete the request. Please check your appointments before retrying a booking.",
       },
       {
         status: 500,
