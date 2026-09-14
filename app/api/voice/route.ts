@@ -108,6 +108,16 @@ function normalizePhoneNumber(phone: string) {
   return digits ? `+${digits}` : "";
 }
 
+function lastFour(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+
+  if (digits.length < 4) {
+    return "unknown";
+  }
+
+  return digits.slice(-4);
+}
+
 function resolveTrialBusiness(
   calledNumber: string
 ): BusinessContext | null {
@@ -120,13 +130,14 @@ function resolveTrialBusiness(
   const businessName =
     process.env.ANAAI_TRIAL_BUSINESS_NAME || "";
 
-  if (
-    !configuredTwilioNumber ||
-    !businessId ||
-    !businessName
-  ) {
+  if (!configuredTwilioNumber || !businessId || !businessName) {
     console.error(
-      "AnaAI trial business configuration is incomplete."
+      "AnaAI trial business configuration is incomplete.",
+      {
+        hasTwilioPhoneNumber: Boolean(configuredTwilioNumber),
+        hasBusinessId: Boolean(businessId),
+        hasBusinessName: Boolean(businessName),
+      }
     );
 
     return null;
@@ -137,6 +148,13 @@ function resolveTrialBusiness(
 
   const normalizedConfiguredNumber =
     normalizePhoneNumber(configuredTwilioNumber);
+
+  console.log("AnaAI business-number comparison:", {
+    incomingLast4: lastFour(normalizedCalledNumber),
+    configuredLast4: lastFour(normalizedConfiguredNumber),
+    incomingLength: normalizedCalledNumber.length,
+    configuredLength: normalizedConfiguredNumber.length,
+  });
 
   if (
     !normalizedCalledNumber ||
@@ -616,7 +634,7 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   const response =
     new twilio.twiml.VoiceResponse();
 
