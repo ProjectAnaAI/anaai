@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import twilio from "twilio";
 
 export const runtime = "nodejs";
-
-const VOICE_URL = "https://anaai-hazel.vercel.app/api/voice";
 
 function twimlResponse(xml: string) {
   return new NextResponse(xml, {
@@ -15,140 +12,293 @@ function twimlResponse(xml: string) {
   });
 }
 
-function addSpeechGather(
+function getVoiceUrl(request: Request, mode?: string) {
+  const url = new URL("/api/voice", request.url);
+
+  if (mode) {
+    url.searchParams.set("mode", mode);
+  }
+
+  return url.toString();
+}
+
+function addMainMenu(
   response: twilio.twiml.VoiceResponse,
-  message: string
+  request: Request
 ) {
   const gather = response.gather({
-    input: ["speech"],
-    action: VOICE_URL,
+    input: ["dtmf", "speech"],
+    numDigits: 1,
+    action: getVoiceUrl(request, "menu"),
     method: "POST",
-    language: "en-US",
+    timeout: 6,
     speechTimeout: "auto",
-    timeout: 5,
+    language: "en-US",
   });
 
   gather.say(
     {
       voice: "alice",
     },
-    message
+    [
+      "Hi, this is AnaAI from our business.",
+      "For appointments or rescheduling, press or say 1.",
+      "For office hours and basic business information, press or say 2.",
+      "To speak with a representative, press or say 3.",
+      "To repeat this menu, press or say 4.",
+    ].join(" ")
+  );
+
+  response.redirect(
+    {
+      method: "POST",
+    },
+    getVoiceUrl(request)
   );
 }
 
-export async function POST(request: Request) {
-  try {
-    const formData = await request.formData();
+function normalizeChoice({
+  digits,
+  speech,
+}: {
+  digits: string;
+  speech: string;
+}) {
+  if (digits === "1") return "1";
+  if (digits === "2") return "2";
+  if (digits === "3") return "3";
+  if (digits === "4") return "4";
 
-    const speechResult = String(
-      formData.get("SpeechResult") || ""
-    ).trim();
+  const normalized = speech
+    .toLowerCase()
+    .replace(/[.,!?]/g, "")
+    .trim();
 
-    const response = new twilio.twiml.VoiceResponse();
-
-    if (!speechResult) {
-      addSpeechGather(
-        response,
-        "This is AnaAI. How can I help you today?"
-      );
-
-      response.say(
-        {
-          voice: "alice",
-        },
-        "I didn't hear anything. Goodbye."
-      );
-
-      return twimlResponse(response.toString());
-    }
-
-    console.log("AnaAI heard caller:", speechResult);
-
-    const apiKey = process.env.OPENAI_API_KEY;
-
-    if (!apiKey) {
-      console.error("OPENAI_API_KEY is missing.");
-
-      response.say(
-        {
-          voice: "alice",
-        },
-        "I'm sorry, I'm having a technical problem right now."
-      );
-
-      return twimlResponse(response.toString());
-    }
-
-    const openai = new OpenAI({
-      apiKey,
-    });
-
-    const aiResponse = await openai.responses.create({
-      model: "gpt-5.6-terra",
-      instructions: `
-You are AnaAI, a friendly and professional AI receptionist speaking with a customer over the phone.
-
-Keep every response brief and natural for spoken conversation.
-
-Usually answer in one or two short sentences.
-
-Do not use markdown, bullet points, headings, or emojis.
-
-This is currently a voice conversation test.
-
-Do not claim that you booked, cancelled, confirmed, rescheduled, or changed an appointment.
-
-If the caller asks you to perform an appointment action, explain briefly that appointment actions are not enabled in this voice test yet.
-      `.trim(),
-      input: speechResult,
-    });
-
-    const answer =
-      aiResponse.output_text?.trim() ||
-      "I'm sorry, I didn't understand that. Could you say that again?";
-
-    console.log("AnaAI voice response:", answer);
-
-    addSpeechGather(response, answer);
-
-    response.say(
-      {
-        voice: "alice",
-      },
-      "Thanks for calling. Goodbye."
-    );
-
-    return twimlResponse(response.toString());
-  } catch (error: unknown) {
-    console.error("AnaAI voice webhook error:", error);
-
-    const response = new twilio.twiml.VoiceResponse();
-
-    response.say(
-      {
-        voice: "alice",
-      },
-      "I'm sorry, I'm having trouble responding right now."
-    );
-
-    return twimlResponse(response.toString());
+  if (
+    normalized === "1" ||
+    normalized === "one" ||
+    normalized.includes("appointment") ||
+    normalized.includes("appointments") ||
+    normalized.includes("reschedule") ||
+    normalized.includes("rescheduling") ||
+    normalized.includes("booking")
+  ) {
+    return "1";
   }
+
+  if (
+    normalized === "2" ||
+    normalized === "two" ||
+    normalized.includes("office hour") ||
+    normalized.includes("office hours") ||
+    normalized.includes("business information") ||
+    normalized.includes("hours")
+  ) {
+    return "2";
+  }
+
+  if (
+    normalized === "3" ||
+    normalized === "three" ||
+    normalized.includes("representative") ||
+    normalized.includes("person") ||
+    normalized.includes("human") ||
+    normalized.includes("someone")
+  ) {
+    return "3";
+  }
+
+  if (
+    normalized === "4" ||
+    normalized === "four" ||
+    normalized.includes("repeat")
+  ) {
+    return "4";
+  }
+
+  return "";
 }
 
-export async function GET() {
-  const response = new twilio.twiml.VoiceResponse();
+function addAppointmentTest(
+  response: twilio.twiml.VoiceResponse,
+  request: Request
+) {
+  const gather = response.gather({
+    input: ["speech"],
+    action: getVoiceUrl(request, "appointment-test"),
+    method: "POST",
+    timeout: 6,
+    speechTimeout: "auto",
+    language: "en-US",
+  });
 
-  addSpeechGather(
-    response,
-    "This is AnaAI. How can I help you today?"
+  gather.say(
+    {
+      voice: "alice",
+    },
+    "You selected appointments or rescheduling. What day and time would you like your appointment?"
   );
 
   response.say(
     {
       voice: "alice",
     },
-    "I didn't hear anything. Goodbye."
+    "I didn't hear a date and time."
   );
+
+  response.redirect(
+    {
+      method: "POST",
+    },
+    getVoiceUrl(request)
+  );
+}
+
+export async function POST(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const mode = url.searchParams.get("mode") || "";
+
+    const formData = await request.formData();
+
+    const digits = String(formData.get("Digits") || "").trim();
+    const speechResult = String(
+      formData.get("SpeechResult") || ""
+    ).trim();
+
+    console.log("AnaAI voice request:", {
+      mode,
+      digits,
+      speechResult,
+    });
+
+    const response = new twilio.twiml.VoiceResponse();
+
+    if (!mode) {
+      addMainMenu(response, request);
+      return twimlResponse(response.toString());
+    }
+
+    if (mode === "menu") {
+      const choice = normalizeChoice({
+        digits,
+        speech: speechResult,
+      });
+
+      if (choice === "1") {
+        addAppointmentTest(response, request);
+        return twimlResponse(response.toString());
+      }
+
+      if (choice === "2") {
+        response.say(
+          {
+            voice: "alice",
+          },
+          "You selected office hours and business information. This option is working. We will connect your real business information next."
+        );
+
+        response.redirect(
+          {
+            method: "POST",
+          },
+          getVoiceUrl(request)
+        );
+
+        return twimlResponse(response.toString());
+      }
+
+      if (choice === "3") {
+        response.say(
+          {
+            voice: "alice",
+          },
+          "You selected transfer to a representative. Call transfer is not enabled yet. We will connect the representative number after testing the menu."
+        );
+
+        response.redirect(
+          {
+            method: "POST",
+          },
+          getVoiceUrl(request)
+        );
+
+        return twimlResponse(response.toString());
+      }
+
+      if (choice === "4") {
+        addMainMenu(response, request);
+        return twimlResponse(response.toString());
+      }
+
+      response.say(
+        {
+          voice: "alice",
+        },
+        "I'm sorry, I didn't understand your selection."
+      );
+
+      addMainMenu(response, request);
+
+      return twimlResponse(response.toString());
+    }
+
+    if (mode === "appointment-test") {
+      if (!speechResult) {
+        response.say(
+          {
+            voice: "alice",
+          },
+          "I'm sorry, I didn't hear the date and time."
+        );
+
+        addAppointmentTest(response, request);
+
+        return twimlResponse(response.toString());
+      }
+
+      response.say(
+        {
+          voice: "alice",
+        },
+        `I heard ${speechResult}. The appointment menu is working. We have not booked anything yet.`
+      );
+
+      response.say(
+        {
+          voice: "alice",
+        },
+        "Returning to the main menu."
+      );
+
+      addMainMenu(response, request);
+
+      return twimlResponse(response.toString());
+    }
+
+    addMainMenu(response, request);
+
+    return twimlResponse(response.toString());
+  } catch (error: unknown) {
+    console.error("AnaAI voice menu error:", error);
+
+    const response = new twilio.twiml.VoiceResponse();
+
+    response.say(
+      {
+        voice: "alice",
+      },
+      "I'm sorry, AnaAI is having trouble responding right now. Please try again later."
+    );
+
+    return twimlResponse(response.toString());
+  }
+}
+
+export async function GET(request: Request) {
+  const response = new twilio.twiml.VoiceResponse();
+
+  addMainMenu(response, request);
 
   return twimlResponse(response.toString());
 }
