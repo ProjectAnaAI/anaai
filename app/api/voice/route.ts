@@ -3,6 +3,31 @@ import twilio from "twilio";
 
 export const runtime = "nodejs";
 
+type BusinessContext = {
+  businessId: string;
+  businessName: string;
+};
+
+type TwilioVerificationResult =
+  | {
+      allowed: true;
+      verified: true;
+      reason: "verified";
+    }
+  | {
+      allowed: true;
+      verified: false;
+      reason: "trial-missing-signature";
+    }
+  | {
+      allowed: false;
+      verified: false;
+      reason:
+        | "invalid-signature"
+        | "missing-auth-token"
+        | "validation-error";
+    };
+
 function twimlResponse(xml: string) {
   return new NextResponse(xml, {
     status: 200,
@@ -59,25 +84,76 @@ function formDataToTwilioParams(formData: FormData) {
   return params;
 }
 
-type TwilioVerificationResult =
-  | {
-      allowed: true;
-      verified: true;
-      reason: "verified";
-    }
-  | {
-      allowed: true;
-      verified: false;
-      reason: "trial-missing-signature";
-    }
-  | {
-      allowed: false;
-      verified: false;
-      reason:
-        | "invalid-signature"
-        | "missing-auth-token"
-        | "validation-error";
-    };
+function normalizePhoneNumber(phone: string) {
+  const trimmed = phone.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  if (trimmed.startsWith("+")) {
+    return `+${trimmed.slice(1).replace(/\D/g, "")}`;
+  }
+
+  const digits = trimmed.replace(/\D/g, "");
+
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  return digits ? `+${digits}` : "";
+}
+
+function resolveTrialBusiness(
+  calledNumber: string
+): BusinessContext | null {
+  const configuredTwilioNumber =
+    process.env.TWILIO_PHONE_NUMBER || "";
+
+  const businessId =
+    process.env.ANAAI_TRIAL_BUSINESS_ID || "";
+
+  const businessName =
+    process.env.ANAAI_TRIAL_BUSINESS_NAME || "";
+
+  if (
+    !configuredTwilioNumber ||
+    !businessId ||
+    !businessName
+  ) {
+    console.error(
+      "AnaAI trial business configuration is incomplete."
+    );
+
+    return null;
+  }
+
+  const normalizedCalledNumber =
+    normalizePhoneNumber(calledNumber);
+
+  const normalizedConfiguredNumber =
+    normalizePhoneNumber(configuredTwilioNumber);
+
+  if (
+    !normalizedCalledNumber ||
+    normalizedCalledNumber !== normalizedConfiguredNumber
+  ) {
+    console.warn(
+      "AnaAI voice request did not match the configured trial business number."
+    );
+
+    return null;
+  }
+
+  return {
+    businessId,
+    businessName: businessName.trim(),
+  };
+}
 
 function verifyTwilioWebhook({
   request,
@@ -87,7 +163,9 @@ function verifyTwilioWebhook({
   params: Record<string, string>;
 }): TwilioVerificationResult {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const signature = request.headers.get("x-twilio-signature");
+  const signature = request.headers.get(
+    "x-twilio-signature"
+  );
 
   if (!signature) {
     console.warn(
@@ -122,9 +200,12 @@ function verifyTwilioWebhook({
     );
 
     if (!isValid) {
-      console.warn("AnaAI rejected invalid Twilio signature.", {
-        validationUrl: publicUrl,
-      });
+      console.warn(
+        "AnaAI rejected invalid Twilio signature.",
+        {
+          validationUrl: publicUrl,
+        }
+      );
 
       return {
         allowed: false,
@@ -139,7 +220,10 @@ function verifyTwilioWebhook({
       reason: "verified",
     };
   } catch (error: unknown) {
-    console.error("Twilio signature validation error:", error);
+    console.error(
+      "Twilio signature validation error:",
+      error
+    );
 
     return {
       allowed: false,
@@ -151,7 +235,8 @@ function verifyTwilioWebhook({
 
 function addMainMenu(
   response: twilio.twiml.VoiceResponse,
-  request: Request
+  request: Request,
+  business: BusinessContext
 ) {
   const gather = response.gather({
     input: ["dtmf", "speech"],
@@ -168,11 +253,11 @@ function addMainMenu(
       voice: "alice",
     },
     [
-      "Hi, this is AnaAI from our business.",
+      `Hi, this is AnaAI from ${business.businessName}.`,
       "For appointments or rescheduling, press or say 1.",
       "For office hours and basic business information, press or say 2.",
-      "To speak with a representative, press or say 3.",
-      "To repeat this menu, press or say 4.",
+      "To transfer the call to a representative, press or say 3.",
+      "To repeat the menu, press or say 4.",
     ].join(" ")
   );
 
@@ -252,7 +337,10 @@ function addAppointmentTest(
 ) {
   const gather = response.gather({
     input: ["speech"],
-    action: getVoiceUrl(request, "appointment-test"),
+    action: getVoiceUrl(
+      request,
+      "appointment-test"
+    ),
     method: "POST",
     timeout: 6,
     speechTimeout: "auto",
@@ -263,14 +351,14 @@ function addAppointmentTest(
     {
       voice: "alice",
     },
-    "You selected appointments or rescheduling. What day and time would you like your appointment?"
+    "You selected appointments or rescheduling. What service would you like to schedule?"
   );
 
   response.say(
     {
       voice: "alice",
     },
-    "I didn't hear a date and time."
+    "I didn't hear a service."
   );
 
   response.redirect(
@@ -281,13 +369,29 @@ function addAppointmentTest(
   );
 }
 
+function addConfigurationError(
+  response: twilio.twiml.VoiceResponse
+) {
+  response.say(
+    {
+      voice: "alice",
+    },
+    "I'm sorry, AnaAI could not identify the business for this phone number."
+  );
+
+  response.hangup();
+}
+
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
-    const mode = url.searchParams.get("mode") || "";
+    const mode =
+      url.searchParams.get("mode") || "";
 
     const formData = await request.formData();
-    const twilioParams = formDataToTwilioParams(formData);
+
+    const twilioParams =
+      formDataToTwilioParams(formData);
 
     const verification = verifyTwilioWebhook({
       request,
@@ -298,25 +402,56 @@ export async function POST(request: Request) {
       return forbiddenResponse();
     }
 
-    const digits = String(formData.get("Digits") || "").trim();
+    const calledNumber = String(
+      formData.get("To") || ""
+    ).trim();
+
+    const business =
+      resolveTrialBusiness(calledNumber);
+
+    const response =
+      new twilio.twiml.VoiceResponse();
+
+    if (!business) {
+      addConfigurationError(response);
+
+      return twimlResponse(
+        response.toString()
+      );
+    }
+
+    const digits = String(
+      formData.get("Digits") || ""
+    ).trim();
 
     const speechResult = String(
       formData.get("SpeechResult") || ""
     ).trim();
 
-    console.log("AnaAI voice request accepted:", {
-      mode,
-      verifiedTwilioRequest: verification.verified,
-      verificationReason: verification.reason,
-      hasDigits: Boolean(digits),
-      hasSpeech: Boolean(speechResult),
-    });
-
-    const response = new twilio.twiml.VoiceResponse();
+    console.log(
+      "AnaAI voice request accepted:",
+      {
+        mode,
+        verifiedTwilioRequest:
+          verification.verified,
+        verificationReason:
+          verification.reason,
+        businessResolved: true,
+        hasDigits: Boolean(digits),
+        hasSpeech: Boolean(speechResult),
+      }
+    );
 
     if (!mode) {
-      addMainMenu(response, request);
-      return twimlResponse(response.toString());
+      addMainMenu(
+        response,
+        request,
+        business
+      );
+
+      return twimlResponse(
+        response.toString()
+      );
     }
 
     if (mode === "menu") {
@@ -326,8 +461,14 @@ export async function POST(request: Request) {
       });
 
       if (choice === "1") {
-        addAppointmentTest(response, request);
-        return twimlResponse(response.toString());
+        addAppointmentTest(
+          response,
+          request
+        );
+
+        return twimlResponse(
+          response.toString()
+        );
       }
 
       if (choice === "2") {
@@ -335,7 +476,7 @@ export async function POST(request: Request) {
           {
             voice: "alice",
           },
-          "You selected office hours and business information. This option is working. We will connect your real business information next."
+          `You selected office hours and business information for ${business.businessName}. This option is working. We will connect the real business information next.`
         );
 
         response.redirect(
@@ -345,7 +486,9 @@ export async function POST(request: Request) {
           getVoiceUrl(request)
         );
 
-        return twimlResponse(response.toString());
+        return twimlResponse(
+          response.toString()
+        );
       }
 
       if (choice === "3") {
@@ -353,7 +496,7 @@ export async function POST(request: Request) {
           {
             voice: "alice",
           },
-          "You selected transfer to a representative. Call transfer is not enabled yet. We will connect the representative number after testing the menu."
+          "You selected transfer to a representative. Call transfer is not enabled yet."
         );
 
         response.redirect(
@@ -363,12 +506,21 @@ export async function POST(request: Request) {
           getVoiceUrl(request)
         );
 
-        return twimlResponse(response.toString());
+        return twimlResponse(
+          response.toString()
+        );
       }
 
       if (choice === "4") {
-        addMainMenu(response, request);
-        return twimlResponse(response.toString());
+        addMainMenu(
+          response,
+          request,
+          business
+        );
+
+        return twimlResponse(
+          response.toString()
+        );
       }
 
       response.say(
@@ -378,9 +530,15 @@ export async function POST(request: Request) {
         "I'm sorry, I didn't understand your selection."
       );
 
-      addMainMenu(response, request);
+      addMainMenu(
+        response,
+        request,
+        business
+      );
 
-      return twimlResponse(response.toString());
+      return twimlResponse(
+        response.toString()
+      );
     }
 
     if (mode === "appointment-test") {
@@ -389,19 +547,24 @@ export async function POST(request: Request) {
           {
             voice: "alice",
           },
-          "I'm sorry, I didn't hear the date and time."
+          "I'm sorry, I didn't hear the service."
         );
 
-        addAppointmentTest(response, request);
+        addAppointmentTest(
+          response,
+          request
+        );
 
-        return twimlResponse(response.toString());
+        return twimlResponse(
+          response.toString()
+        );
       }
 
       response.say(
         {
           voice: "alice",
         },
-        `I heard ${speechResult}. The appointment menu is working. We have not booked anything yet.`
+        `I heard ${speechResult}. The appointment service-selection test is working. We have not booked anything yet.`
       );
 
       response.say(
@@ -411,18 +574,34 @@ export async function POST(request: Request) {
         "Returning to the main menu."
       );
 
-      addMainMenu(response, request);
+      addMainMenu(
+        response,
+        request,
+        business
+      );
 
-      return twimlResponse(response.toString());
+      return twimlResponse(
+        response.toString()
+      );
     }
 
-    addMainMenu(response, request);
+    addMainMenu(
+      response,
+      request,
+      business
+    );
 
-    return twimlResponse(response.toString());
+    return twimlResponse(
+      response.toString()
+    );
   } catch (error: unknown) {
-    console.error("AnaAI voice menu error:", error);
+    console.error(
+      "AnaAI voice menu error:",
+      error
+    );
 
-    const response = new twilio.twiml.VoiceResponse();
+    const response =
+      new twilio.twiml.VoiceResponse();
 
     response.say(
       {
@@ -431,14 +610,24 @@ export async function POST(request: Request) {
       "I'm sorry, AnaAI is having trouble responding right now. Please try again later."
     );
 
-    return twimlResponse(response.toString());
+    return twimlResponse(
+      response.toString()
+    );
   }
 }
 
 export async function GET(request: Request) {
-  const response = new twilio.twiml.VoiceResponse();
+  const response =
+    new twilio.twiml.VoiceResponse();
 
-  addMainMenu(response, request);
+  response.say(
+    {
+      voice: "alice",
+    },
+    "AnaAI voice service is online."
+  );
 
-  return twimlResponse(response.toString());
+  return twimlResponse(
+    response.toString()
+  );
 }
