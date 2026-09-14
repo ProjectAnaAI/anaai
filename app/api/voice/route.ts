@@ -21,8 +21,25 @@ function forbiddenResponse() {
   });
 }
 
+function getPublicRequestUrl(request: Request) {
+  const requestUrl = new URL(request.url);
+
+  const forwardedProto =
+    request.headers.get("x-forwarded-proto") ||
+    requestUrl.protocol.replace(":", "");
+
+  const forwardedHost =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    requestUrl.host;
+
+  return `${forwardedProto}://${forwardedHost}${requestUrl.pathname}${requestUrl.search}`;
+}
+
 function getVoiceUrl(request: Request, mode?: string) {
-  const url = new URL("/api/voice", request.url);
+  const publicRequestUrl = new URL(getPublicRequestUrl(request));
+
+  const url = new URL("/api/voice", publicRequestUrl.origin);
 
   if (mode) {
     url.searchParams.set("mode", mode);
@@ -65,15 +82,19 @@ function validateTwilioWebhook({
   }
 
   try {
+    const publicUrl = getPublicRequestUrl(request);
+
     const isValid = twilio.validateRequest(
       authToken,
       signature,
-      request.url,
+      publicUrl,
       params
     );
 
     if (!isValid) {
-      console.warn("AnaAI rejected invalid Twilio signature.");
+      console.warn("AnaAI rejected invalid Twilio signature.", {
+        validationUrl: publicUrl,
+      });
     }
 
     return isValid;
