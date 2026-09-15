@@ -1,25 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function SignUpPage() {
+  const router = useRouter();
+  const inFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   async function handleSignUp(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    if (error) {
-      alert(error.message);
-    } else {
-      alert("Account created! Check your email to verify your account.");
-    }
+    if (inFlight.current) return;
+    inFlight.current=true; setBusy(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({email,password});
+      if(error) setMessage("Unable to create account. Check your details and try again.");
+      else if(data.session) router.replace("/dashboard");
+      else setMessage("Check your email to verify your account, then log in to finish setup.");
+    } catch { setMessage("Unable to create account. Please try again."); }
+    finally { inFlight.current=false; setBusy(false); }
   }
 
   return (
@@ -61,12 +65,14 @@ export default function SignUpPage() {
           </div>
 
           <button
+            disabled={busy}
             type="submit"
             className="w-full rounded-lg bg-cyan-500 p-3 font-bold text-black hover:bg-cyan-400 transition"
           >
-            Create Account
+            {busy ? "Creating account..." : "Create Account"}
           </button>
         </form>
+        {message && <p role="status" className="mt-4">{message}</p>}
       </div>
     </main>
   );

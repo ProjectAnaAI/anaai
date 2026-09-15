@@ -38,6 +38,7 @@ export function BusinessSelector() {
 export default function ActiveBusinessProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const isOnboarding = pathname === "/onboarding";
   const isPublic = ["/", "/login", "/signup"].includes(pathname);
   const [userId, setUserId] = useState<string | null | undefined>(undefined);
   const [state, setState] = useState<{
@@ -76,7 +77,13 @@ export default function ActiveBusinessProvider({ children }: { children: React.R
         const ids = (memberships ?? [])
           .filter((membership) => ["owner", "manager", "staff"].includes(membership.role))
           .map((membership) => membership.business_id);
-        if (!ids.length) throw new Error("No business membership was found for this account.");
+        if (!memberships?.length) {
+          if (cancelled) return;
+          setState({ userId: currentUserId, businesses: [], businessId: null });
+          if (!isOnboarding) router.replace("/onboarding");
+          return;
+        }
+        if (!ids.length) throw new Error("Business access is unavailable.");
 
         const { data, error: businessError } = await supabase
           .from("businesses").select("id, name").in("id", ids).order("name");
@@ -90,17 +97,21 @@ export default function ActiveBusinessProvider({ children }: { children: React.R
         if (cancelled) return;
         setActiveBusinessId(businessId);
         setState({ userId: currentUserId, businesses, businessId });
-      } catch (error) {
-        if (!cancelled) setError(error instanceof Error ? error.message : "Unable to load businesses.");
+        if (isOnboarding) router.replace("/dashboard");
+      } catch {
+        if (!cancelled) setError("Unable to load business access. Please reload to try again.");
       }
     }
     void loadBusinesses();
     return () => { cancelled = true; };
-  }, [userId, isPublic, router]);
+  }, [userId, isPublic, isOnboarding, router]);
 
   if (isPublic) return <>{children}</>;
   if (error) return <main className="p-8"><p role="alert">{error}</p></main>;
   if (!state || state.userId !== userId) return <main className="p-8">Loading business...</main>;
+
+  if (!state.businesses.length) return isOnboarding ? <Fragment key={state.userId}>{children}</Fragment> : <main className="p-8">Opening setup...</main>;
+  if (isOnboarding) return <main className="p-8">Opening dashboard...</main>;
 
   function selectBusiness(id: string) {
     if (!state || !state.businesses.some((business) => business.id === id)) return;
