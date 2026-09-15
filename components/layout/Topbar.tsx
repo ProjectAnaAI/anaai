@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
+import { BusinessSelector } from "./ActiveBusinessProvider";
 import { Button } from "@/components/ui/button";
 
 export default function Topbar() {
@@ -37,6 +38,8 @@ export default function Topbar() {
           AnaAI
         </h2>
       </div>
+
+      <BusinessSelector />
 
       <Button
         variant="outline"
