@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppLayout from "@/components/layout/AppLayout";
+import { activeBusinessHeaders } from "@/lib/active-business";
+import { saveCustomer } from "@/lib/customer-mutations";
 import { supabase } from "@/lib/supabase";
 
 import { Button } from "@/components/ui/button";
@@ -47,6 +49,11 @@ export default function CustomersPage() {
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
+
   useEffect(() => {
     initializePage();
   }, []);
@@ -64,6 +71,7 @@ export default function CustomersPage() {
     const response = await fetch("/api/current-business", {
       method: "GET",
       headers: {
+        ...activeBusinessHeaders(),
         Authorization: `Bearer ${session.access_token}`,
       },
     });
@@ -129,37 +137,35 @@ export default function CustomersPage() {
       return;
     }
 
-    const trimmedFullName = fullName.trim();
-
-    if (!trimmedFullName) {
-      alert("Customer name is required.");
-      return;
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
+    try {
+      const customer = await saveCustomer(businessId, { name: fullName, phone, email, notes }, { id: editingId || undefined });
+      setCustomers(current => [customer, ...current.filter(item => item.id !== customer.id)]);
+      setFeedback(editingId ? "Customer updated." : "Customer created.");
+      setEditingId(null);
+      setFullName(""); setPhone(""); setEmail(""); setNotes("");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to save customer.");
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
     }
+  }
 
-    const { error } = await supabase.from("customers").insert({
-      business_id: businessId,
+  function editCustomer(customer: Customer) {
+    if (saveInFlight.current) return;
+    setEditingId(customer.id);
+    setFullName(customer.full_name); setPhone(customer.phone || "");
+    setEmail(customer.email || ""); setNotes(customer.notes || "");
+    setFeedback("");
+    document.getElementById("customer-editor")?.scrollIntoView({ behavior: "smooth" });
+  }
 
-      // Temporary compatibility during the user_id → business_id migration.
-      // We will remove this once AnaAI is fully business-scoped.
-      user_id: userId,
-
-      full_name: trimmedFullName,
-      phone: phone.trim() || null,
-      email: email.trim() || null,
-      notes: notes.trim() || null,
-    });
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setFullName("");
-    setPhone("");
-    setEmail("");
-    setNotes("");
-
-    await loadCustomers();
+  function cancelEdit() {
+    if (saveInFlight.current) return;
+    setEditingId(null); setFullName(""); setPhone(""); setEmail(""); setNotes(""); setFeedback("");
   }
 
   async function deleteCustomer(id: string) {
@@ -179,6 +185,7 @@ export default function CustomersPage() {
       return;
     }
 
+    if (editingId === id) cancelEdit();
     await loadCustomers();
   }
 
@@ -201,11 +208,12 @@ export default function CustomersPage() {
 
         <Card className="mt-8">
           <CardHeader>
-            <CardTitle>New customer</CardTitle>
+            <CardTitle>{editingId ? "Edit customer" : "New customer"}</CardTitle>
           </CardHeader>
 
           <CardContent>
-            <form onSubmit={handleSubmit}>
+            <form id="customer-editor" onSubmit={handleSubmit}>
+              <fieldset disabled={saving}>
               <div className="grid gap-4 md:grid-cols-2">
                 <Input
                   placeholder="Full name"
@@ -238,10 +246,13 @@ export default function CustomersPage() {
               <Button
                 type="submit"
                 className="mt-5"
-                disabled={!businessId || !userId}
+                disabled={saving || !businessId || !userId}
               >
-                Save customer
+                {saving ? "Saving..." : editingId ? "Save changes" : "Save customer"}
               </Button>
+              {editingId && <Button type="button" variant="outline" className="ml-2" onClick={cancelEdit}>Cancel</Button>}
+              </fieldset>
+              {feedback && <p role="status" className="mt-3 text-sm">{feedback}</p>}
             </form>
           </CardContent>
         </Card>
@@ -299,12 +310,16 @@ export default function CustomersPage() {
                       )}
                     </div>
 
+                    <div className="flex gap-2">
+                    <Button variant="outline" disabled={saving} onClick={() => editCustomer(customer)}>Edit</Button>
                     <Button
+                      disabled={saving}
                       variant="destructive"
                       onClick={() => deleteCustomer(customer.id)}
                     >
                       Delete
                     </Button>
+                    </div>
                   </div>
                 </div>
               ))}

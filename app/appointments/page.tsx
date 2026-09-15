@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { activeBusinessHeaders } from "@/lib/active-business";
+import { saveCustomer, normalizeCustomerPhone } from "@/lib/customer-mutations";
 import { supabase } from "@/lib/supabase";
 
 import AppLayout from "@/components/layout/AppLayout";
@@ -106,10 +107,6 @@ const emptyForm: AppointmentFormValues = {
 
 function normalizeCustomerName(value: string) {
   return value.trim().toLowerCase();
-}
-
-function normalizeCustomerPhone(value: string) {
-  return value.replace(/[^0-9]/g, "");
 }
 
 function findCustomerMatches(customers: Customer[], name: string, phone: string) {
@@ -275,6 +272,9 @@ export default function AppointmentsPage() {
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const createInFlight = useRef(false);
+
   const matchingCustomers = findCustomerMatches(customers, customerName, customerPhone);
   const selectedCreateCustomer = customers.find(
     (customer) => customer.id === createForm.customerId
@@ -288,6 +288,7 @@ export default function AppointmentsPage() {
   }
 
   function selectCreateCustomer(customer: Customer) {
+    setCustomerEmail(customer.email || "");
     setCustomerName(customer.full_name);
     setCustomerPhone(customer.phone || "");
     setCreateForm((current) => ({ ...current, customerId: customer.id }));
@@ -706,6 +707,7 @@ export default function AppointmentsPage() {
   }
 
   async function handleCreateAppointment() {
+    if (createInFlight.current) return;
     if (!businessId || !userId) {
       showNotice(
         "error",
@@ -714,7 +716,7 @@ export default function AppointmentsPage() {
       return;
     }
 
-    const selectedCustomer = customers.find(
+    let selectedCustomer = customers.find(
       (customer) => customer.id === createForm.customerId
     );
 
@@ -723,9 +725,9 @@ export default function AppointmentsPage() {
     );
 
     if (
-      !selectedCustomer ||
+      createForm.customerId && (!selectedCustomer ||
       normalizeCustomerName(customerName) !== normalizeCustomerName(selectedCustomer.full_name) ||
-      normalizeCustomerPhone(customerPhone) !== normalizeCustomerPhone(selectedCustomer.phone || "")
+      normalizeCustomerPhone(customerPhone) !== normalizeCustomerPhone(selectedCustomer.phone || ""))
     ) {
       showNotice("warning", "Please select an existing customer from the matches.");
       return;
@@ -752,9 +754,18 @@ export default function AppointmentsPage() {
       return;
     }
 
+    createInFlight.current = true;
     setSubmitting(true);
 
     try {
+      if (!selectedCustomer) {
+        selectedCustomer = await saveCustomer(businessId, { name: customerName, phone: customerPhone, email: customerEmail });
+        // Preserve selection even when booking fails, so retry never creates
+        // another customer. Editing identity explicitly clears this selection.
+        const savedCustomer = selectedCustomer;
+        setCustomers(current => [...current.filter(item => item.id !== savedCustomer.id), savedCustomer]);
+        selectCreateCustomer(savedCustomer);
+      }
       await sendAppointmentUpdate({
         creating: true,
         updates: {
@@ -770,10 +781,12 @@ export default function AppointmentsPage() {
       setCreateForm(emptyForm);
       setCustomerName("");
       setCustomerPhone("");
+      setCustomerEmail("");
       await loadAppointments();
     } catch (error) {
       showNotice("error", error instanceof Error ? error.message : "Could not create appointment.");
     } finally {
+      createInFlight.current = false;
       setSubmitting(false);
     }
   }
@@ -1073,15 +1086,17 @@ export default function AppointmentsPage() {
                   <label className="space-y-2 text-sm font-medium">
                     <span>Customer name</span>
                     <Input
+                      disabled={submitting}
                       value={customerName}
                       onChange={(event) => updateCustomerLookup("name", event.target.value)}
                       placeholder="Search by name"
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
-                    <span>Phone number</span>
+                    <span>Phone number (optional)</span>
                     <Input
                       type="tel"
+                      disabled={submitting}
                       value={customerPhone}
                       onChange={(event) => updateCustomerLookup("phone", event.target.value)}
                       placeholder="Search by phone number"
@@ -1097,10 +1112,10 @@ export default function AppointmentsPage() {
                   <div className="space-y-2 text-sm">
                     <p className="text-gray-600" role="status">
                       {matchingCustomers.length
-                        ? "Matching customers — select an existing customer below."
+                        ? "Matching customers — select one, or save as a new customer if this is someone else."
                         : customerName.trim() || customerPhone.trim()
-                        ? "No matching customers. Select an existing customer before saving; new customers cannot be created here yet."
-                        : "Search by name or phone, then select an existing customer before saving."}
+                        ? "New customer — created when you save the appointment."
+                        : "Enter a customer name. Phone and email are optional."}
                     </p>
                     {customerPhone.trim() && (
                       <p className="text-gray-500">Phone matches take priority. Clear the phone field to search by name.</p>
@@ -1110,6 +1125,7 @@ export default function AppointmentsPage() {
                         <button
                           key={customer.id}
                           type="button"
+                          disabled={submitting}
                           onClick={() => selectCreateCustomer(customer)}
                           className="block w-full rounded-lg border border-input px-3 py-2 text-left hover:bg-gray-50"
                         >
@@ -1120,6 +1136,10 @@ export default function AppointmentsPage() {
                     </div>
                   </div>
                 )}
+                <label className="block space-y-2 text-sm">
+                  <span>Email (optional)</span>
+                  <Input type="email" value={customerEmail} disabled={submitting || Boolean(selectedCreateCustomer)} onChange={event => setCustomerEmail(event.target.value)} />
+                </label>
               </div>
 
               <select
@@ -1191,7 +1211,7 @@ export default function AppointmentsPage() {
               className="mt-5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:opacity-50"
             >
               {submitting
-                ? "Checking availability..."
+                ? "Saving appointment..."
                 : "Save appointment"}
             </button>
           </CardContent>

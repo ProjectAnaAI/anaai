@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppLayout from "@/components/layout/AppLayout";
+import { activeBusinessHeaders } from "@/lib/active-business";
+import { validateService } from "@/lib/service-validation";
 import { supabase } from "@/lib/supabase";
 
 import { Button } from "@/components/ui/button";
@@ -48,6 +50,12 @@ export default function ServicesPage() {
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
 
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [active, setActive] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const saveInFlight = useRef(false);
+
   useEffect(() => {
     initializePage();
   }, []);
@@ -65,6 +73,7 @@ export default function ServicesPage() {
     const response = await fetch("/api/current-business", {
       method: "GET",
       headers: {
+        ...activeBusinessHeaders(),
         Authorization: `Bearer ${session.access_token}`,
       },
     });
@@ -132,40 +141,43 @@ export default function ServicesPage() {
       return;
     }
 
-    const trimmedName = name.trim();
-
-    if (!trimmedName) {
-      alert("Service name is required.");
-      return;
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
+    setFeedback("");
+    try {
+      if (activeBusinessHeaders()["x-anaai-business-id"] !== businessId) throw new Error("Business context changed. Reload and try again.");
+      const values = validateService({ name, duration: durationMinutes, price, description, active });
+      // Existing durations define booked intervals. Never rewrite them via editing.
+      const { duration_minutes, ...editableValues } = values;
+      const query = editingId
+        ? supabase.from("services").update(editableValues).eq("id", editingId).eq("business_id", businessId)
+        : supabase.from("services").insert({ ...values, business_id: businessId, user_id: userId });
+      const { data, error } = await query.select("id, name, duration_minutes, price, description, is_active").single();
+      if (error || !data) throw new Error("Unable to save service. Refresh the list before retrying.");
+      setServices(current => [data, ...current.filter(item => item.id !== data.id)]);
+      setFeedback(editingId ? "Service updated." : "Service created.");
+      setEditingId(null); setName(""); setDurationMinutes(""); setPrice(""); setDescription(""); setActive(true);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to save service.");
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
     }
+  }
 
-    const { error } = await supabase.from("services").insert({
-      business_id: businessId,
+  function editService(service: Service) {
+    if (saveInFlight.current) return;
+    setEditingId(service.id); setName(service.name);
+    setDurationMinutes(service.duration_minutes == null ? "" : String(service.duration_minutes));
+    setPrice(service.price == null ? "" : String(service.price));
+    setDescription(service.description || ""); setActive(service.is_active); setFeedback("");
+    document.getElementById("service-editor")?.scrollIntoView({ behavior: "smooth" });
+  }
 
-      // Temporary compatibility during the user_id → business_id migration.
-      // We will remove this after every AnaAI feature is business-scoped.
-      user_id: userId,
-
-      name: trimmedName,
-      duration_minutes: durationMinutes
-        ? Number(durationMinutes)
-        : null,
-      price: price ? Number(price) : null,
-      description: description.trim() || null,
-      is_active: true,
-    });
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setName("");
-    setDurationMinutes("");
-    setPrice("");
-    setDescription("");
-
-    await loadServices();
+  function cancelEdit() {
+    if (saveInFlight.current) return;
+    setEditingId(null); setName(""); setDurationMinutes(""); setPrice(""); setDescription(""); setActive(true); setFeedback("");
   }
 
   async function deleteService(id: string) {
@@ -185,6 +197,7 @@ export default function ServicesPage() {
       return;
     }
 
+    if (editingId === id) cancelEdit();
     await loadServices();
   }
 
@@ -207,11 +220,12 @@ export default function ServicesPage() {
 
         <Card className="mt-8">
           <CardHeader>
-            <CardTitle>New service</CardTitle>
+            <CardTitle>{editingId ? "Edit service" : "New service"}</CardTitle>
           </CardHeader>
 
           <CardContent>
-            <form onSubmit={handleSubmit}>
+            <form id="service-editor" onSubmit={handleSubmit}>
+              <fieldset disabled={saving}>
               <div className="grid gap-4 md:grid-cols-3">
                 <Input
                   placeholder="Service name"
@@ -223,6 +237,7 @@ export default function ServicesPage() {
                 <Input
                   type="number"
                   min="1"
+                  readOnly={Boolean(editingId)}
                   placeholder="Duration in minutes"
                   value={durationMinutes}
                   onChange={(e) => setDurationMinutes(e.target.value)}
@@ -238,6 +253,10 @@ export default function ServicesPage() {
                 />
               </div>
 
+              {editingId && <p className="mt-3 text-sm text-gray-500">Duration is read-only to preserve existing appointment times. Create a new service for a different duration.</p>}
+              <label className="mt-3 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={active} onChange={event => setActive(event.target.checked)} /> Active
+              </label>
               <Textarea
                 className="mt-4"
                 placeholder="Service description"
@@ -248,10 +267,13 @@ export default function ServicesPage() {
               <Button
                 type="submit"
                 className="mt-5"
-                disabled={!businessId || !userId}
+                disabled={saving || !businessId || !userId}
               >
-                Save service
+                {saving ? "Saving..." : editingId ? "Save changes" : "Save service"}
               </Button>
+              {editingId && <Button type="button" variant="outline" className="ml-2" onClick={cancelEdit}>Cancel</Button>}
+              </fieldset>
+              {feedback && <p role="status" className="mt-3 text-sm">{feedback}</p>}
             </form>
           </CardContent>
         </Card>
@@ -320,12 +342,16 @@ export default function ServicesPage() {
                       )}
                     </div>
 
+                    <div className="flex gap-2">
+                    <Button variant="outline" disabled={saving} onClick={() => editService(service)}>Edit</Button>
                     <Button
+                      disabled={saving}
                       variant="destructive"
                       onClick={() => deleteService(service.id)}
                     >
                       Delete
                     </Button>
+                    </div>
                   </div>
                 </div>
               ))}
