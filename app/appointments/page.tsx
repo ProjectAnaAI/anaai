@@ -104,6 +104,36 @@ const emptyForm: AppointmentFormValues = {
   notes: "",
 };
 
+function normalizeCustomerName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeCustomerPhone(value: string) {
+  return value.replace(/[^0-9]/g, "");
+}
+
+function findCustomerMatches(customers: Customer[], name: string, phone: string) {
+  const normalizedName = normalizeCustomerName(name);
+  const normalizedPhone = normalizeCustomerPhone(phone);
+
+  // Phone takes precedence over names; never infer identity from a name alone.
+  if (phone.trim()) {
+    if (!normalizedPhone) return [];
+    const exactMatches = customers.filter(
+      (customer) => normalizeCustomerPhone(customer.phone || "") === normalizedPhone
+    );
+    if (exactMatches.length) return exactMatches;
+    return customers.filter((customer) =>
+      normalizeCustomerPhone(customer.phone || "").includes(normalizedPhone)
+    );
+  }
+
+  if (!normalizedName) return [];
+  return customers.filter((customer) =>
+    normalizeCustomerName(customer.full_name).includes(normalizedName)
+  );
+}
+
 function normalizeTime(value: string | null) {
   if (!value) {
     return "";
@@ -242,6 +272,26 @@ export default function AppointmentsPage() {
 
   const [createForm, setCreateForm] =
     useState<AppointmentFormValues>(emptyForm);
+
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const matchingCustomers = findCustomerMatches(customers, customerName, customerPhone);
+  const selectedCreateCustomer = customers.find(
+    (customer) => customer.id === createForm.customerId
+  );
+
+  function updateCustomerLookup(field: "name" | "phone", value: string) {
+    if (field === "name") setCustomerName(value);
+    else setCustomerPhone(value);
+    // Require explicit selection again after editing either identity field.
+    setCreateForm((current) => ({ ...current, customerId: "" }));
+  }
+
+  function selectCreateCustomer(customer: Customer) {
+    setCustomerName(customer.full_name);
+    setCustomerPhone(customer.phone || "");
+    setCreateForm((current) => ({ ...current, customerId: customer.id }));
+  }
 
   const [editingAppointmentId, setEditingAppointmentId] =
     useState<string | null>(null);
@@ -670,8 +720,12 @@ export default function AppointmentsPage() {
       (service) => service.id === createForm.serviceId
     );
 
-    if (!selectedCustomer) {
-      showNotice("warning", "Please select a customer.");
+    if (
+      !selectedCustomer ||
+      normalizeCustomerName(customerName) !== normalizeCustomerName(selectedCustomer.full_name) ||
+      normalizeCustomerPhone(customerPhone) !== normalizeCustomerPhone(selectedCustomer.phone || "")
+    ) {
+      showNotice("warning", "Please select an existing customer from the matches.");
       return;
     }
 
@@ -746,6 +800,8 @@ export default function AppointmentsPage() {
     );
 
     setCreateForm(emptyForm);
+    setCustomerName("");
+    setCustomerPhone("");
 
     await loadAppointments();
   }
@@ -1058,27 +1114,59 @@ export default function AppointmentsPage() {
 
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2">
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
-                value={createForm.customerId}
-                onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    customerId: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Select customer</option>
-
-                {customers.map((customer) => (
-                  <option
-                    key={customer.id}
-                    value={customer.id}
-                  >
-                    {customer.full_name}
-                  </option>
-                ))}
-              </select>
+              <div className="space-y-4 md:col-span-2">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="space-y-2 text-sm font-medium">
+                    <span>Customer name</span>
+                    <Input
+                      value={customerName}
+                      onChange={(event) => updateCustomerLookup("name", event.target.value)}
+                      placeholder="Search by name"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    <span>Phone number</span>
+                    <Input
+                      type="tel"
+                      value={customerPhone}
+                      onChange={(event) => updateCustomerLookup("phone", event.target.value)}
+                      placeholder="Search by phone number"
+                    />
+                  </label>
+                </div>
+                {selectedCreateCustomer ? (
+                  <p role="status" className="text-sm text-green-700">
+                    Existing customer selected: {selectedCreateCustomer.full_name}
+                    {" — "}{selectedCreateCustomer.phone || "No phone number"}
+                  </p>
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    <p className="text-gray-600" role="status">
+                      {matchingCustomers.length
+                        ? "Matching customers — select an existing customer below."
+                        : customerName.trim() || customerPhone.trim()
+                        ? "No matching customers. Select an existing customer before saving; new customers cannot be created here yet."
+                        : "Search by name or phone, then select an existing customer before saving."}
+                    </p>
+                    {customerPhone.trim() && (
+                      <p className="text-gray-500">Phone matches take priority. Clear the phone field to search by name.</p>
+                    )}
+                    <div className="max-h-48 space-y-2 overflow-y-auto">
+                      {matchingCustomers.map((customer) => (
+                        <button
+                          key={customer.id}
+                          type="button"
+                          onClick={() => selectCreateCustomer(customer)}
+                          className="block w-full rounded-lg border border-input px-3 py-2 text-left hover:bg-gray-50"
+                        >
+                          {customer.full_name}{" — "}{customer.phone || "No phone number"}
+                          {customer.email ? ` · ${customer.email}` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <select
                 className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
