@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 import { resolveBusinessContext } from "@/lib/business-context";
@@ -147,7 +147,79 @@ function buildSms({
   ].join("\n");
 }
 
+const schedulingErrors: Record<string, [number, string]> = {
+  UNAUTHORIZED: [401, "Please log in again."],
+  FORBIDDEN: [403, "Business access is not available."],
+  INVALID_CUSTOMER: [400, "Customer reference is not available for this business."],
+  INVALID_SERVICE: [400, "Select an active service available for this business."],
+  INVALID_DURATION: [400, "The service does not have a valid duration."],
+  INVALID_SCHEDULE: [400, "Select a valid appointment date and time."],
+  INVALID_HOURS: [400, "Business hours are not configured correctly."],
+  CLOSED: [409, "The business is closed on the selected day."],
+  OUTSIDE_HOURS: [409, "The appointment must fit within business hours."],
+  SOURCE_DATE_CHANGED: [409, "This appointment was moved by another request. Refresh and try again."],
+  SLOT_CONFLICT: [409, "That time is no longer available. Please choose another time."],
+  INVALID_EXISTING_SCHEDULE: [409, "The calendar contains an appointment that cannot be safely checked."],
+  APPOINTMENT_NOT_FOUND: [404, "Appointment not found."],
+  TERMINAL_APPOINTMENT: [409, "Only Booked or Confirmed appointments can be rescheduled."],
+};
+
+async function runAtomicScheduling(
+  supabase: SupabaseClient,
+  businessId: string,
+  body: AppointmentUpdateBody,
+  appointmentId?: string
+): Promise<{ response: NextResponse } | { appointment: ExistingAppointment }> {
+  const ids: Record<string, string> = {};
+  for (const [camel, snake] of [["customerId", "customer_id"], ["serviceId", "service_id"]] as const) {
+    const values = [body[camel], body[snake]].filter((value) => value !== undefined);
+    if (!values.length || values.some((value) => typeof value !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())) ||
+      values.some((value) => value!.trim().toLowerCase() !== values[0]!.trim().toLowerCase())) {
+      return { response: NextResponse.json({ error: "Select valid customer and service references." }, { status: 400 }) };
+    }
+    ids[snake] = values[0]!.trim();
+  }
+  if (typeof body.appointmentDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.appointmentDate) ||
+      typeof body.appointmentTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(body.appointmentTime) ||
+      (body.notes !== undefined && body.notes !== null && typeof body.notes !== "string") ||
+      body.status !== undefined) {
+    return { response: NextResponse.json({ error: "Provide a valid schedule and notes without a status change." }, { status: 400 }) };
+  }
+  const { data, error } = await supabase.rpc(
+    appointmentId ? "reschedule_appointment_atomic_business" : "create_appointment_atomic_business",
+    {
+      p_business_id: businessId,
+      ...(appointmentId ? { p_appointment_id: appointmentId } : {}),
+      p_customer_id: ids.customer_id,
+      p_service_id: ids.service_id,
+      p_appointment_date: body.appointmentDate,
+      p_appointment_time: body.appointmentTime,
+      p_notes: body.notes?.trim() || null,
+    }
+  );
+  if (error || data?.success !== true || !data?.appointment?.id) {
+    const safeFailure = !error && data?.success === false && schedulingErrors[data.code];
+    const schedulingRpcCode = typeof data?.code === "string" && (
+      Object.prototype.hasOwnProperty.call(schedulingErrors, data.code) ||
+      ["INTERNAL_ERROR", "UNSUPPORTED_ISOLATION"].includes(data.code)
+    ) ? data.code : "INTERNAL_ERROR";
+    if (!safeFailure) console.error({ schedulingRpcCode });
+    const [status, message]: [number, string] = safeFailure || [500, "Unable to save the appointment. Check your appointments before retrying."];
+    return { response: NextResponse.json({ success: false, error: message }, { status }) };
+  }
+  return { appointment: data.appointment as ExistingAppointment };
+}
+
+export async function POST(request: Request) {
+  return handleAppointmentRequest(request, true);
+}
+
 export async function PATCH(request: Request) {
+  return handleAppointmentRequest(request, false);
+}
+
+async function handleAppointmentRequest(request: Request, creating: boolean) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -226,9 +298,22 @@ export async function PATCH(request: Request) {
       },
     });
 
-    const body = (await request.json()) as AppointmentUpdateBody;
+    let body: AppointmentUpdateBody;
+    try {
+      body = await request.json();
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid body");
+    } catch {
+      return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    }
 
-    const appointmentId = body.appointmentId?.trim();
+    if (creating) {
+      const result = await runAtomicScheduling(supabase, businessId, body);
+      if ("response" in result) return result.response;
+      // Manual creation retains its current no-SMS behavior.
+      return NextResponse.json({ success: true, appointment: result.appointment, sms_sent: false });
+    }
+
+    const appointmentId = typeof body.appointmentId === "string" ? body.appointmentId.trim() : "";
 
     if (!appointmentId) {
       return NextResponse.json(
@@ -275,142 +360,37 @@ export async function PATCH(request: Request) {
 
     const existing = existingData as ExistingAppointment;
 
-    const updates: Record<string, string | null> = {};
-
-    // Validate every supplied alias before applying any appointment changes.
-    for (const [camelKey, snakeKey, table, label] of [
-      ["customerId", "customer_id", "customers", "Customer"],
-      ["serviceId", "service_id", "services", "Service"],
-    ] as const) {
-      const suppliedKeys = [camelKey, snakeKey].filter((key) =>
-        Object.prototype.hasOwnProperty.call(body, key)
-      );
-
-      if (suppliedKeys.length === 0) continue;
-
-      const ids: string[] = [];
-      for (const key of suppliedKeys) {
+    const schedulingChange = ["customerId", "customer_id", "serviceId", "service_id", "appointmentDate", "appointmentTime"]
+      .some((key) => Object.prototype.hasOwnProperty.call(body, key));
+    let updatedData: ExistingAppointment;
+    if (schedulingChange) {
+      const result = await runAtomicScheduling(supabase, businessId, body, appointmentId);
+      if ("response" in result) return result.response;
+      updatedData = result.appointment;
+    } else {
+      // Existing confirmation/cancellation and metadata-only behavior.
+      const updates: Record<string, string | null> = {};
+      for (const [key, column] of [
+        ["customerName", "customer_name"], ["customerPhone", "customer_phone"],
+        ["customerEmail", "customer_email"], ["service", "service"],
+        ["notes", "notes"], ["status", "status"],
+      ] as const) {
         const value = body[key];
-        if (
-          typeof value !== "string" ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
-        ) {
-          return NextResponse.json(
-            { error: `${label} reference must be a valid UUID.` },
-            { status: 400 }
-          );
-        }
-        ids.push(value.trim().toLowerCase());
+        if (typeof value === "string") updates[column] = ["customerPhone", "customerEmail", "notes"].includes(key) ? value.trim() || null : value.trim();
+        else if (value === null && ["customerPhone", "customerEmail", "notes"].includes(key)) updates[column] = null;
       }
-
-      if (ids.some((id) => id !== ids[0])) {
-        return NextResponse.json(
-          { error: `${label} reference aliases must match.` },
-          { status: 400 }
-        );
+      if (!Object.keys(updates).length) {
+        return NextResponse.json({ error: "No appointment changes were provided." }, { status: 400 });
       }
-
-      const referenceId = ids[0];
-      const { data: reference, error: referenceError } = await supabase
-        .from(table)
-        .select("id")
-        .eq("id", referenceId)
-        .eq("business_id", businessId)
-        .maybeSingle();
-
-      if (referenceError) {
-        console.error(`Appointment ${table} reference validation failed:`, referenceError);
-        return NextResponse.json(
-          { error: `Unable to validate ${label.toLowerCase()} reference.` },
-          { status: 500 }
-        );
+      const { data, error } = await supabase.from("appointments").update(updates)
+        .eq("id", appointmentId).eq("business_id", businessId)
+        .select("id, customer_name, customer_phone, customer_email, service, appointment_date, appointment_time, status")
+        .single();
+      if (error) {
+        console.error("Appointment update failed:", error);
+        return NextResponse.json({ error: "Unable to update the appointment. Please try again." }, { status: 500 });
       }
-
-      // Missing, inaccessible, and other-business rows have the same response.
-      if (!reference) {
-        return NextResponse.json(
-          { error: `${label} reference is not available for this business.` },
-          { status: 400 }
-        );
-      }
-
-      updates[snakeKey] = referenceId;
-    }
-
-    if (typeof body.customerName === "string") {
-      updates.customer_name = body.customerName.trim();
-    }
-
-    if (
-      typeof body.customerPhone === "string" ||
-      body.customerPhone === null
-    ) {
-      updates.customer_phone = body.customerPhone?.trim() || null;
-    }
-
-    if (
-      typeof body.customerEmail === "string" ||
-      body.customerEmail === null
-    ) {
-      updates.customer_email = body.customerEmail?.trim() || null;
-    }
-
-    if (typeof body.service === "string") {
-      updates.service = body.service.trim();
-    }
-
-    if (typeof body.appointmentDate === "string") {
-      updates.appointment_date = body.appointmentDate.trim();
-    }
-
-    if (typeof body.appointmentTime === "string") {
-      updates.appointment_time = normalizeTime(
-        body.appointmentTime.trim()
-      );
-    }
-
-    if (
-      typeof body.notes === "string" ||
-      body.notes === null
-    ) {
-      updates.notes = body.notes?.trim() || null;
-    }
-
-    if (typeof body.status === "string") {
-      updates.status = body.status.trim();
-    }
-
-    if (Object.keys(updates).length === 0) {
-      return NextResponse.json(
-        {
-          error: "No appointment changes were provided.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    const { data: updatedData, error: updateError } = await supabase
-      .from("appointments")
-      .update(updates)
-      .eq("id", appointmentId)
-      .eq("business_id", businessId)
-      .select(
-        "id, customer_name, customer_phone, customer_email, service, appointment_date, appointment_time, status"
-      )
-      .single();
-
-    if (updateError) {
-      console.error("Appointment update failed:", updateError);
-      return NextResponse.json(
-        {
-          error: "Unable to update the appointment. Please try again.",
-        },
-        {
-          status: 500,
-        }
-      );
+      updatedData = data as ExistingAppointment;
     }
 
     const notificationType = body.notificationType || "none";
@@ -418,80 +398,86 @@ export async function PATCH(request: Request) {
     let smsSent = false;
     let smsError: string | null = null;
 
-    if (
-      notificationType === "confirm" ||
-      notificationType === "reschedule" ||
-      notificationType === "cancel"
-    ) {
-      const customerPhone = updatedData.customer_phone?.trim();
+    try {
+      if (
+        notificationType === "confirm" ||
+        notificationType === "reschedule" ||
+        notificationType === "cancel"
+      ) {
+        const customerPhone = updatedData.customer_phone?.trim();
 
-      if (!customerPhone) {
-        smsError = "Customer phone number is missing.";
-      } else {
-        const { data: businessData, error: businessError } =
-          await supabase
-            .from("business_profiles")
-            .select("business_name, address")
-            .eq("business_id", businessId)
-            .order("created_at", {
-              ascending: false,
-            })
-            .limit(1)
-            .maybeSingle();
-
-        if (businessError) {
-          console.error(
-            "AnaAI business profile lookup failed during SMS:",
-            businessError
-          );
-        }
-
-        const businessName =
-          businessData?.business_name?.trim() ||
-          businessContextResult.context.businessName ||
-          "the business";
-
-        const smsBody = buildSms({
-          notificationType,
-          businessName,
-          businessAddress: businessData?.address?.trim() || null,
-          customerName:
-            updatedData.customer_name || existing.customer_name,
-          service: updatedData.service || existing.service,
-          appointmentDate:
-            updatedData.appointment_date ||
-            existing.appointment_date,
-          appointmentTime:
-            updatedData.appointment_time ||
-            existing.appointment_time,
-        });
-
-        const smsResult = await sendSms({
-          to: customerPhone,
-          body: smsBody,
-        });
-
-        if (smsResult.success) {
-          smsSent = true;
-
-          console.log("AnaAI appointment update SMS sent:", {
-            appointmentId,
-            notificationType,
-            messageSid: smsResult.messageSid,
-          });
+        if (!customerPhone) {
+          smsError = "Customer phone number is missing.";
         } else {
-          smsError = "The appointment was saved, but the SMS could not be sent.";
+          const { data: businessData, error: businessError } =
+            await supabase
+              .from("business_profiles")
+              .select("business_name, address")
+              .eq("business_id", businessId)
+              .order("created_at", {
+                ascending: false,
+              })
+              .limit(1)
+              .maybeSingle();
 
-          console.error(
-            "AnaAI appointment updated but SMS failed:",
-            {
+          if (businessError) {
+            console.error(
+              "AnaAI business profile lookup failed during SMS:",
+              businessError
+            );
+          }
+
+          const businessName =
+            businessData?.business_name?.trim() ||
+            businessContextResult.context.businessName ||
+            "the business";
+
+          const smsBody = buildSms({
+            notificationType,
+            businessName,
+            businessAddress: businessData?.address?.trim() || null,
+            customerName:
+              updatedData.customer_name || existing.customer_name,
+            service: updatedData.service || existing.service,
+            appointmentDate:
+              updatedData.appointment_date ||
+              existing.appointment_date,
+            appointmentTime:
+              updatedData.appointment_time ||
+              existing.appointment_time,
+          });
+
+          const smsResult = await sendSms({
+            to: customerPhone,
+            body: smsBody,
+          });
+
+          if (smsResult.success) {
+            smsSent = true;
+
+            console.log("AnaAI appointment update SMS sent:", {
               appointmentId,
               notificationType,
-              error: smsResult.error,
-            }
-          );
+              messageSid: smsResult.messageSid,
+            });
+          } else {
+            smsError = "The appointment was saved, but the SMS could not be sent.";
+
+            console.error(
+              "AnaAI appointment updated but SMS failed:",
+              {
+                appointmentId,
+                notificationType,
+                error: smsResult.error,
+              }
+            );
+          }
         }
       }
+
+    } catch (error) {
+      console.error("Appointment saved but notification failed:", error);
+      smsError = "The appointment was saved, but the SMS could not be sent.";
     }
 
     return NextResponse.json({

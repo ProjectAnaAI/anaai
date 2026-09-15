@@ -659,8 +659,10 @@ export default function AppointmentsPage() {
     appointmentId,
     updates,
     notificationType,
+    creating = false,
   }: {
-    appointmentId: string;
+    appointmentId?: string;
+    creating?: boolean;
     updates: Record<string, string | null>;
     notificationType:
       | "confirm"
@@ -677,7 +679,7 @@ export default function AppointmentsPage() {
     }
 
     const response = await fetch("/api/appointments", {
-      method: "PATCH",
+      method: creating ? "POST" : "PATCH",
       headers: {
         ...activeBusinessHeaders(),
         "x-anaai-business-id": businessId,
@@ -752,58 +754,28 @@ export default function AppointmentsPage() {
 
     setSubmitting(true);
 
-    const availability =
-      await validateAppointmentAvailability({
-        activeBusinessId: businessId,
-        serviceId: selectedService.id,
-        appointmentDate: createForm.appointmentDate,
-        appointmentTime: createForm.appointmentTime,
+    try {
+      await sendAppointmentUpdate({
+        creating: true,
+        updates: {
+          customerId: selectedCustomer.id,
+          serviceId: selectedService.id,
+          appointmentDate: createForm.appointmentDate,
+          appointmentTime: createForm.appointmentTime,
+          notes: createForm.notes.trim() || null,
+        },
+        notificationType: "none",
       });
-
-    if (!availability.valid) {
+      showNotice("success", "Appointment created successfully.");
+      setCreateForm(emptyForm);
+      setCustomerName("");
+      setCustomerPhone("");
+      await loadAppointments();
+    } catch (error) {
+      showNotice("error", error instanceof Error ? error.message : "Could not create appointment.");
+    } finally {
       setSubmitting(false);
-      showNotice("warning", availability.message);
-      return;
     }
-
-    const { error } = await supabase
-      .from("appointments")
-      .insert({
-        business_id: businessId,
-
-        // Temporary compatibility while the rest of AnaAI
-        // transitions from user_id to business_id.
-        user_id: userId,
-
-        customer_id: selectedCustomer.id,
-        service_id: selectedService.id,
-        customer_name: selectedCustomer.full_name,
-        customer_phone: selectedCustomer.phone,
-        customer_email: selectedCustomer.email,
-        service: selectedService.name,
-        appointment_date: createForm.appointmentDate,
-        appointment_time: createForm.appointmentTime,
-        notes: createForm.notes.trim() || null,
-        status: "Booked",
-      });
-
-    setSubmitting(false);
-
-    if (error) {
-      showNotice("error", error.message);
-      return;
-    }
-
-    showNotice(
-      "success",
-      "Appointment created successfully."
-    );
-
-    setCreateForm(emptyForm);
-    setCustomerName("");
-    setCustomerPhone("");
-
-    await loadAppointments();
   }
 
   function startEditingAppointment(
@@ -877,20 +849,6 @@ export default function AppointmentsPage() {
     setActionAppointmentId(appointment.id);
 
     try {
-      const availability =
-        await validateAppointmentAvailability({
-          activeBusinessId: businessId,
-          serviceId: selectedService.id,
-          appointmentDate: editForm.appointmentDate,
-          appointmentTime: editForm.appointmentTime,
-          excludeAppointmentId: appointment.id,
-        });
-
-      if (!availability.valid) {
-        showNotice("warning", availability.message);
-        return;
-      }
-
       const dateChanged =
         appointment.appointment_date !==
         editForm.appointmentDate;
@@ -910,10 +868,6 @@ export default function AppointmentsPage() {
         updates: {
           customerId: selectedCustomer.id,
           serviceId: selectedService.id,
-          customerName: selectedCustomer.full_name,
-          customerPhone: selectedCustomer.phone,
-          customerEmail: selectedCustomer.email,
-          service: selectedService.name,
           appointmentDate: editForm.appointmentDate,
           appointmentTime: editForm.appointmentTime,
           notes: editForm.notes.trim() || null,
