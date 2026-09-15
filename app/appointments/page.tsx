@@ -1,5 +1,6 @@
 "use client";
 
+import { createRequestKeyStore } from "@/lib/appointment-request-key";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -80,6 +81,7 @@ type AppointmentFormValues = {
 };
 
 type AppointmentUpdateResponse = {
+  message?: string;
   success?: boolean;
   error?: string;
   sms_sent?: boolean;
@@ -274,6 +276,8 @@ export default function AppointmentsPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const createInFlight = useRef(false);
+  const actionKeys = useRef(createRequestKeyStore());
+  const mutationInFlight = useRef(false);
 
   const matchingCustomers = findCustomerMatches(customers, customerName, customerPhone);
   const selectedCreateCustomer = customers.find(
@@ -679,9 +683,14 @@ export default function AppointmentsPage() {
       throw new Error("Your session has expired. Please log in again.");
     }
 
+    if (mutationInFlight.current) throw new Error("An appointment action is already in progress.");
+    mutationInFlight.current = true;
+    try {
+    const idempotencyKey = actionKeys.current.forRequest({ userId, businessId, creating, appointmentId, updates });
     const response = await fetch("/api/appointments", {
       method: creating ? "POST" : "PATCH",
       headers: {
+        "Idempotency-Key": idempotencyKey,
         ...activeBusinessHeaders(),
         "x-anaai-business-id": businessId,
         "Content-Type": "application/json",
@@ -703,7 +712,9 @@ export default function AppointmentsPage() {
       );
     }
 
+    actionKeys.current.clear();
     return result;
+    } finally { mutationInFlight.current = false; }
   }
 
   async function handleCreateAppointment() {
@@ -766,7 +777,7 @@ export default function AppointmentsPage() {
         setCustomers(current => [...current.filter(item => item.id !== savedCustomer.id), savedCustomer]);
         selectCreateCustomer(savedCustomer);
       }
-      await sendAppointmentUpdate({
+      const result = await sendAppointmentUpdate({
         creating: true,
         updates: {
           customerId: selectedCustomer.id,
@@ -777,7 +788,7 @@ export default function AppointmentsPage() {
         },
         notificationType: "none",
       });
-      showNotice("success", "Appointment created successfully.");
+      showNotice("success", result.message || "Appointment action succeeded.");
       setCreateForm(emptyForm);
       setCustomerName("");
       setCustomerPhone("");
@@ -890,22 +901,7 @@ export default function AppointmentsPage() {
           : "none",
       });
 
-      if (wasRescheduled && result.sms_sent) {
-        showNotice(
-          "success",
-          "Appointment rescheduled and customer SMS sent."
-        );
-      } else if (wasRescheduled && !result.sms_sent) {
-        showNotice(
-          "warning",
-          "Appointment rescheduled successfully, but the customer SMS could not be sent."
-        );
-      } else {
-        showNotice(
-          "success",
-          "Appointment updated successfully."
-        );
-      }
+      showNotice("success", result.message || "Appointment action succeeded.");
 
       setEditingAppointmentId(null);
       setEditForm(emptyForm);
@@ -934,35 +930,9 @@ export default function AppointmentsPage() {
       return;
     }
 
-    if (
-      !appointment.service_id ||
-      !appointment.appointment_date ||
-      !appointment.appointment_time
-    ) {
-      showNotice(
-        "warning",
-        "This appointment is missing scheduling information."
-      );
-      return;
-    }
-
     setActionAppointmentId(appointment.id);
 
     try {
-      const availability =
-        await validateAppointmentAvailability({
-          activeBusinessId: businessId,
-          serviceId: appointment.service_id,
-          appointmentDate: appointment.appointment_date,
-          appointmentTime: appointment.appointment_time,
-          excludeAppointmentId: appointment.id,
-        });
-
-      if (!availability.valid) {
-        showNotice("warning", availability.message);
-        return;
-      }
-
       const result = await sendAppointmentUpdate({
         appointmentId: appointment.id,
         updates: {
@@ -971,17 +941,7 @@ export default function AppointmentsPage() {
         notificationType: "confirm",
       });
 
-      if (result.sms_sent) {
-        showNotice(
-          "success",
-          "Appointment confirmed and customer SMS sent."
-        );
-      } else {
-        showNotice(
-          "warning",
-          "Appointment confirmed successfully, but the customer SMS could not be sent."
-        );
-      }
+      showNotice("success", result.message || "Appointment action succeeded.");
 
       await loadAppointments();
     } catch (error) {
@@ -1018,17 +978,7 @@ export default function AppointmentsPage() {
         notificationType: "cancel",
       });
 
-      if (result.sms_sent) {
-        showNotice(
-          "success",
-          "Appointment cancelled and customer SMS sent."
-        );
-      } else {
-        showNotice(
-          "warning",
-          "Appointment cancelled successfully, but the customer SMS could not be sent."
-        );
-      }
+      showNotice("success", result.message || "Appointment action succeeded.");
 
       await loadAppointments();
     } catch (error) {
@@ -1452,17 +1402,13 @@ export default function AppointmentsPage() {
                               }
                               disabled={
                                 actionInProgress ||
-                                appointment.status ===
-                                  "Cancelled"
+                                !["Booked", "Confirmed"].includes(appointment.status || "")
                               }
                             >
                               Reschedule
                             </Button>
 
-                            {appointment.status !==
-                              "Confirmed" &&
-                              appointment.status !==
-                                "Cancelled" && (
+                            {appointment.status === "Booked" && (
                                 <Button
                                   onClick={() =>
                                     confirmAppointment(
@@ -1476,8 +1422,7 @@ export default function AppointmentsPage() {
                                 </Button>
                               )}
 
-                            {appointment.status !==
-                              "Cancelled" && (
+                            {["Booked", "Confirmed"].includes(appointment.status || "") && (
                               <Button
                                 variant="outline"
                                 onClick={() =>

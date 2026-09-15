@@ -8,6 +8,7 @@ type SendSmsResult =
   | {
       success: false;
       error: string;
+      outcome?: "failed" | "uncertain";
     };
 
 function normalizePhoneNumber(phone: string) {
@@ -46,6 +47,7 @@ export async function sendSms({
 
     return {
       success: false,
+      outcome: "failed",
       error: "Twilio configuration is missing.",
     };
   }
@@ -53,6 +55,7 @@ export async function sendSms({
   if (!to.trim()) {
     return {
       success: false,
+      outcome: "failed",
       error: "SMS recipient phone number is missing.",
     };
   }
@@ -60,6 +63,7 @@ export async function sendSms({
   if (!body.trim()) {
     return {
       success: false,
+      outcome: "failed",
       error: "SMS message body is empty.",
     };
   }
@@ -88,12 +92,14 @@ export async function sendSms({
       return {
         success: false,
         error: "SMS provider request failed.",
+        outcome: "uncertain",
       };
     }
 
     return {
       success: false,
       error: "Unknown Twilio SMS error.",
+      outcome: "uncertain",
     };
   }
 }

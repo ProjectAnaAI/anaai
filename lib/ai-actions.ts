@@ -42,7 +42,7 @@ export function bookingReceipt(value:unknown, businessId:string, serviceId:strin
   return {success:true,appointment_id:value.appointment_id as string,customer_id:value.customer_id as string,business_id:value.business_id as string,service_id:value.service_id as string,service:value.service,date:value.date,time:value.time as string,status:'Booked'};
 }
 const noAction = 'No appointment change has been verified. To request a booking, provide your name, phone number, service, date and time. Rescheduling, confirmation and cancellation are not supported here.';
-export async function executeAiActions(output:unknown, preview:boolean, book:(input:BookingInput)=>Promise<{receipt?:BookingReceipt;sms_sent?:boolean;reason?:string}>, availability?:(args:{service_name:string;date:string;time:string})=>Promise<{available:boolean}>) {
+export async function executeAiActions(output:unknown, preview:boolean, book:(input:BookingInput)=>Promise<{receipt?:BookingReceipt;sms_sent?:boolean;replayed?:boolean;reason?:string;rejection?:BookingRejection}>, availability?:(args:{service_name:string;date:string;time:string})=>Promise<{available:boolean}>) {
   if (!Array.isArray(output)) return {reply:noAction, action:null};
   const calls = output.filter(item => record(item) && item.type === 'function_call');
   const bookings = calls.filter(call => call.name === 'book_appointment');
@@ -65,7 +65,44 @@ export async function executeAiActions(output:unknown, preview:boolean, book:(in
   try { args = bookingInput(JSON.parse(bookings[0].arguments)); } catch { /* Invalid tool arguments are not executable. */ }
   if (!args) return {reply:'Please check the booking details. No booking was attempted.', action:null};
   const result = await book(args);
+  if (result.rejection) return {reply:bookingRejectionReply(result.rejection),action:null,rejection:result.rejection};
   if (!result.receipt) return {reply:result.reason || 'Booking could not be verified. Check your appointments before retrying.', action:null};
   // No model-controlled or customer-controlled string is interpolated into prose.
-  return {reply:result.sms_sent ? 'Your appointment was booked successfully. A confirmation text was submitted for sending.' : 'Your appointment was booked successfully. A confirmation text was not sent.', action:{type:'booking',receipt:result.receipt,sms_sent:result.sms_sent === true}};
+  return {reply:result.replayed ? "The original booking succeeded. This retry made no new booking. Check appointments for its current state." : result.sms_sent ? 'Your appointment was booked successfully. A confirmation text was submitted for sending.' : 'Your appointment was booked successfully. Text confirmation status could not be verified.', action:{type:'booking',receipt:result.receipt,replayed:result.replayed===true,sms_sent:result.sms_sent === true}};
+}
+
+const bookingRejectionMessages: Record<string, string> = {
+  UNAUTHORIZED: 'Please log in again before booking.',
+  INVALID_REQUEST: 'Please check the booking request details.',
+  FORBIDDEN: 'Business access is not available for this booking.',
+  INVALID_CUSTOMER: 'Please check the customer name and phone number.',
+  INVALID_SERVICE: 'Please select an available service.',
+  INVALID_SCHEDULE: 'Please select a valid appointment date and time.',
+  INVALID_DURATION: 'The service duration is not configured correctly.',
+  INVALID_HOURS: 'Business hours are not configured correctly.',
+  CLOSED: 'The business is closed on the requested day.',
+  OUTSIDE_HOURS: 'The appointment must fit within business hours.',
+  INVALID_EXISTING_SCHEDULE: 'The calendar contains an appointment that cannot be safely checked.',
+  SLOT_CONFLICT: 'That time is no longer available. Please choose another time.',
+};
+export type BookingRejection = {
+  success: false; changed: false; action_id: string; action_type: 'book';
+  business_id: string; code: string; receipt_scope: 'action_outcome';
+  replayed: boolean; completed_at: string;
+};
+export function bookingRejection(value: unknown, businessId: string): BookingRejection | null {
+  if (!record(value) || value.success !== false || value.changed !== false ||
+      value.action_type !== 'book' || value.business_id !== businessId ||
+      typeof value.business_id !== 'string' || !uuid.test(value.business_id) ||
+      typeof value.action_id !== 'string' || !uuid.test(value.action_id) ||
+      value.receipt_scope !== 'action_outcome' || typeof value.replayed !== 'boolean' ||
+      typeof value.completed_at !== 'string' || !Number.isFinite(Date.parse(value.completed_at)) ||
+      typeof value.code !== 'string' || !Object.hasOwn(bookingRejectionMessages, value.code)) return null;
+  // Copy only validated fields; legacy/provider text cannot reach the response.
+  return {success:false,changed:false,action_id:value.action_id,action_type:'book',
+    business_id:value.business_id,code:value.code,receipt_scope:'action_outcome',
+    replayed:value.replayed,completed_at:value.completed_at};
+}
+export function bookingRejectionReply(receipt: BookingRejection) {
+  return `${receipt.replayed ? 'The original booking request was rejected. No new booking was attempted. ' : 'The appointment was not booked. '}${bookingRejectionMessages[receipt.code]}`;
 }

@@ -18,12 +18,14 @@ function harness({ code, rpcError, smsFails, smsThrows, denied } = {}) {
   let args, rpcName;
   const supabase = {
     rpc: async (name, params) => {
+      if(name==='claim_appointment_notification')return {data:rpcName && args.p_operation==='reschedule'?{claimed:true,id:appointmentId,token:customerId,kind:'reschedule',payload:{phone:'2025550100',date:body.appointmentDate,time:body.appointmentTime}}:{claimed:false}};
+      if(name==='finish_appointment_notification')return {data:true};
       events.push('rpc'); args = params; rpcName = name;
       if (rpcError) return { error: { message: 'SECRET SQL DETAILS' }, data: null };
       if (code) return { data: { success: false, code, reason: 'SECRET INTERNAL DETAILS' } };
-      stored = { ...stored, customer_name: 'Database customer', service: 'Database service', appointment_date: params.p_appointment_date, appointment_time: params.p_appointment_time };
+      stored = { ...stored, business_id:'44444444-4444-4444-4444-444444444444', customer_id:params.p_request.customer_id, service_id:params.p_request.service_id, status:params.p_operation==='manual_book'?'Booked':'Confirmed', customer_name: 'Database customer', service: 'Database service', appointment_date: params.p_request.date, appointment_time: params.p_request.time };
       events.push('commit');
-      return { data: { success: true, appointment: stored } };
+      return { data: { success: true, changed:true, replayed:false,action_id:appointmentId,action_type:params.p_operation==='manual_book'?'book':'reschedule', business_id:'44444444-4444-4444-4444-444444444444',appointment_id:appointmentId,receipt_scope:'action_outcome',code:'APPLIED',status:stored.status,appointment: stored } };
     },
     from: (table) => {
       const q = {};
@@ -37,7 +39,13 @@ function harness({ code, rpcError, smsFails, smsThrows, denied } = {}) {
   const context = { exports, Request, Response, console: { error() {}, log() {} }, process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://example.invalid', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'test' } }, require: (name) => {
     if (name === '@supabase/supabase-js') return { createClient: () => supabase };
     if (name === 'next/server') return { NextResponse: { json: (data, init) => Response.json(data, init) } };
-    if (name === '@/lib/business-context') return { resolveBusinessContext: async () => denied ? { success: false, status: 403, error: 'No access' } : { success: true, context: { businessId: 'resolved-business', businessName: 'Business' } } };
+    if (name === '@/lib/business-context') return { resolveBusinessContext: async () => denied ? { success: false, status: 403, error: 'No access' } : { success: true, context: { businessId: '44444444-4444-4444-4444-444444444444', businessName: 'Business' } } };
+    if (name === '@/lib/appointment-actions') {
+      const helper={}; const ai={};
+      vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/ai-actions.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:ai});
+      vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/appointment-actions.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:helper,require:n=>n==='node:crypto'?require(n):n==='./ai-actions'?ai:context.require('@/lib/twilio')});
+      return helper;
+    }
     if (name === '@/lib/twilio') return { sendSms: async () => {
       assert.ok(events.includes('commit'), 'SMS must follow successful RPC completion');
       events.push('sms'); if (smsThrows) throw new Error('SECRET TWILIO');
@@ -49,16 +57,16 @@ function harness({ code, rpcError, smsFails, smsThrows, denied } = {}) {
   return {
     events, original, stored: () => stored, args: () => args, rpcName: () => rpcName,
     call: async (method, extra = {}) => {
-      const response = await exports[method](new Request('https://example.invalid/api/appointments', { method, headers: { authorization: 'Bearer test', 'x-anaai-business-id': 'requested-business', 'content-type': 'application/json' }, body: JSON.stringify({ ...body, ...(method === 'PATCH' ? { appointmentId, notificationType: 'reschedule' } : {}), ...extra }) }));
+      const response = await exports[method](new Request('https://example.invalid/api/appointments', { method, headers: { authorization: 'Bearer test', 'idempotency-key':customerId, 'x-anaai-business-id': 'requested-business', 'content-type': 'application/json' }, body: JSON.stringify({ ...body, ...(method === 'PATCH' ? { appointmentId, notificationType: 'reschedule' } : {}), ...extra }) }));
       return { status: response.status, body: await response.json() };
     },
   };
 }
 test('manual create uses RPC, resolved business, selected IDs, no snapshots or SMS', async () => {
   const h = harness(); const r = await h.call('POST', { business_id: 'forged', customerName: 'forged' });
-  assert.equal(r.body.success, true); assert.equal(h.rpcName(), 'create_appointment_atomic_business');
-  assert.equal(h.args().p_business_id, 'resolved-business'); assert.equal(h.args().p_customer_id, customerId);
-  assert.equal(h.args().p_customer_name, undefined); assert.equal(h.args().p_notes, 'notes');
+  assert.equal(r.body.success, true); assert.equal(h.rpcName(), 'schedule_appointment_idempotent_business');
+  assert.equal(h.args().p_business_id, '44444444-4444-4444-4444-444444444444'); assert.equal(h.args().p_request.customer_id, customerId);
+  assert.equal(h.args().p_customer_name, undefined); assert.equal(h.args().p_request.notes, 'notes');
   assert.deepEqual(h.events, ['rpc', 'commit']);
 });
 for (const [code, status] of Object.entries({ SLOT_CONFLICT:409, INVALID_CUSTOMER:400, INVALID_SERVICE:400, INVALID_DURATION:400, CLOSED:409, OUTSIDE_HOURS:409, INVALID_HOURS:400, INVALID_EXISTING_SCHEDULE:409 })) {
@@ -71,8 +79,8 @@ for (const [code, status] of Object.entries({ SLOT_CONFLICT:409, INVALID_CUSTOME
 test('reschedule commits before SMS and uses explicit appointment ID', async () => {
   const h=harness(); const r=await h.call('PATCH');
   assert.equal(r.body.success,true); assert.equal(r.body.sms_sent,true);
-  assert.equal(h.rpcName(),'reschedule_appointment_atomic_business');
-  assert.equal(h.args().p_appointment_id,appointmentId); assert.deepEqual(h.events,['rpc','commit','sms']);
+  assert.equal(h.rpcName(),'schedule_appointment_idempotent_business');
+  assert.equal(h.args().p_request.appointment_id,appointmentId); assert.deepEqual(h.events,['rpc','commit','sms']);
 });
 for (const code of ['SLOT_CONFLICT','SOURCE_DATE_CHANGED','TERMINAL_APPOINTMENT','INVALID_CUSTOMER','INVALID_SERVICE']) {
   test(`rejected reschedule ${code} does not fall back to a write or send SMS`,async()=>{
