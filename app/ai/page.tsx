@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 
 import AppLayout from "@/components/layout/AppLayout";
+import { activeBusinessHeaders } from "@/lib/active-business";
 import { supabase } from "@/lib/supabase";
 
 type KnowledgeItem = {
@@ -40,6 +41,8 @@ export default function AIReceptionistPage() {
   const [testMessage, setTestMessage] = useState("");
   const [aiReply, setAiReply] = useState("");
 
+  const [businessId, setBusinessId] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -53,7 +56,7 @@ export default function AIReceptionistPage() {
         } = await supabase.auth.getSession();
 
         if (sessionError) {
-          console.error("Session error:", sessionError);
+          console.error("AnaAI client request diagnostic.");
           toast.error("Unable to read your login session.");
           router.push("/login");
           return;
@@ -64,7 +67,16 @@ export default function AIReceptionistPage() {
           return;
         }
 
-        const user = session.user;
+        const response = await fetch("/api/current-business", {
+          headers: { ...activeBusinessHeaders(), Authorization: `Bearer ${session.access_token}` },
+        });
+        const context = await response.json();
+
+        if (!response.ok || !context.success || !context.business?.id) {
+          throw new Error(context.error || "Unable to resolve your business.");
+        }
+
+        const activeBusinessId = context.business.id;
 
         const [settingsResult, knowledgeResult] = await Promise.all([
           supabase
@@ -72,35 +84,20 @@ export default function AIReceptionistPage() {
             .select(
               "receptionist_name, greeting, tone, custom_instructions, transfer_instructions"
             )
-            .eq("user_id", user.id)
+            .eq("business_id", activeBusinessId)
             .maybeSingle(),
 
           supabase
             .from("business_knowledge")
             .select("id, category, question, answer")
-            .eq("user_id", user.id)
+            .eq("business_id", activeBusinessId)
             .order("created_at", {
               ascending: false,
             }),
         ]);
 
-        if (settingsResult.error) {
-          console.error(
-            "AI settings load error:",
-            settingsResult.error
-          );
-
-          toast.error(settingsResult.error.message);
-        }
-
-        if (knowledgeResult.error) {
-          console.error(
-            "Knowledge load error:",
-            knowledgeResult.error
-          );
-
-          toast.error(knowledgeResult.error.message);
-        }
+        if (settingsResult.error) throw new Error(settingsResult.error.message);
+        if (knowledgeResult.error) throw new Error(knowledgeResult.error.message);
 
         const settings = settingsResult.data;
 
@@ -132,6 +129,11 @@ export default function AIReceptionistPage() {
 
         setKnowledgeItems(items);
         setKnowledgeCount(items.length);
+        setBusinessId(activeBusinessId);
+      } catch (error) {
+        setBusinessId(null);
+        console.error("AnaAI client request diagnostic.");
+        toast.error(error instanceof Error ? error.message : "Unable to load AI settings.");
       } finally {
         setLoading(false);
       }
@@ -147,7 +149,7 @@ export default function AIReceptionistPage() {
     } = await supabase.auth.getSession();
 
     if (error) {
-      console.error("getSession error:", error);
+      console.error("AnaAI client request diagnostic.");
       return null;
     }
 
@@ -161,10 +163,7 @@ export default function AIReceptionistPage() {
     } = await supabase.auth.refreshSession();
 
     if (refreshError) {
-      console.error(
-        "refreshSession error:",
-        refreshError
-      );
+      console.error("AnaAI client request diagnostic.");
 
       return null;
     }
@@ -173,6 +172,11 @@ export default function AIReceptionistPage() {
   }
 
   async function handleAskAI() {
+    if (loading || !businessId) {
+      toast.error("Business context is unavailable. Please reload the page.");
+      return;
+    }
+
     const message = testMessage.trim();
 
     if (!message) {
@@ -198,30 +202,24 @@ export default function AIReceptionistPage() {
         return;
       }
 
-      console.log(
-        "AnaAI authenticated request:",
-        Boolean(accessToken)
-      );
-
       const response = await fetch("/api/ai", {
         method: "POST",
         headers: {
+          ...activeBusinessHeaders(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
+          "x-anaai-business-id": businessId,
         },
         body: JSON.stringify({
           message,
+          mode: "preview",
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        console.error(
-          "AnaAI API response:",
-          response.status,
-          data
-        );
+        console.error("AnaAI client request diagnostic.");
 
         if (response.status === 401) {
           toast.error(
@@ -243,10 +241,7 @@ export default function AIReceptionistPage() {
           "AnaAI did not return a response."
       );
     } catch (error) {
-      console.error(
-        "Ask AnaAI error:",
-        error
-      );
+      console.error("AnaAI client request diagnostic.");
 
       const message =
         error instanceof Error
@@ -260,6 +255,11 @@ export default function AIReceptionistPage() {
   }
 
   async function handleSave() {
+    if (loading || !businessId) {
+      toast.error("Business context is unavailable. Please reload the page.");
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -277,39 +277,47 @@ export default function AIReceptionistPage() {
         return;
       }
 
-      const { error } = await supabase
+      const { data: existingSettings, error: lookupError } = await supabase
         .from("ai_settings")
-        .upsert(
-          {
+        .select("id")
+        .eq("business_id", businessId)
+        .maybeSingle();
+
+      if (lookupError) throw new Error(lookupError.message);
+
+      const settings = {
+        receptionist_name: receptionistName.trim() || "Ana",
+        greeting: greeting.trim(),
+        tone,
+        custom_instructions: instructions.trim(),
+        transfer_instructions: transferInstructions.trim(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = existingSettings
+        ? await supabase
+            .from("ai_settings")
+            .update(settings)
+            .eq("id", existingSettings.id)
+            .eq("business_id", businessId)
+            .select("id")
+            .single()
+        : await supabase.from("ai_settings").insert({
+            ...settings,
+            business_id: businessId,
+            // Retain user_id for compatibility during the migration.
             user_id: user.id,
-            receptionist_name:
-              receptionistName.trim() || "Ana",
-            greeting: greeting.trim(),
-            tone,
-            custom_instructions:
-              instructions.trim(),
-            transfer_instructions:
-              transferInstructions.trim(),
-            updated_at:
-              new Date().toISOString(),
-          },
-          {
-            onConflict: "user_id",
-          }
-        );
+          });
 
       if (error) {
-        throw error;
+        throw new Error(error.message);
       }
 
       toast.success(
         "AI receptionist settings saved."
       );
     } catch (error) {
-      console.error(
-        "Save AI settings error:",
-        error
-      );
+      console.error("AnaAI client request diagnostic.");
 
       toast.error(
         error instanceof Error
@@ -398,6 +406,7 @@ export default function AIReceptionistPage() {
                     </label>
 
                     <textarea
+                      aria-description="Preview only: does not book appointments or send SMS."
                       value={testMessage}
                       onChange={(event) =>
                         setTestMessage(
@@ -410,6 +419,7 @@ export default function AIReceptionistPage() {
                       className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 leading-7 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100"
                     />
 
+                    <p className="mt-2 text-xs text-gray-500">Preview only: no appointments are created or changed, and no SMS is sent.</p>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-gray-400">
                         Enter sends. Shift + Enter adds
@@ -422,6 +432,7 @@ export default function AIReceptionistPage() {
                           void handleAskAI()
                         }
                         disabled={
+                          loading || !businessId ||
                           asking ||
                           !testMessage.trim()
                         }
@@ -597,7 +608,7 @@ export default function AIReceptionistPage() {
                   onClick={() =>
                     void handleSave()
                   }
-                  disabled={saving}
+                  disabled={saving || loading || !businessId}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3.5 font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:opacity-50"
                 >
                   <Save className="h-5 w-5" />

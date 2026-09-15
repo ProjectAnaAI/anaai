@@ -42,7 +42,7 @@ export async function sendSms({
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
   if (!accountSid || !authToken || !fromNumber) {
-    console.error("Twilio configuration is missing.");
+    console.error("AnaAI SMS configuration missing.");
 
     return {
       success: false,
@@ -75,23 +75,19 @@ export async function sendSms({
       body: body.trim(),
     });
 
-    console.log("AnaAI SMS sent:", {
-      sid: message.sid,
-      status: message.status,
-      to: normalizedPhone,
-    });
+    console.log("AnaAI SMS submitted.");
 
     return {
       success: true,
       messageSid: message.sid,
     };
   } catch (error: unknown) {
-    console.error("AnaAI SMS error:", error);
+    console.error("AnaAI SMS provider request failed.");
 
     if (error instanceof Error) {
       return {
         success: false,
-        error: error.message,
+        error: "SMS provider request failed.",
       };
     }
 

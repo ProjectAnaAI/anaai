@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { bookingReceipt, uniqueService, executeAiActions } from "@/lib/ai-actions";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
@@ -73,21 +74,6 @@ type AvailabilityResult = {
   time?: string;
   duration_minutes?: number;
   suggested_times: string[];
-};
-
-type AtomicBookingResult = {
-  success: boolean;
-  reason?: string;
-  appointment_id?: string;
-  customer_id?: string;
-  customer_name?: string;
-  customer_phone?: string;
-  service?: string;
-  service_id?: string;
-  business_id?: string;
-  date?: string;
-  time?: string;
-  status?: string;
 };
 
 function timeToMinutes(value: string) {
@@ -321,7 +307,7 @@ export async function POST(request: Request) {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!process.env.OPENAI_API_KEY) {
-      console.error("AnaAI OpenAI configuration is missing.");
+      console.error("AnaAI: OpenAI configuration missing.");
       return NextResponse.json(
         {
           error: "AnaAI is temporarily unavailable.",
@@ -333,7 +319,7 @@ export async function POST(request: Request) {
     }
 
     if (!supabaseUrl || !supabaseAnonKey) {
-      console.error("AnaAI Supabase configuration is missing.");
+      console.error("AnaAI: Supabase configuration missing.");
       return NextResponse.json(
         {
           error: "AnaAI is temporarily unavailable.",
@@ -380,7 +366,7 @@ export async function POST(request: Request) {
 
     if (!businessContextResult.success) {
       if (businessContextResult.status >= 500) {
-        console.error("AnaAI business context failed:", businessContextResult);
+        console.error("AnaAI: Business context failed.");
       }
       return NextResponse.json(
         {
@@ -477,7 +463,7 @@ export async function POST(request: Request) {
     ]);
 
     if (settingsResult.error) {
-      console.error("AnaAI AI settings lookup failed:", settingsResult.error);
+      console.error("AnaAI: AI settings lookup failed.");
       return NextResponse.json(
         {
           error: "Unable to load AI settings. Please try again.",
@@ -489,7 +475,7 @@ export async function POST(request: Request) {
     }
 
     if (knowledgeResult.error) {
-      console.error("AnaAI business knowledge lookup failed:", knowledgeResult.error);
+      console.error("AnaAI: Knowledge lookup failed.");
       return NextResponse.json(
         {
           error: "Unable to load business knowledge. Please try again.",
@@ -501,7 +487,7 @@ export async function POST(request: Request) {
     }
 
     if (businessResult.error) {
-      console.error("AnaAI business profile lookup failed:", businessResult.error);
+      console.error("AnaAI: Business profile lookup failed.");
       return NextResponse.json(
         {
           error: "Unable to load business profile. Please try again.",
@@ -513,7 +499,7 @@ export async function POST(request: Request) {
     }
 
     if (servicesResult.error) {
-      console.error("AnaAI services lookup failed:", servicesResult.error);
+      console.error("AnaAI: Services lookup failed.");
       return NextResponse.json(
         {
           error: "Unable to load services. Please try again.",
@@ -625,14 +611,7 @@ ${timezone}
         };
       }
 
-      const service =
-        services.find(
-          (item) =>
-            item.name.toLowerCase() === serviceName.toLowerCase()
-        ) ||
-        services.find((item) =>
-          item.name.toLowerCase().includes(serviceName.toLowerCase())
-        );
+      const service = uniqueService(services, serviceName);
 
       if (!service) {
         return {
@@ -741,10 +720,7 @@ ${timezone}
         });
 
       if (appointmentsError) {
-        console.error(
-          "Availability appointments error:",
-          appointmentsError
-        );
+        console.error("AnaAI availability lookup failed.");
 
         return {
           available: false,
@@ -908,23 +884,9 @@ ${timezone}
         };
       }
 
-      const selectedService =
-        services.find(
-          (service) =>
-            service.name.toLowerCase() === serviceName.toLowerCase()
-        ) ||
-        services.find((service) =>
-          service.name
-            .toLowerCase()
-            .includes(serviceName.toLowerCase())
-        );
+      const selectedService = uniqueService(services, serviceName);
 
-      if (!selectedService) {
-        return {
-          success: false,
-          reason: `The service "${serviceName}" could not be found.`,
-        };
-      }
+      if (!selectedService) return { reason: "Please specify one unambiguous active service. No booking was attempted." };
 
       const { data, error } = await supabase.rpc(
         "book_appointment_atomic_business",
@@ -941,7 +903,7 @@ ${timezone}
       );
 
       if (error) {
-        console.error("Business atomic booking RPC error:", error);
+        console.error("AnaAI: Atomic booking RPC failed.");
 
         return {
           success: false,
@@ -950,106 +912,34 @@ ${timezone}
         };
       }
 
-      const result = data as AtomicBookingResult | null;
+      const result = bookingReceipt(data, businessId, selectedService.id, date, time);
+      if (!result) return { reason: "Booking could not be verified. Check your appointments before retrying." };
+      // Receipt is established before notification work; notification failures cannot erase it.
+      const bookedCustomerName = customerName;
+      const bookedCustomerPhone = customerPhone;
+      const bookedService = result.service;
+      const bookedDate = result.date;
+      const bookedTime = result.time;
+      try {
+        const smsBody = buildBookingConfirmationSms({
+          customerName: bookedCustomerName,
+          businessName,
+          businessAddress: business?.address?.trim() || null,
+          service: bookedService,
+          date: bookedDate,
+          time: bookedTime,
+        });
 
-      if (!result) {
-        return {
-          success: false,
-          reason:
-            "The booking system did not return a result.",
-        };
+        const smsResult = await sendSms({
+          to: bookedCustomerPhone,
+          body: smsBody,
+        });
+
+        return { receipt: result, sms_sent: smsResult.success };
+      } catch {
+        console.error("AnaAI: Booking notification failed.");
+        return { receipt: result, sms_sent: false };
       }
-
-      if (!result.success) {
-        const availability = await checkAvailability({
-          service_name: selectedService.name,
-          date,
-          time,
-        });
-
-        console.log("AnaAI atomic booking rejected:", {
-          businessId,
-          args,
-          result,
-          availability,
-        });
-
-        return {
-          success: false,
-          // RPC reason text may contain internal database diagnostics.
-          reason: availability.available
-            ? "The appointment could not be booked. Please try again."
-            : availability.reason,
-          suggested_times:
-            availability.suggested_times ?? [],
-        };
-      }
-
-      console.log("AnaAI atomic appointment booked:", {
-        businessId,
-        appointmentId: result.appointment_id,
-      });
-
-      /*
-       * The database booking is already complete here.
-       *
-       * SMS is intentionally attempted afterward.
-       * A Twilio failure must never undo a valid appointment.
-       */
-      const bookedCustomerName =
-        result.customer_name || customerName;
-
-      const bookedCustomerPhone =
-        result.customer_phone || customerPhone;
-
-      const bookedService =
-        result.service || selectedService.name;
-
-      const bookedDate = result.date || date;
-      const bookedTime = normalizeTime(result.time || time);
-
-      const smsBody = buildBookingConfirmationSms({
-        customerName: bookedCustomerName,
-        businessName,
-        businessAddress: business?.address?.trim() || null,
-        service: bookedService,
-        date: bookedDate,
-        time: bookedTime,
-      });
-
-      const smsResult = await sendSms({
-        to: bookedCustomerPhone,
-        body: smsBody,
-      });
-
-      if (smsResult.success) {
-        console.log("AnaAI booking confirmation SMS sent:", {
-          businessId,
-          appointmentId: result.appointment_id,
-          messageSid: smsResult.messageSid,
-        });
-      } else {
-        console.error("AnaAI booking created but SMS failed:", {
-          businessId,
-          appointmentId: result.appointment_id,
-          error: smsResult.error,
-        });
-      }
-
-      return {
-        success: true,
-        appointment_id: result.appointment_id,
-        customer_id: result.customer_id,
-        customer_name: bookedCustomerName,
-        customer_phone: bookedCustomerPhone,
-        service: bookedService,
-        service_id:
-          result.service_id || selectedService.id,
-        date: bookedDate,
-        time: bookedTime,
-        status: result.status || "Booked",
-        sms_sent: smsResult.success,
-      };
     }
 
     const availabilityTool = {
@@ -1235,148 +1125,11 @@ GENERAL RULES
       input: message,
     });
 
-    const functionCalls = firstResponse.output.filter(
-      (item) => item.type === "function_call"
-    );
-
-    if (functionCalls.length === 0) {
-      const reply = firstResponse.output_text?.trim();
-
-      if (!reply) {
-        console.error("AnaAI provider returned no initial text response.");
-        return NextResponse.json(
-          {
-            error: "AnaAI could not generate a response. Please try again.",
-          },
-          {
-            status: 500,
-          }
-        );
-      }
-
-      return NextResponse.json({
-        reply,
-      });
-    }
-
-    const toolOutputs: {
-      type: "function_call_output";
-      call_id: string;
-      output: string;
-    }[] = [];
-
-    for (const call of functionCalls) {
-      if (call.name === "check_availability") {
-        let args: AvailabilityArgs;
-
-        try {
-          args = JSON.parse(call.arguments) as AvailabilityArgs;
-        } catch {
-          toolOutputs.push({
-            type: "function_call_output",
-            call_id: call.call_id,
-            output: JSON.stringify({
-              available: false,
-              reason:
-                "The availability request could not be interpreted.",
-              suggested_times: [],
-            }),
-          });
-
-          continue;
-        }
-
-        const result = await checkAvailability(args);
-
-        console.log("AnaAI availability check:", {
-          businessId,
-          args,
-          result,
-        });
-
-        toolOutputs.push({
-          type: "function_call_output",
-          call_id: call.call_id,
-          output: JSON.stringify(result),
-        });
-
-        continue;
-      }
-
-      if (call.name === "book_appointment") {
-        let args: BookingArgs;
-
-        try {
-          args = JSON.parse(call.arguments) as BookingArgs;
-        } catch {
-          toolOutputs.push({
-            type: "function_call_output",
-            call_id: call.call_id,
-            output: JSON.stringify({
-              success: false,
-              reason:
-                "The booking request could not be interpreted.",
-            }),
-          });
-
-          continue;
-        }
-
-        const result = await bookAppointment(args);
-
-        console.log("AnaAI booking result:", {
-          businessId,
-          result,
-        });
-
-        toolOutputs.push({
-          type: "function_call_output",
-          call_id: call.call_id,
-          output: JSON.stringify(result),
-        });
-
-        continue;
-      }
-
-      toolOutputs.push({
-        type: "function_call_output",
-        call_id: call.call_id,
-        output: JSON.stringify({
-          success: false,
-          reason: "Unsupported AnaAI tool request.",
-        }),
-      });
-    }
-
-    const finalResponse = await openai.responses.create({
-      model: "gpt-5.6-terra",
-      instructions,
-      tools,
-      tool_choice: "auto",
-      previous_response_id: firstResponse.id,
-      input: toolOutputs,
-    });
-
-    const reply = finalResponse.output_text?.trim();
-
-    if (!reply) {
-      console.error("AnaAI provider returned no final text response after tool execution.");
-      return NextResponse.json(
-        {
-          error:
-            "AnaAI could not complete its response. Please check your appointments before retrying a booking.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    return NextResponse.json({
-      reply,
-    });
+    // Exactly one proposal round. There is deliberately no final model generation:
+    // a post-commit provider failure cannot obscure a committed receipt.
+    return NextResponse.json(await executeAiActions(firstResponse.output, body.mode === "preview", bookAppointment, checkAvailability));
   } catch (error: unknown) {
-    console.error("AnaAI API error:", error);
+    console.error("AnaAI: AI request failed.");
 
     if (error instanceof OpenAI.APIError) {
       return NextResponse.json(
