@@ -48,11 +48,14 @@ function providerErrorDetails(error: unknown) {
 
   return {
     code:
-      typeof providerError.code === "number"
+      typeof providerError.code === "number" &&
+      Number.isSafeInteger(providerError.code) && providerError.code > 0
         ? providerError.code
         : null,
     status:
-      typeof providerError.status === "number"
+      typeof providerError.status === "number" &&
+      Number.isInteger(providerError.status) &&
+      providerError.status >= 100 && providerError.status <= 599
         ? providerError.status
         : null,
   };
@@ -106,6 +109,12 @@ export async function sendSms({
       body: body.trim(),
     });
 
+    // A resolved SDK promise alone is not an authoritative acceptance receipt.
+    if (typeof message?.sid !== "string" || !/^SM[0-9a-fA-F]{32}$/.test(message.sid)) {
+      console.error("AnaAI SMS provider acceptance could not be verified.");
+      return { success: false, outcome: "uncertain", error: "SMS acceptance could not be verified." };
+    }
+
     console.log("AnaAI SMS submitted.");
 
     return {
@@ -123,7 +132,12 @@ export async function sendSms({
     return {
       success: false,
       error: "SMS provider request failed.",
-      outcome: "uncertain",
+      // RestException represents an actual HTTP response in the installed SDK.
+      // A 4xx rejection did not accept the message (including rate limiting).
+      // Keep request timeouts, transport errors and 5xx conservative: no resend.
+      outcome: error instanceof twilio.RestException &&
+        details.status !== null && details.status >= 400 && details.status < 500 &&
+        details.status !== 408 ? "failed" : "uncertain",
     };
   }
 }
