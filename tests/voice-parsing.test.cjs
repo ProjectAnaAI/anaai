@@ -74,3 +74,27 @@ for (const [configured, expected] of [[undefined,'Polly.Joanna-Neural'],['Polly.
 test('yearless leap day retains next-year fallback', () => {
   assert.equal(p.bookingDate('February 29','America/Los_Angeles',Date.parse('2027-09-16T12:00:00Z')),'2028-02-29');
 });
+
+for (const input of [
+  'I would like a facial, please.', "I'd like a facial, please", 'I would like facial',
+  'Can I get a facial please', 'Facial please', 'The facial', 'I want the facial',
+  'Could I book a facial', "I'd like to book a facial",
+]) test(`production facial phrase: ${input}`, () => {
+  const routed = [{ name: 'facial' }, { name: 'haircut' }, { name: 'waxing' }];
+  assert.equal(p.matchVoiceService(routed, input).match?.name, 'facial');
+  assert.equal(p.confirmation(input), 'ambiguous');
+});
+
+test('conversational booking wrappers preserve authority and ambiguity', () => {
+  for (const input of ['Could I book a facial', "I'd like to book a facial"]) {
+    assert.equal(p.matchVoiceService([{ name: 'haircut' }], input).match, null);
+    const ambiguous = p.matchVoiceService([{ name: 'facial basic' }, { name: 'facial premium' }], input);
+    assert.equal(ambiguous.match, null);
+    assert.equal(ambiguous.candidates.length, 2);
+  }
+  for (const input of ['facial or waxing', 'do not book a facial', 'invent a facial', 'facial and haircut']) {
+    assert.equal(p.matchVoiceService([{ name: 'facial' }, { name: 'waxing' }], input).match, null);
+  }
+  const literal = { name: 'Could I book a facial' };
+  assert.equal(p.matchVoiceService([literal, { name: 'facial' }], literal.name).match, literal);
+});

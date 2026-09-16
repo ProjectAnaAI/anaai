@@ -66,6 +66,7 @@ function handlerHarness({
   stateEnabled = false,
   timezone = 'America/Los_Angeles',
   bookingResult = { success: true, replayed: false, smsSent: true },
+  bookingExecutor,
   services = [{ id: SERVICE_ID, name: 'Haircut' }],
 } = {}) {
   const queries = [], requests = [], logs = [], bookings = [], serviceLoads = [], serviceResolutions = [];
@@ -153,7 +154,7 @@ function handlerHarness({
     },
     executeVoiceBooking: async request => {
       bookings.push(request);
-      return bookingResult;
+      return bookingExecutor ? bookingExecutor(request) : bookingResult;
     },
   };
 
@@ -992,4 +993,181 @@ test('retry counter validates bounds and legacy state without counter still open
     state.booking.failures=failures;
     assert.throws(()=>h.state.openVoiceState(h.state.sealVoiceState(state,binding),binding));
   }
+});
+
+const productionServices = [
+  { id: SERVICE_ID, name: 'facial' },
+  { id: CUSTOMER_ID, name: 'haircut' },
+  { id: APPOINTMENT_ID, name: 'waxing' },
+];
+
+for (const ingress of ['production', 'trial']) {
+  for (const invalidAttempts of [0, 1, 2]) {
+    test(`${ingress}: Randy -> ${invalidAttempts} invalid services -> Facial advances through encrypted callbacks`, async () => {
+      const h = handlerHarness({ stateEnabled: true, services: productionServices });
+      const binding = { businessId: BUSINESS_ID, callSid: CALL_SID, ingress };
+      let xml = await h.run({ digits: '1', ingress, from: CALLER });
+      const initial = h.state.openVoiceState(callbackState(xml), binding);
+      const key = initial.booking.idempotencyKey;
+      xml = await h.run({ speech: 'Randy', stateToken: callbackState(xml), ingress, from: CALLER });
+      assert.match(xml, /facial, haircut, waxing/);
+      for (let n = 1; n <= invalidAttempts; n++) {
+        const previous = callbackState(xml);
+        xml = await h.run({ speech: 'unmatched service', stateToken: previous, ingress, from: CALLER });
+        assert.match(xml, /couldn't match that service.*facial, haircut, waxing/);
+        assert.notEqual(callbackState(xml), previous);
+        const state = h.state.openVoiceState(callbackState(xml), binding);
+        assert.equal(state.booking.stage, 'service');
+        assert.equal(state.booking.failures, n);
+        assert.equal(state.turns, 2 + n);
+        assert.equal(state.booking.serviceId, null);
+        assert.equal(state.booking.idempotencyKey, key);
+        assert.equal(state.expires, initial.expires);
+        assert.equal(JSON.stringify(state).includes(CALLER), false);
+        const action = new URL(/action="([^"]+)"/.exec(xml)[1].replaceAll('&amp;', '&'));
+        assert.equal(action.pathname, ingress === 'trial' ? '/api/voice/trial' : '/api/voice');
+        assert.equal(action.searchParams.get('token'), ingress === 'trial' ? env.TWILIO_TRIAL_VOICE_TOKEN : null);
+        assert.equal(action.searchParams.get('mode'), 'listen');
+        assert.match(xml, /hints="facial,haircut,waxing"/);
+        assert.match(xml, /speechModel="experimental_utterances"/);
+        assert.match(xml, /speechTimeout="2"/);
+        assert.match(xml, /actionOnEmptyResult="true"/);
+        assert.match(xml, /method="POST"/);
+        assert.equal(h.bookings.length, 0);
+      }
+      xml = await h.run({ speech: invalidAttempts ? 'Facial' : 'I would like a facial, please.', stateToken: callbackState(xml), ingress, from: CALLER });
+      assert.match(xml, /What date would you like for facial/);
+      assert.doesNotMatch(xml, /No appointment was booked|<Hangup/);
+      const selected = h.state.openVoiceState(callbackState(xml), binding);
+      assert.equal(selected.booking.stage, 'date');
+      assert.equal(selected.booking.failures, 0);
+      assert.equal(selected.booking.serviceId, SERVICE_ID);
+      assert.equal(selected.booking.serviceName, 'facial');
+      assert.equal(selected.booking.customerName, 'Randy');
+      assert.equal(selected.booking.idempotencyKey, key);
+      assert.equal(h.bookings.length, 0);
+      xml = await h.run({ speech: 'tomorrow', stateToken: callbackState(xml), ingress, from: CALLER });
+      assert.match(xml, /What time would you like/);
+      xml = await h.run({ speech: 'two thirty PM', stateToken: callbackState(xml), ingress, from: CALLER });
+      assert.match(xml, /Say yes to book/);
+      assert.equal(h.bookings.length, 0);
+      xml = await h.run({ speech: 'yes', stateToken: callbackState(xml), ingress, from: CALLER });
+      assert.match(xml, /booked successfully/);
+      assert.equal(h.bookings.length, 1);
+      assert.equal(h.bookings[0].idempotencyKey, key);
+      assert.equal(h.bookings[0].time, '14:30');
+      assert.ok(h.serviceLoads.every(id => id === BUSINESS_ID));
+      assert.equal(h.requests.length, 0);
+      assert.equal(h.logs.length, 0);
+    });
+  }
+}
+
+test('two failures in every collection stage reset before the next stage', async () => {
+  const h = handlerHarness({ stateEnabled: true, services: productionServices });
+  const binding = { businessId: BUSINESS_ID, callSid: CALL_SID, ingress: 'trial' };
+  let xml = await h.run({ digits: '1', from: CALLER });
+  for (const [stage, invalid, valid, next] of [
+    ['name', 'x', 'Randy', 'service'],
+    ['service', 'unmatched', 'Facial', 'date'],
+    ['date', 'February 30th 2099', 'tomorrow', 'time'],
+    ['time', '25 PM', 'two thirty PM', 'confirm'],
+  ]) {
+    for (let n = 1; n <= 2; n++) {
+      xml = await h.run({ speech: invalid, stateToken: callbackState(xml), from: CALLER });
+      const state = h.state.openVoiceState(callbackState(xml), binding);
+      assert.equal(state.booking.stage, stage);
+      assert.equal(state.booking.failures, n);
+      assert.equal(h.bookings.length, 0);
+    }
+    xml = await h.run({ speech: valid, stateToken: callbackState(xml), from: CALLER });
+    const state = h.state.openVoiceState(callbackState(xml), binding);
+    assert.equal(state.booking.stage, next);
+    assert.equal(state.booking.failures, 0);
+  }
+  for (let n = 1; n <= 2; n++) {
+    xml = await h.run({ speech: 'maybe', stateToken: callbackState(xml), from: CALLER });
+    assert.equal(h.state.openVoiceState(callbackState(xml), binding).booking.failures, n);
+    assert.equal(h.bookings.length, 0);
+  }
+  xml = await h.run({ speech: 'yes', stateToken: callbackState(xml), from: CALLER });
+  assert.match(xml, /booked successfully/);
+  assert.equal(h.bookings.length, 1);
+});
+
+for (const silence of [false, true]) test(`service ${silence ? 'silence' : 'failed answers'} is bounded without mutation`, async () => {
+  const h = handlerHarness({ stateEnabled: true, services: productionServices });
+  let xml = await h.run({ digits: '1', from: CALLER });
+  xml = await h.run({ speech: 'Randy', stateToken: callbackState(xml), from: CALLER });
+  const limit = silence ? 2 : 3;
+  for (let n = 1; n <= limit; n++) {
+    xml = await h.run({ speech: silence ? '' : 'unmatched', stateToken: callbackState(xml), from: CALLER });
+    if (n < limit) assert.ok(callbackState(xml));
+    else {
+      assert.match(xml, /No appointment was booked/);
+      assert.match(xml, /<Hangup/);
+      assert.equal(callbackState(xml), null);
+    }
+    assert.equal(h.bookings.length, 0);
+  }
+});
+
+test('silence does not consume service failures and a valid answer clears both', async () => {
+  const h = handlerHarness({ stateEnabled: true, services: productionServices });
+  const binding = { businessId: BUSINESS_ID, callSid: CALL_SID, ingress: 'trial' };
+  let xml = await h.run({ digits: '1', from: CALLER });
+  for (const speech of ['Randy', 'unmatched', '']) {
+    xml = await h.run({ speech, stateToken: callbackState(xml), from: CALLER });
+  }
+  const silent = h.state.openVoiceState(callbackState(xml), binding);
+  assert.equal(silent.booking.failures, 1);
+  assert.equal(silent.silence, 1);
+  xml = await h.run({ speech: 'Facial', stateToken: callbackState(xml), from: CALLER });
+  const recovered = h.state.openVoiceState(callbackState(xml), binding);
+  assert.equal(recovered.booking.failures, 0);
+  assert.equal(recovered.silence, 0);
+  assert.equal(recovered.booking.stage, 'date');
+  assert.equal(h.bookings.length, 0);
+});
+
+for (const verified of [true, false]) test(`recovered facial booking requires authoritative receipt: ${verified}`, async () => {
+  const receipt = {
+    success: true, changed: true, action_id: ACTION_ID, action_type: 'book',
+    business_id: BUSINESS_ID, receipt_scope: 'action_outcome', replayed: false,
+    appointment_id: APPOINTMENT_ID, customer_id: CUSTOMER_ID, service_id: SERVICE_ID,
+    service: 'facial', date: '2099-09-20', time: '14:30:00', status: 'Booked',
+  };
+  const real = bookingModuleHarness({ services: productionServices, rpcResult: verified ? receipt : { success: true } });
+  const h = handlerHarness({ stateEnabled: true, services: productionServices, bookingExecutor: real.module.executeVoiceBooking });
+  let xml = await h.run({ digits: '1', from: CALLER });
+  for (const speech of ['Randy', 'unmatched service', 'Facial', 'September twentieth 2099', 'two thirty PM']) {
+    xml = await h.run({ speech, stateToken: callbackState(xml), from: CALLER });
+    assert.ok(callbackState(xml));
+    assert.equal(real.calls.length, 0);
+    assert.equal(h.bookings.length, 0);
+  }
+  xml = await h.run({ speech: 'yes', stateToken: callbackState(xml), from: CALLER });
+  assert.equal(real.calls.filter(call => call.name === 'voice_book_appointment_business').length, 1);
+  if (verified) assert.match(xml, /booked successfully/);
+  else {
+    assert.doesNotMatch(xml, /booked successfully/);
+    assert.match(xml, /couldn't verify the booking/);
+    assert.equal(real.sms.length, 0);
+  }
+});
+
+for (const failures of [undefined, 0, 1, 2]) test(`legacy/current service state with failures=${failures} accepts Facial`, async () => {
+  const h = handlerHarness({ stateEnabled: true, services: productionServices });
+  const binding = { businessId: BUSINESS_ID, callSid: CALL_SID, ingress: 'trial' };
+  const state = h.state.initialBookingState();
+  state.booking.stage = 'service';
+  state.booking.customerName = 'Randy';
+  if (failures !== undefined) state.booking.failures = failures;
+  const xml = await h.run({ speech: 'Facial', stateToken: h.state.sealVoiceState(state, binding), from: CALLER });
+  assert.match(xml, /What date would you like for facial/);
+  const next = h.state.openVoiceState(callbackState(xml), binding);
+  assert.equal(next.booking.stage, 'date');
+  assert.equal(next.booking.failures, 0);
+  assert.equal(next.booking.idempotencyKey, state.booking.idempotencyKey);
+  assert.equal(h.bookings.length, 0);
 });

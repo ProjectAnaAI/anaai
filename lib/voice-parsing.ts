@@ -110,7 +110,9 @@ export function matchVoiceService<T extends { name: string }>(services: T[], spe
   if (!speech.trim() || speech.length > 200) return { match: null, candidates: [] };
   const strict = uniqueService(services, speech);
   if (strict) return { match: strict, candidates: [strict] };
-  const stripped = normalizedSpeech(speech).replace(/^(?:i'd like|i would like|i want|can i get|could i get|can i have) /, '').replace(/^(?:a|an|the) /, '').replace(/ please$/, '');
+  const stripped = normalizedSpeech(speech)
+    .replace(/^(?:(?:i'd like|i would like|i want)(?: to book)?|can i get|could i get|can i have|could i book) /, '')
+    .replace(/^(?:a|an|the) /, '').replace(/ please$/, '');
   const key = serviceKey(stripped);
   if (!key) return { match: null, candidates: [] };
   const exact = services.filter(s => serviceKey(s.name) === key);
