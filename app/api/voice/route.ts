@@ -427,7 +427,18 @@ export async function POST(request: Request) {
     });
 
     if (!verification.allowed) {
-      return forbiddenResponse();
+      const diagnosticResponse = new twilio.twiml.VoiceResponse();
+
+      diagnosticResponse.say(
+        {
+          voice: "alice",
+        },
+        `AnaAI diagnostic. Verification result: ${verification.reason.replaceAll("-", " ")}.`
+      );
+
+      diagnosticResponse.hangup();
+
+      return twimlResponse(diagnosticResponse.toString());
     }
 
     const calledNumber = String(formData.get("To") || "").trim();
