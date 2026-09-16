@@ -278,6 +278,85 @@ test('booking collects name, service, date and time without mutation before expl
   assert.deepEqual(h.serviceResolutions, [{ businessId: BUSINESS_ID, spoken: 'Haircut' }]);
 });
 
+test('phone booking accepts natural spoken month dates in the business timezone', async () => {
+  for (const speech of [
+    'September 18',
+    'September 18th',
+    'September 18 2099',
+    '2099 September 18th',
+  ]) {
+    const h = handlerHarness({
+      stateEnabled: true,
+    });
+
+    const started = await h.run({
+      digits: '1',
+      from: CALLER,
+    });
+
+    const name = await h.run({
+      speech: 'Alex Customer',
+      stateToken: callbackState(started),
+      from: CALLER,
+    });
+
+    const service = await h.run({
+      speech: 'Haircut',
+      stateToken: callbackState(name),
+      from: CALLER,
+    });
+
+    const dated = await h.run({
+      speech,
+      stateToken: callbackState(service),
+      from: CALLER,
+    });
+
+    assert.match(
+      dated,
+      /What time would you like/
+    );
+
+    assert.equal(h.bookings.length, 0);
+  }
+});
+
+test('phone booking rejects impossible natural spoken dates', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+  });
+
+  const started = await h.run({
+    digits: '1',
+    from: CALLER,
+  });
+
+  const name = await h.run({
+    speech: 'Alex Customer',
+    stateToken: callbackState(started),
+    from: CALLER,
+  });
+
+  const service = await h.run({
+    speech: 'Haircut',
+    stateToken: callbackState(name),
+    from: CALLER,
+  });
+
+  const dated = await h.run({
+    speech: 'February 30th 2099',
+    stateToken: callbackState(service),
+    from: CALLER,
+  });
+
+  assert.match(
+    dated,
+    /couldn't verify that date/
+  );
+
+  assert.equal(h.bookings.length, 0);
+});
+
 test('explicit no at confirmation performs no mutation', async () => {
   const h = handlerHarness({ stateEnabled: true });
   const flow = await advanceBooking(h);

@@ -352,28 +352,138 @@ function bookingDate(
     );
   }
 
-  const match =
-    /\b(\d{4}-\d{2}-\d{2})\b/.exec(
+  const validCanonicalDate = (
+    year: number,
+    month: number,
+    day: number
+  ) => {
+    if (
+      !Number.isInteger(year) ||
+      !Number.isInteger(month) ||
+      !Number.isInteger(day) ||
+      year < 1 ||
+      year > 9999 ||
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31
+    ) {
+      return null;
+    }
+
+    const value = `${String(year).padStart(
+      4,
+      "0"
+    )}-${String(month).padStart(
+      2,
+      "0"
+    )}-${String(day).padStart(2, "0")}`;
+
+    const date = new Date(
+      `${value}T00:00:00Z`
+    );
+
+    if (
+      !Number.isFinite(date.getTime()) ||
+      date.toISOString().slice(0, 10) !==
+        value
+    ) {
+      return null;
+    }
+
+    return value;
+  };
+
+  const iso =
+    /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(
       text
     );
 
-  if (!match) {
+  if (iso) {
+    return validCanonicalDate(
+      Number(iso[1]),
+      Number(iso[2]),
+      Number(iso[3])
+    );
+  }
+
+  const months: Record<string, number> = {
+    january: 1,
+    february: 2,
+    march: 3,
+    april: 4,
+    may: 5,
+    june: 6,
+    july: 7,
+    august: 8,
+    september: 9,
+    october: 10,
+    november: 11,
+    december: 12,
+  };
+
+  const monthNames =
+    Object.keys(months).join("|");
+
+  const monthFirst = new RegExp(
+    `\\b(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?\\b`
+  ).exec(text);
+
+  const yearFirst = new RegExp(
+    `\\b(\\d{4})\\s+(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`
+  ).exec(text);
+
+  let month: number;
+  let day: number;
+  let explicitYear: number | null;
+
+  if (monthFirst) {
+    month = months[monthFirst[1]];
+    day = Number(monthFirst[2]);
+    explicitYear = monthFirst[3]
+      ? Number(monthFirst[3])
+      : null;
+  } else if (yearFirst) {
+    explicitYear = Number(yearFirst[1]);
+    month = months[yearFirst[2]];
+    day = Number(yearFirst[3]);
+  } else {
     return null;
   }
 
-  const date = new Date(
-    `${match[1]}T00:00:00Z`
+  if (explicitYear !== null) {
+    return validCanonicalDate(
+      explicitYear,
+      month,
+      day
+    );
+  }
+
+  const today = businessLocalDate(timezone);
+
+  if (!today) {
+    return null;
+  }
+
+  const currentYear = Number(
+    today.slice(0, 4)
   );
 
-  if (
-    !Number.isFinite(date.getTime()) ||
-    date.toISOString().slice(0, 10) !==
-      match[1]
-  ) {
-    return null;
+  const thisYear = validCanonicalDate(
+    currentYear,
+    month,
+    day
+  );
+
+  if (thisYear && thisYear >= today) {
+    return thisYear;
   }
 
-  return match[1];
+  return validCanonicalDate(
+    currentYear + 1,
+    month,
+    day
+  );
 }
 
 function bookingTime(speech: string) {
