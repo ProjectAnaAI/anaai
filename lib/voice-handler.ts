@@ -1,6 +1,8 @@
+import "server-only";
 import twilio from "twilio";
 
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
+import { answerVoiceQuestion, safeVoiceText } from "@/lib/voice-receptionist";
 
 export type VoiceIngress = "production" | "trial";
 
@@ -123,12 +125,11 @@ async function resolveBusinessByCalledNumber(
     .eq("phone_number", normalizedCalledNumber)
     .eq("provider", "twilio")
     .eq("is_active", true)
+    .abortSignal(AbortSignal.timeout(3000))
     .maybeSingle();
 
   if (error) {
-    console.error("AnaAI voice business lookup failed.", {
-      code: error.code || "unknown",
-    });
+    console.error("AnaAI voice business lookup failed.");
 
     throw new Error("Voice business lookup failed.");
   }
@@ -163,284 +164,49 @@ async function resolveBusinessByCalledNumber(
   };
 }
 
-function addMainMenu(
-  response: twilio.twiml.VoiceResponse,
-  business: BusinessContext,
-  ingress: VoiceIngress
-) {
+// No call history is retained. Every speech turn resolves the called number again.
+function listen(response: twilio.twiml.VoiceResponse, ingress: VoiceIngress,
+  message: string, mode = "listen") {
   const gather = response.gather({
-    input: ["dtmf", "speech"],
-    numDigits: 1,
-    action: getVoiceUrl(ingress, "menu"),
-    method: "POST",
-    timeout: 6,
-    speechTimeout: "auto",
-    language: "en-US",
+    input: ["speech"], action: getVoiceUrl(ingress, mode), method: "POST",
+    timeout: 6, speechTimeout: "auto", language: "en-US", actionOnEmptyResult: true,
   });
-
-  gather.say(
-    {
-      voice: "alice",
-    },
-    [
-      `Hi, this is AnaAI from ${business.businessName}.`,
-      "For appointments or rescheduling, press or say 1.",
-      "For office hours and basic business information, press or say 2.",
-      "To transfer the call to a representative, press or say 3.",
-      "To repeat the menu, press or say 4.",
-    ].join(" ")
-  );
-
-  response.redirect(
-    {
-      method: "POST",
-    },
-    getVoiceUrl(ingress)
-  );
+  gather.say({ voice: "alice" }, message);
 }
 
-function normalizeChoice({
-  digits,
-  speech,
-}: {
-  digits: string;
-  speech: string;
+export async function buildVoiceResponse({ formData, mode, ingress }: {
+  formData: FormData; mode: string; ingress: VoiceIngress;
 }) {
-  if (digits === "1") return "1";
-  if (digits === "2") return "2";
-  if (digits === "3") return "3";
-  if (digits === "4") return "4";
-
-  const normalized = speech
-    .toLowerCase()
-    .replace(/[.,!?]/g, "")
-    .trim();
-
-  if (
-    normalized === "1" ||
-    normalized === "one" ||
-    normalized.includes("appointment") ||
-    normalized.includes("appointments") ||
-    normalized.includes("reschedule") ||
-    normalized.includes("rescheduling") ||
-    normalized.includes("booking")
-  ) {
-    return "1";
-  }
-
-  if (
-    normalized === "2" ||
-    normalized === "two" ||
-    normalized.includes("office hour") ||
-    normalized.includes("office hours") ||
-    normalized.includes("business information") ||
-    normalized.includes("hours")
-  ) {
-    return "2";
-  }
-
-  if (
-    normalized === "3" ||
-    normalized === "three" ||
-    normalized.includes("representative") ||
-    normalized.includes("person") ||
-    normalized.includes("human") ||
-    normalized.includes("someone")
-  ) {
-    return "3";
-  }
-
-  if (
-    normalized === "4" ||
-    normalized === "four" ||
-    normalized.includes("repeat")
-  ) {
-    return "4";
-  }
-
-  return "";
-}
-
-function addAppointmentTest(
-  response: twilio.twiml.VoiceResponse,
-  ingress: VoiceIngress
-) {
-  const gather = response.gather({
-    input: ["speech"],
-    action: getVoiceUrl(ingress, "appointment-test"),
-    method: "POST",
-    timeout: 6,
-    speechTimeout: "auto",
-    language: "en-US",
-  });
-
-  gather.say(
-    {
-      voice: "alice",
-    },
-    "You selected appointments or rescheduling. What service would you like to schedule?"
+  const calledNumber = formData.get("To");
+  const business = await resolveBusinessByCalledNumber(
+    typeof calledNumber === "string" ? calledNumber : ""
   );
-
-  response.say(
-    {
-      voice: "alice",
-    },
-    "I didn't hear a service."
-  );
-
-  response.redirect(
-    {
-      method: "POST",
-    },
-    getVoiceUrl(ingress)
-  );
-}
-
-function addConfigurationError(response: twilio.twiml.VoiceResponse) {
-  response.say(
-    {
-      voice: "alice",
-    },
-    "I'm sorry, AnaAI could not identify the business for this phone number."
-  );
-
-  response.hangup();
-}
-
-export async function buildVoiceResponse({
-  formData,
-  mode,
-  ingress,
-}: {
-  formData: FormData;
-  mode: string;
-  ingress: VoiceIngress;
-}) {
-  const calledNumber = String(formData.get("To") || "").trim();
-
-  const business = await resolveBusinessByCalledNumber(calledNumber);
-
   const response = new twilio.twiml.VoiceResponse();
-
   if (!business) {
-    console.warn(
-      "AnaAI voice request did not resolve to an active business."
-    );
-
-    addConfigurationError(response);
+    console.warn("AnaAI voice request did not resolve to an active business.");
+    response.say({ voice: "alice" },
+      "I'm sorry, AnaAI could not identify the business for this phone number.");
+    response.hangup();
     return response.toString();
   }
-
-  const digits = String(formData.get("Digits") || "").trim();
-  const speechResult = String(formData.get("SpeechResult") || "").trim();
-
-  console.log("AnaAI voice request accepted.", {
-    ingress,
-    mode,
-    businessResolved: true,
-    hasDigits: Boolean(digits),
-    hasSpeech: Boolean(speechResult),
-  });
-
+  const value = formData.get("SpeechResult");
+  const speech = typeof value === "string" ? value.trim() : "";
   if (!mode) {
-    addMainMenu(response, business, ingress);
-    return response.toString();
+    listen(response, ingress,
+      `Hi, this is AnaAI from ${safeVoiceText(business.businessName, 100) || "the business"}. I can help with business hours, services, and general information. What would you like to know?`);
+  } else if (!speech) {
+    if (mode === "retry") {
+      response.say({ voice: "alice" }, "I couldn't hear you. Please call again when you're ready. Goodbye.");
+      response.hangup();
+    } else {
+      listen(response, ingress, "I didn't hear anything. What would you like to know about the business?", "retry");
+    }
+  } else if (/^(goodbye|bye|bye bye|end (the )?call|hang up|that['’]?s all|thank you goodbye)[.!?, ]*$/i.test(speech)) {
+    response.say({ voice: "alice" }, "Thanks for calling. Goodbye!");
+    response.hangup();
+  } else {
+    const answer = await answerVoiceQuestion(business.businessId, business.businessName, speech);
+    listen(response, ingress, `${answer} What else would you like to know?`);
   }
-
-  if (mode === "menu") {
-    const choice = normalizeChoice({
-      digits,
-      speech: speechResult,
-    });
-
-    if (choice === "1") {
-      addAppointmentTest(response, ingress);
-      return response.toString();
-    }
-
-    if (choice === "2") {
-      response.say(
-        {
-          voice: "alice",
-        },
-        `You selected office hours and business information for ${business.businessName}. This option is working. We will connect the real business information next.`
-      );
-
-      response.redirect(
-        {
-          method: "POST",
-        },
-        getVoiceUrl(ingress)
-      );
-
-      return response.toString();
-    }
-
-    if (choice === "3") {
-      response.say(
-        {
-          voice: "alice",
-        },
-        "You selected transfer to a representative. Call transfer is not enabled yet."
-      );
-
-      response.redirect(
-        {
-          method: "POST",
-        },
-        getVoiceUrl(ingress)
-      );
-
-      return response.toString();
-    }
-
-    if (choice === "4") {
-      addMainMenu(response, business, ingress);
-      return response.toString();
-    }
-
-    response.say(
-      {
-        voice: "alice",
-      },
-      "I'm sorry, I didn't understand your selection."
-    );
-
-    addMainMenu(response, business, ingress);
-    return response.toString();
-  }
-
-  if (mode === "appointment-test") {
-    if (!speechResult) {
-      response.say(
-        {
-          voice: "alice",
-        },
-        "I'm sorry, I didn't hear the service."
-      );
-
-      addAppointmentTest(response, ingress);
-      return response.toString();
-    }
-
-    response.say(
-      {
-        voice: "alice",
-      },
-      `I heard ${speechResult}. The appointment service-selection test is working. We have not booked anything yet.`
-    );
-
-    response.say(
-      {
-        voice: "alice",
-      },
-      "Returning to the main menu."
-    );
-
-    addMainMenu(response, business, ingress);
-    return response.toString();
-  }
-
-  addMainMenu(response, business, ingress);
   return response.toString();
 }

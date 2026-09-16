@@ -10,6 +10,7 @@ function twimlResponse(xml: string) {
     status: 200,
     headers: {
       "Content-Type": "text/xml",
+      "Cache-Control": "no-store",
     },
   });
 }
@@ -141,7 +142,7 @@ export async function POST(request: Request) {
 
     return twimlResponse(xml);
   } catch {
-    console.error("AnaAI voice menu request failed.");
+    console.error("AnaAI voice request failed.");
 
     const response = new twilio.twiml.VoiceResponse();
 
