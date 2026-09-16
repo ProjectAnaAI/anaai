@@ -72,6 +72,13 @@ function normalizePhone(value: string) {
   return digits ? `+${digits}` : "";
 }
 
+function normalizeSpokenService(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
 function fingerprint(value: unknown) {
   return createHash("sha256")
     .update(JSON.stringify(value))
@@ -134,12 +141,38 @@ export async function resolveVoiceService(
   spokenName: string
 ): Promise<Service | null> {
   const services = await loadVoiceServices(businessId);
+  const spoken = spokenName.trim();
 
-  if (!spokenName.trim()) {
+  if (!spoken) {
     return null;
   }
 
-  return uniqueService(services, spokenName);
+  // Preserve the existing strict matcher first. This keeps exact and
+  // unambiguous existing behavior unchanged.
+  const strictMatch = uniqueService(services, spoken);
+
+  if (strictMatch) {
+    return strictMatch;
+  }
+
+  // Phone speech recognition can insert or remove harmless separators,
+  // for example "haircut" -> "hair cut". Compare a separator-free form,
+  // but only accept it when exactly one available service matches.
+  const normalizedSpoken = normalizeSpokenService(spoken);
+
+  if (!normalizedSpoken) {
+    return null;
+  }
+
+  const normalizedMatches = services.filter(
+    (service) =>
+      normalizeSpokenService(service.name) ===
+      normalizedSpoken
+  );
+
+  return normalizedMatches.length === 1
+    ? normalizedMatches[0]
+    : null;
 }
 
 function voiceBookingReceipt(

@@ -658,6 +658,53 @@ function bookingModuleHarness({
   return { module, execute, calls, sms, logs };
 }
 
+test('voice service matching tolerates speech-recognition spacing differences', async () => {
+  const h = bookingModuleHarness();
+
+  const match = await h.module.resolveVoiceService(
+    BUSINESS_ID,
+    'hair cut'
+  );
+
+  assert.ok(match);
+  assert.equal(match.id, SERVICE_ID);
+  assert.equal(match.name, 'Haircut');
+});
+
+test('voice service matching tolerates harmless case and punctuation differences', async () => {
+  const h = bookingModuleHarness();
+
+  for (const spoken of ['HAIR CUT', 'hair-cut', 'Hair, Cut']) {
+    const match = await h.module.resolveVoiceService(
+      BUSINESS_ID,
+      spoken
+    );
+
+    assert.ok(match);
+    assert.equal(match.id, SERVICE_ID);
+    assert.equal(match.name, 'Haircut');
+  }
+});
+
+test('voice service normalization rejects ambiguous matches', async () => {
+  const secondServiceId =
+    '99999999-9999-4999-8999-999999999999';
+
+  const h = bookingModuleHarness({
+    services: [
+      { id: SERVICE_ID, name: 'Haircut' },
+      { id: secondServiceId, name: 'Hair Cut' },
+    ],
+  });
+
+  const match = await h.module.resolveVoiceService(
+    BUSINESS_ID,
+    'hair-cut'
+  );
+
+  assert.equal(match, null);
+});
+
 test('real voice booking module calls only voice booking and voice notification RPCs', async () => {
   const h = bookingModuleHarness();
   const result = await h.execute();
