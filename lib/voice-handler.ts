@@ -19,7 +19,6 @@ import {
   voiceStateConfigured,
   type VoiceBinding,
   type VoiceBookingState,
-  type VoiceBookingStage,
   type VoiceState,
 } from "@/lib/voice-state";
 
@@ -27,47 +26,6 @@ import { bookingDate, businessLocalDate, parseSpokenTime, confirmation as interp
 import { voiceOptions, gatherOptions } from "@/lib/voice-config";
 
 export type VoiceIngress = "production" | "trial";
-
-// TEMPORARY incident diagnostic. Remove after the live branch is identified.
-// Only classification enums, booleans and bounded counters belong in this payload.
-type BookingDiagnostic = {
-  stage?: VoiceBookingStage;
-  speech_present: boolean;
-  speech_length_bucket: "empty" | "short" | "medium" | "long";
-  confirmation_interpretation: "yes" | "no" | "unclear";
-  stage_interpretation: "accepted" | "invalid" | "ambiguous" | "no_input" | "not_applicable";
-  failure_count_before?: number;
-  failure_count_after?: number;
-  next_stage: VoiceBookingStage | "exit";
-  exit_reason?: "explicit_negative" | "retry_exhausted" | "silence_exhausted" | "turn_limit" | "state_invalid" | "other";
-  ingress: VoiceIngress;
-};
-
-function bookingDiagnostic(speech: string, ingress: VoiceIngress, state?: VoiceBookingState): BookingDiagnostic {
-  const interpretation = interpretConfirmation(speech);
-  return {
-    ...(state ? {
-      stage: state.booking.stage,
-      failure_count_before: state.booking.failures || 0,
-      failure_count_after: state.booking.failures || 0,
-    } : {}),
-    speech_present: speech.length > 0,
-    // Buckets are UTF-16 lengths, never the text or its hash.
-    speech_length_bucket: !speech.length ? "empty" : speech.length <= 20 ? "short" : speech.length <= 80 ? "medium" : "long",
-    confirmation_interpretation: interpretation === "ambiguous" ? "unclear" : interpretation,
-    stage_interpretation: "not_applicable",
-    next_stage: state?.booking.stage || "exit",
-    ingress,
-  };
-}
-
-function emitBookingDiagnostic(diagnostic: BookingDiagnostic) {
-  try {
-    console.info(diagnostic);
-  } catch {
-    // Diagnostics must never interrupt or retry a booking operation.
-  }
-}
 
 type BusinessContext = {
   businessId: string;
@@ -299,7 +257,7 @@ function gather(
       "Thanks for calling. Please call again if you need more help. Goodbye."
     );
     response.hangup();
-    return state.turns >= 30 ? ("turn_limit" as const) : ("other" as const);
+    return;
   }
 
   const token = state
@@ -386,7 +344,6 @@ async function bookingTurn({
   state,
   speech,
   callerPhone,
-  diagnostic,
 }: {
   response: twilio.twiml.VoiceResponse;
   ingress: VoiceIngress;
@@ -395,16 +352,9 @@ async function bookingTurn({
   state: VoiceBookingState;
   speech: string;
   callerPhone: string;
-  diagnostic: BookingDiagnostic;
 }) {
-  const bookingGather = (...args: Parameters<typeof gather>) => {
-    const exit = gather(...args);
-    if (exit) diagnostic.exit_reason = exit;
-  };
   if (!speech) {
-    diagnostic.stage_interpretation = "no_input";
     if (state.silence >= 1) {
-      diagnostic.exit_reason = "silence_exhausted";
       response.say(
         voiceOptions(),
         "I couldn't hear you. No appointment was booked. Please call again when you're ready. Goodbye."
@@ -428,7 +378,7 @@ async function bookingTurn({
                   state
                 )}. Say yes to book it, or no to cancel.`;
 
-    bookingGather(
+    gather(
       response,
       ingress,
       binding,
@@ -441,7 +391,6 @@ async function bookingTurn({
   state.silence = 0;
 
   if (interpretConfirmation(speech) === "no") {
-    diagnostic.exit_reason = "explicit_negative";
     response.say(
       voiceOptions(),
       "Okay. No appointment was booked. Thanks for calling. Goodbye."
@@ -453,14 +402,12 @@ async function bookingTurn({
   const retry = (message: string, names: string[] = []) => {
     state.booking.failures = (state.booking.failures || 0) + 1;
     if (state.booking.failures >= 3) {
-      diagnostic.exit_reason = "retry_exhausted";
       response.say(voiceOptions(), "I'm sorry, I couldn't verify those details. No appointment was booked. Please contact the business for help. Goodbye.");
       response.hangup();
-    } else bookingGather(response, ingress, binding, message, state, "listen", names);
+    } else gather(response, ingress, binding, message, state, "listen", names);
   };
 
   if (state.booking.stage === "name") {
-    diagnostic.stage_interpretation = "invalid";
     const name = speech
       .replace(/\s+/g, " ")
       .trim();
@@ -474,7 +421,6 @@ async function bookingTurn({
       return;
     }
 
-    diagnostic.stage_interpretation = "accepted";
     state.booking.failures = 0;
     state.booking.customerName = name;
     state.booking.stage = "service";
@@ -485,7 +431,6 @@ async function bookingTurn({
       );
 
     if (!services.length) {
-      diagnostic.exit_reason = "other";
       response.say(
         voiceOptions(),
         "I'm sorry, I can't find any services available for phone booking right now. No appointment was booked."
@@ -499,7 +444,7 @@ async function bookingTurn({
       .map((service) => service.name)
       .join(", ");
 
-    bookingGather(
+    gather(
       response,
       ingress,
       binding,
@@ -512,7 +457,6 @@ async function bookingTurn({
   if (state.booking.stage === "service") {
     const services = await loadVoiceServices(business.businessId);
     const { match: service, candidates } = matchVoiceService(services, speech);
-    diagnostic.stage_interpretation = service ? "accepted" : candidates.length > 1 ? "ambiguous" : "invalid";
     if (!service) {
       const choices = (candidates.length ? candidates : services).slice(0, 3).map(s => s.name).join(", ");
       retry(candidates.length > 1 ? `Which service did you mean: ${choices}?` :
@@ -525,7 +469,7 @@ async function bookingTurn({
       service.name;
     state.booking.stage = "date";
 
-    bookingGather(
+    gather(
       response,
       ingress,
       binding,
@@ -536,7 +480,6 @@ async function bookingTurn({
   }
 
   if (state.booking.stage === "date") {
-    diagnostic.stage_interpretation = "invalid";
     const date = bookingDate(
       speech,
       business.timezone
@@ -557,12 +500,11 @@ async function bookingTurn({
       return;
     }
 
-    diagnostic.stage_interpretation = "accepted";
     state.booking.failures = 0;
     state.booking.date = date;
     state.booking.stage = "time";
 
-    bookingGather(
+    gather(
       response,
       ingress,
       binding,
@@ -574,7 +516,6 @@ async function bookingTurn({
 
   if (state.booking.stage === "time") {
     const parsed = parseSpokenTime(speech);
-    diagnostic.stage_interpretation = parsed.kind === "valid" ? "accepted" : parsed.kind;
     if (parsed.kind !== "valid") {
       retry(parsed.kind === "ambiguous"
         ? `Did you mean ${spokenTime(parsed.options[0])} or ${spokenTime(parsed.options[1])}? Please say the full time with AM or PM.`
@@ -585,7 +526,7 @@ async function bookingTurn({
     state.booking.time = parsed.value;
     state.booking.stage = "confirm";
 
-    bookingGather(
+    gather(
       response,
       ingress,
       binding,
@@ -598,13 +539,10 @@ async function bookingTurn({
   }
 
   if (interpretConfirmation(speech) !== "yes") {
-    diagnostic.stage_interpretation = "ambiguous";
     retry(`Please say yes to book ${bookingSummary(state)}, or no to cancel.`);
     return;
   }
 
-  diagnostic.stage_interpretation = "accepted";
-  diagnostic.exit_reason = "other";
   const booking = state.booking;
 
   if (
@@ -733,10 +671,6 @@ export async function buildVoiceResponse({
         binding
       );
     } catch {
-      // Failed authentication/validation gives no trustworthy stage or retry count.
-      const diagnostic = bookingDiagnostic(read("SpeechResult"), ingress);
-      diagnostic.exit_reason = "state_invalid";
-      emitBookingDiagnostic(diagnostic);
       response.say(
         voiceOptions(),
         "This conversation has expired. No appointment was changed. Please call again. Goodbye."
@@ -758,12 +692,6 @@ export async function buildVoiceResponse({
   }
 
   if (state && (state.turns >= 30 || state.expires <= Date.now())) {
-    if (state.mode === "booking") {
-      const diagnostic = bookingDiagnostic(read("SpeechResult"), ingress, state);
-      diagnostic.next_stage = "exit";
-      diagnostic.exit_reason = state.turns >= 30 ? "turn_limit" : "other";
-      emitBookingDiagnostic(diagnostic);
-    }
     response.say(voiceOptions(), "This conversation has ended. Please call again if you need help. Goodbye.");
     response.hangup();
     return response.toString();
@@ -774,26 +702,15 @@ export async function buildVoiceResponse({
   const callerPhone = read("From");
 
   if (state?.mode === "booking") {
-    const diagnostic = bookingDiagnostic(speech, ingress, state);
-    try {
-      await bookingTurn({
-        response,
-        ingress,
-        binding,
-        business,
-        state,
-        speech,
-        callerPhone,
-        diagnostic,
-      });
-    } catch (error) {
-      diagnostic.exit_reason = "other";
-      throw error;
-    } finally {
-      diagnostic.failure_count_after = state.booking.failures || 0;
-      diagnostic.next_stage = diagnostic.exit_reason ? "exit" : state.booking.stage;
-      emitBookingDiagnostic(diagnostic);
-    }
+    await bookingTurn({
+      response,
+      ingress,
+      binding,
+      business,
+      state,
+      speech,
+      callerPhone,
+    });
 
     return response.toString();
   }
