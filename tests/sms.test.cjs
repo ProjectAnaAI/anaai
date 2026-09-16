@@ -76,6 +76,7 @@ for (const [error, expected] of [[undefined, 'accepted'], [providerError(400), '
   };
   const ai = load('lib/ai-actions.ts', {});
   const voice = load('lib/voice-booking.ts', {
+    '@/lib/voice-parsing': load('lib/voice-parsing.ts', { './ai-actions': load('lib/ai-actions.ts', {}) }),
     'node:crypto': require('node:crypto'), '@/lib/ai-actions': ai,
     '@/lib/appointment-actions': { isUuid: v => typeof v === 'string' && /^[\da-f-]{36}$/i.test(v) },
     '@/lib/supabase-server': { createSupabaseServiceClient: () => db }, '@/lib/twilio': h,

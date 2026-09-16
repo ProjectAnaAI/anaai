@@ -9,12 +9,12 @@ import {
   bookingRejection,
   bookingRejectionReply,
   canonicalTime,
-  uniqueService,
   validDate,
   type BookingReceipt,
 } from "@/lib/ai-actions";
 import { isUuid } from "@/lib/appointment-actions";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
+import { matchVoiceService } from "@/lib/voice-parsing";
 import { sendSms } from "@/lib/twilio";
 
 const PHONE = /^\+[1-9]\d{7,14}$/;
@@ -70,13 +70,6 @@ function normalizePhone(value: string) {
   }
 
   return digits ? `+${digits}` : "";
-}
-
-function normalizeSpokenService(value: string) {
-  return value
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 function fingerprint(value: unknown) {
@@ -141,38 +134,7 @@ export async function resolveVoiceService(
   spokenName: string
 ): Promise<Service | null> {
   const services = await loadVoiceServices(businessId);
-  const spoken = spokenName.trim();
-
-  if (!spoken) {
-    return null;
-  }
-
-  // Preserve the existing strict matcher first. This keeps exact and
-  // unambiguous existing behavior unchanged.
-  const strictMatch = uniqueService(services, spoken);
-
-  if (strictMatch) {
-    return strictMatch;
-  }
-
-  // Phone speech recognition can insert or remove harmless separators,
-  // for example "haircut" -> "hair cut". Compare a separator-free form,
-  // but only accept it when exactly one available service matches.
-  const normalizedSpoken = normalizeSpokenService(spoken);
-
-  if (!normalizedSpoken) {
-    return null;
-  }
-
-  const normalizedMatches = services.filter(
-    (service) =>
-      normalizeSpokenService(service.name) ===
-      normalizedSpoken
-  );
-
-  return normalizedMatches.length === 1
-    ? normalizedMatches[0]
-    : null;
+  return matchVoiceService(services, spokenName).match;
 }
 
 function voiceBookingReceipt(

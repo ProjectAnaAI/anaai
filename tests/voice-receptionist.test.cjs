@@ -47,6 +47,9 @@ function load(file, imports, logs = [], overrides = {}) {
   return exports;
 }
 
+const parsing = load('lib/voice-parsing.ts', { './ai-actions': load('lib/ai-actions.ts', {}) });
+const voiceConfig = load('lib/voice-config.ts', {});
+
 function callbackState(xml) {
   const action = /action="([^"]+)"/.exec(xml)?.[1];
   return action ? new URL(action.replaceAll('&amp;', '&')).searchParams.get('state') : null;
@@ -162,6 +165,8 @@ function handlerHarness({
       '@/lib/voice-receptionist': receptionist,
       '@/lib/voice-state': state,
       '@/lib/voice-booking': booking,
+      '@/lib/voice-parsing': parsing,
+      '@/lib/voice-config': voiceConfig,
     },
     logs,
     stateEnv
@@ -274,8 +279,9 @@ test('booking collects name, service, date and time without mutation before expl
   assert.match(flow.dated, /What time would you like/);
   assert.match(flow.timed, /Say yes to book this appointment/);
   assert.equal(h.bookings.length, 0);
-  assert.deepEqual(h.serviceLoads, [BUSINESS_ID]);
-  assert.deepEqual(h.serviceResolutions, [{ businessId: BUSINESS_ID, spoken: 'Haircut' }]);
+  assert.deepEqual(h.serviceLoads, [BUSINESS_ID, BUSINESS_ID]);
+  assert.ok(h.serviceLoads.length >= 2);
+  assert.ok(h.serviceLoads.every(id => id === BUSINESS_ID));
 });
 
 test('phone booking accepts natural spoken month dates in the business timezone', async () => {
@@ -445,7 +451,7 @@ test('invalid service, date and time reprompt without mutation', async () => {
 
   const date = await h.run({ speech: '2099-09-20', stateToken: callbackState(badDate), from: CALLER });
   const badTime = await h.run({ speech: 'whenever', stateToken: callbackState(date), from: CALLER });
-  assert.match(badTime, /couldn't verify that time/);
+  assert.match(badTime, /couldn't interpret that time/);
   assert.equal(h.bookings.length, 0);
 });
 
@@ -577,6 +583,7 @@ function route(ingress, overrides = {}, throws = false) {
     {
       'node:crypto': { default: require('node:crypto') },
       'next/server': { NextResponse: Response },
+      '@/lib/voice-config': voiceConfig,
       twilio: { default: twilio },
       '@/lib/voice-handler': {
         buildVoiceResponse: async ({ ingress: actual }) => {
@@ -710,6 +717,7 @@ function bookingModuleHarness({
       'node:crypto': require('node:crypto'),
       '@supabase/supabase-js': {},
       '@/lib/ai-actions': aiActions,
+      '@/lib/voice-parsing': parsing,
       '@/lib/appointment-actions': appointmentActions,
       '@/lib/supabase-server': { createSupabaseServiceClient: () => db },
       '@/lib/twilio': {
@@ -920,4 +928,68 @@ test('notification cannot send unless machine claim returns a valid claim', asyn
     'voice_book_appointment_business',
     'voice_claim_appointment_notification',
   ]);
+});
+
+for (const speech of ['yeah', 'correct', 'sounds good', 'book it', 'please book it']) test(`full flow requires and accepts explicit ${speech}`, async () => {
+  const h = handlerHarness({stateEnabled:true});
+  const flow = await advanceBooking(h, {time:'one p.m.'});
+  assert.equal(h.bookings.length,0);
+  assert.match(flow.timed,/1 PM/);
+  await h.run({speech,stateToken:flow.confirmToken,from:CALLER});
+  assert.equal(h.bookings.length,1);
+  assert.equal(h.bookings[0].time,'13:00');
+  assert.equal(h.requests.length,0);
+});
+for (const speech of ['no', 'cancel', "that's wrong", "don't book it", 'start over']) test(`full flow negative ${speech} never mutates`, async () => {
+  const h=handlerHarness({stateEnabled:true}); const flow=await advanceBooking(h);
+  const xml=await h.run({speech,stateToken:flow.confirmToken,from:CALLER});
+  assert.match(xml, /<Hangup/); assert.equal(h.bookings.length,0);
+});
+test('ambiguous confirmation exhausts bounded retries without booking', async () => {
+  const h=handlerHarness({stateEnabled:true}); const flow=await advanceBooking(h);
+  let token=flow.confirmToken, xml;
+  for (let n=0;n<3;n++) {
+    xml=await h.run({speech:'maybe',stateToken:token,from:CALLER});
+    if(n<2) {token=callbackState(xml); assert.ok(token);}
+  }
+  assert.match(xml,/<Hangup/); assert.equal(h.bookings.length,0); assert.equal(h.logs.length,0);
+});
+test('ambiguous time clarification preserves stage and canonicalizes full answer', async () => {
+  const h=handlerHarness({stateEnabled:true}); const flow=await advanceBooking(h,{time:'two thirty'});
+  assert.match(flow.timed,/2:30 AM or 2:30 PM/); assert.equal(h.bookings.length,0);
+  const clarified=await h.run({speech:'two thirty PM',stateToken:flow.confirmToken,from:CALLER});
+  assert.match(clarified,/Say yes to book/); assert.match(clarified,/2:30 PM/);
+  assert.equal(h.bookings.length,0);
+});
+test('ambiguous services prompt only the routed service list with no selection', async () => {
+  const h=handlerHarness({stateEnabled:true,services:[{id:SERVICE_ID,name:'Haircut basic'},{id:CUSTOMER_ID,name:'Haircut premium'}]});
+  const started=await h.run({digits:'1',from:CALLER});
+  const named=await h.run({speech:'Alex Customer',stateToken:callbackState(started),from:CALLER});
+  const xml=await h.run({speech:'a haircut please',stateToken:callbackState(named),from:CALLER});
+  assert.match(xml,/Which service did you mean: Haircut basic, Haircut premium/);
+  assert.match(xml,/hints="Haircut basic,Haircut premium"/);
+  assert.ok(h.serviceLoads.every(id=>id===BUSINESS_ID)); assert.equal(h.bookings.length,0);
+});
+test('past dates reprompt and silence never books', async () => {
+  const h=handlerHarness({stateEnabled:true}); const flow=await advanceBooking(h,{date:'2000-01-01',time:''});
+  assert.match(flow.dated,/already passed/);
+  const xml=await h.run({speech:'',stateToken:callbackState(flow.timed),from:CALLER});
+  assert.match(xml,/<Hangup/); assert.equal(h.bookings.length,0);
+});
+test('total turn limit is enforced before final affirmative execution', async () => {
+  const h=handlerHarness({stateEnabled:true}); const flow=await advanceBooking(h);
+  const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
+  const state=h.state.openVoiceState(flow.confirmToken,binding); state.turns=29;
+  const xml=await h.run({speech:'yes',stateToken:h.state.sealVoiceState(state,binding),from:CALLER});
+  assert.match(xml,/<Hangup/); assert.equal(h.bookings.length,0);
+});
+test('retry counter validates bounds and legacy state without counter still opens', () => {
+  const h=handlerHarness({stateEnabled:true});
+  const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
+  const state=h.state.initialBookingState();
+  assert.equal(h.state.openVoiceState(h.state.sealVoiceState(state,binding),binding).booking.failures,undefined);
+  for (const failures of [-1,3,1.5,'1']) {
+    state.booking.failures=failures;
+    assert.throws(()=>h.state.openVoiceState(h.state.sealVoiceState(state,binding),binding));
+  }
 });

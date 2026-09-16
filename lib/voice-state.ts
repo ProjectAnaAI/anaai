@@ -37,6 +37,7 @@ export type VoiceBookingState = {
   mode: "booking";
   booking: {
     stage: VoiceBookingStage;
+    failures?: number;
     idempotencyKey: string;
     customerName: string | null;
     serviceId: string | null;
@@ -162,7 +163,8 @@ function validBookingState(
   ];
 
   if (
-    Object.keys(booking).length !== expectedKeys.length ||
+    Object.keys(booking).some(key => ![...expectedKeys, "failures"].includes(key)) ||
+    (booking.failures !== undefined && (typeof booking.failures !== "number" || !Number.isInteger(booking.failures) || booking.failures < 0 || booking.failures > 2)) ||
     expectedKeys.some((field) => !(field in booking))
   ) {
     return false;

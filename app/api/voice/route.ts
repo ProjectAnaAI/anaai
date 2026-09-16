@@ -3,6 +3,8 @@ import twilio from "twilio";
 
 import { buildVoiceResponse } from "@/lib/voice-handler";
 
+import { voiceOptions } from "@/lib/voice-config";
+
 export const runtime = "nodejs";
 
 function twimlResponse(xml: string) {
@@ -148,9 +150,7 @@ export async function POST(request: Request) {
     const response = new twilio.twiml.VoiceResponse();
 
     response.say(
-      {
-        voice: "alice",
-      },
+      voiceOptions(),
       "I'm sorry, AnaAI is having trouble responding right now. Please try again later."
     );
 
@@ -162,9 +162,7 @@ export async function GET() {
   const response = new twilio.twiml.VoiceResponse();
 
   response.say(
-    {
-      voice: "alice",
-    },
+    voiceOptions(),
     "AnaAI voice service is online."
   );
 

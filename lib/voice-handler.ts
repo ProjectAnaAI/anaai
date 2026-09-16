@@ -5,7 +5,6 @@ import twilio from "twilio";
 import {
   executeVoiceBooking,
   loadVoiceServices,
-  resolveVoiceService,
 } from "@/lib/voice-booking";
 import {
   answerVoiceQuestion,
@@ -23,6 +22,9 @@ import {
   type VoiceState,
 } from "@/lib/voice-state";
 
+import { bookingDate, businessLocalDate, parseSpokenTime, confirmation as interpretConfirmation, matchVoiceService } from "@/lib/voice-parsing";
+import { voiceOptions, gatherOptions } from "@/lib/voice-config";
+
 export type VoiceIngress = "production" | "trial";
 
 type BusinessContext = {
@@ -39,12 +41,6 @@ const TRANSFER_UNAVAILABLE =
 
 const BOOKING_STATE_UNAVAILABLE =
   "I'm sorry, phone booking is temporarily unavailable. I can still help with business information.";
-
-const YES =
-  /^(?:yes|yeah|yep|correct|confirm|confirmed|that's right|that is right|looks good|sounds good|book it|please do)[.!?, ]*$/i;
-
-const NO =
-  /^(?:no|nope|cancel|stop|never mind|nevermind|go back|start over)[.!?, ]*$/i;
 
 const BOOKING_INTENT =
   /\b(?:book|booking|schedule|reserve)\b/i;
@@ -248,7 +244,8 @@ function gather(
   binding: VoiceBinding,
   message: string,
   state: VoiceState | null,
-  mode = "listen"
+  mode = "listen",
+  services: string[] = []
 ) {
   if (
     state &&
@@ -256,7 +253,7 @@ function gather(
       state.expires <= Date.now())
   ) {
     response.say(
-      { voice: "alice" },
+      voiceOptions(),
       "Thanks for calling. Please call again if you need more help. Goodbye."
     );
     response.hangup();
@@ -268,263 +265,14 @@ function gather(
     : undefined;
 
   const input = response.gather({
-    input: ["speech", "dtmf"],
-    numDigits: 1,
-    action: callbackUrl(
-      ingress,
-      mode,
-      token
-    ),
-    method: "POST",
-    timeout: 6,
-    speechTimeout: "auto",
-    language: "en-US",
-    actionOnEmptyResult: true,
+    ...gatherOptions(state?.mode === "booking" ? state.booking.stage : undefined, services),
+    action: callbackUrl(ingress, mode, token),
   });
 
   input.say(
-    { voice: "alice" },
+    voiceOptions(),
     message
   );
-}
-
-function businessLocalDate(
-  timezone: string | null,
-  offsetDays = 0
-) {
-  if (!timezone) {
-    return null;
-  }
-
-  try {
-    const base = new Date(
-      Date.now() +
-        offsetDays * 24 * 60 * 60_000
-    );
-
-    const parts =
-      new Intl.DateTimeFormat("en-CA", {
-        timeZone: timezone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).formatToParts(base);
-
-    const values = Object.fromEntries(
-      parts.map((part) => [
-        part.type,
-        part.value,
-      ])
-    );
-
-    if (
-      !values.year ||
-      !values.month ||
-      !values.day
-    ) {
-      return null;
-    }
-
-    return `${values.year}-${values.month}-${values.day}`;
-  } catch {
-    return null;
-  }
-}
-
-function bookingDate(
-  speech: string,
-  timezone: string | null
-) {
-  const text = speech
-    .replace(/[,.]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-
-  if (text === "today") {
-    return businessLocalDate(timezone);
-  }
-
-  if (text === "tomorrow") {
-    return businessLocalDate(
-      timezone,
-      1
-    );
-  }
-
-  const validCanonicalDate = (
-    year: number,
-    month: number,
-    day: number
-  ) => {
-    if (
-      !Number.isInteger(year) ||
-      !Number.isInteger(month) ||
-      !Number.isInteger(day) ||
-      year < 1 ||
-      year > 9999 ||
-      month < 1 ||
-      month > 12 ||
-      day < 1 ||
-      day > 31
-    ) {
-      return null;
-    }
-
-    const value = `${String(year).padStart(
-      4,
-      "0"
-    )}-${String(month).padStart(
-      2,
-      "0"
-    )}-${String(day).padStart(2, "0")}`;
-
-    const date = new Date(
-      `${value}T00:00:00Z`
-    );
-
-    if (
-      !Number.isFinite(date.getTime()) ||
-      date.toISOString().slice(0, 10) !==
-        value
-    ) {
-      return null;
-    }
-
-    return value;
-  };
-
-  const iso =
-    /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(
-      text
-    );
-
-  if (iso) {
-    return validCanonicalDate(
-      Number(iso[1]),
-      Number(iso[2]),
-      Number(iso[3])
-    );
-  }
-
-  const months: Record<string, number> = {
-    january: 1,
-    february: 2,
-    march: 3,
-    april: 4,
-    may: 5,
-    june: 6,
-    july: 7,
-    august: 8,
-    september: 9,
-    october: 10,
-    november: 11,
-    december: 12,
-  };
-
-  const monthNames =
-    Object.keys(months).join("|");
-
-  const monthFirst = new RegExp(
-    `\\b(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?\\b`
-  ).exec(text);
-
-  const yearFirst = new RegExp(
-    `\\b(\\d{4})\\s+(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`
-  ).exec(text);
-
-  let month: number;
-  let day: number;
-  let explicitYear: number | null;
-
-  if (monthFirst) {
-    month = months[monthFirst[1]];
-    day = Number(monthFirst[2]);
-    explicitYear = monthFirst[3]
-      ? Number(monthFirst[3])
-      : null;
-  } else if (yearFirst) {
-    explicitYear = Number(yearFirst[1]);
-    month = months[yearFirst[2]];
-    day = Number(yearFirst[3]);
-  } else {
-    return null;
-  }
-
-  if (explicitYear !== null) {
-    return validCanonicalDate(
-      explicitYear,
-      month,
-      day
-    );
-  }
-
-  const today = businessLocalDate(timezone);
-
-  if (!today) {
-    return null;
-  }
-
-  const currentYear = Number(
-    today.slice(0, 4)
-  );
-
-  const thisYear = validCanonicalDate(
-    currentYear,
-    month,
-    day
-  );
-
-  if (thisYear && thisYear >= today) {
-    return thisYear;
-  }
-
-  return validCanonicalDate(
-    currentYear + 1,
-    month,
-    day
-  );
-}
-
-function bookingTime(speech: string) {
-  const text = speech
-    .trim()
-    .toLowerCase()
-    .replace(/\./g, "");
-
-  const twelve =
-    /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm)\b/.exec(
-      text
-    );
-
-  if (twelve) {
-    let hour = Number(twelve[1]);
-    const minute = Number(
-      twelve[2] || "00"
-    );
-
-    if (twelve[3] === "am") {
-      if (hour === 12) {
-        hour = 0;
-      }
-    } else if (hour !== 12) {
-      hour += 12;
-    }
-
-    return `${String(hour).padStart(
-      2,
-      "0"
-    )}:${String(minute).padStart(2, "0")}`;
-  }
-
-  const twentyFour =
-    /\b([01]\d|2[0-3]):([0-5]\d)\b/.exec(
-      text
-    );
-
-  return twentyFour
-    ? `${twentyFour[1]}:${twentyFour[2]}`
-    : null;
 }
 
 function spokenTime(value: string) {
@@ -608,7 +356,7 @@ async function bookingTurn({
   if (!speech) {
     if (state.silence >= 1) {
       response.say(
-        { voice: "alice" },
+        voiceOptions(),
         "I couldn't hear you. No appointment was booked. Please call again when you're ready. Goodbye."
       );
       response.hangup();
@@ -623,7 +371,7 @@ async function bookingTurn({
         : state.booking.stage === "service"
           ? "I didn't hear the service. Which service would you like?"
           : state.booking.stage === "date"
-            ? "I didn't hear the date. Please say today, tomorrow, or a date like 2026-09-20."
+            ? "I didn't hear the date. Please say the month and day, such as September 24th."
             : state.booking.stage === "time"
               ? "I didn't hear the time. Please say a time such as 10 AM or 2:30 PM."
               : `I didn't hear your answer. ${bookingSummary(
@@ -642,14 +390,22 @@ async function bookingTurn({
 
   state.silence = 0;
 
-  if (NO.test(speech)) {
+  if (interpretConfirmation(speech) === "no") {
     response.say(
-      { voice: "alice" },
+      voiceOptions(),
       "Okay. No appointment was booked. Thanks for calling. Goodbye."
     );
     response.hangup();
     return;
   }
+
+  const retry = (message: string, names: string[] = []) => {
+    state.booking.failures = (state.booking.failures || 0) + 1;
+    if (state.booking.failures >= 3) {
+      response.say(voiceOptions(), "I'm sorry, I couldn't verify those details. No appointment was booked. Please contact the business for help. Goodbye.");
+      response.hangup();
+    } else gather(response, ingress, binding, message, state, "listen", names);
+  };
 
   if (state.booking.stage === "name") {
     const name = speech
@@ -661,16 +417,11 @@ async function bookingTurn({
       name.length > 120 ||
       /[<>\x00-\x1f]/.test(name)
     ) {
-      gather(
-        response,
-        ingress,
-        binding,
-        "I couldn't use that name. Please say the name for the appointment.",
-        state
-      );
+      retry("I couldn't use that name. Please say the name for the appointment.");
       return;
     }
 
+    state.booking.failures = 0;
     state.booking.customerName = name;
     state.booking.stage = "service";
 
@@ -681,7 +432,7 @@ async function bookingTurn({
 
     if (!services.length) {
       response.say(
-        { voice: "alice" },
+        voiceOptions(),
         "I'm sorry, I can't find any services available for phone booking right now. No appointment was booked."
       );
       response.hangup();
@@ -698,29 +449,21 @@ async function bookingTurn({
       ingress,
       binding,
       `Which service would you like? Available services include ${names}.`,
-      state
+      state, "listen", services.map(service => service.name)
     );
     return;
   }
 
   if (state.booking.stage === "service") {
-    const service =
-      await resolveVoiceService(
-        business.businessId,
-        speech
-      );
-
+    const services = await loadVoiceServices(business.businessId);
+    const { match: service, candidates } = matchVoiceService(services, speech);
     if (!service) {
-      gather(
-        response,
-        ingress,
-        binding,
-        "I couldn't match that to one available service. Please say the service name again.",
-        state
-      );
+      const choices = (candidates.length ? candidates : services).slice(0, 3).map(s => s.name).join(", ");
+      retry(candidates.length > 1 ? `Which service did you mean: ${choices}?` :
+        `I couldn't match that service. ${choices ? `Available options include ${choices}.` : "Please contact the business for services."}`, services.map(s => s.name));
       return;
     }
-
+    state.booking.failures = 0;
     state.booking.serviceId = service.id;
     state.booking.serviceName =
       service.name;
@@ -730,7 +473,7 @@ async function bookingTurn({
       response,
       ingress,
       binding,
-      `What date would you like for ${service.name}? You can say today, tomorrow, or a date like 2026-09-20.`,
+      `What date would you like for ${service.name}? You can say tomorrow, or a month and day.`,
       state
     );
     return;
@@ -743,13 +486,7 @@ async function bookingTurn({
     );
 
     if (!date) {
-      gather(
-        response,
-        ingress,
-        binding,
-        "I couldn't verify that date. Please say today, tomorrow, or a date like 2026-09-20.",
-        state
-      );
+      retry("I couldn't verify that date. Please say the month, day, and year.");
       return;
     }
 
@@ -759,16 +496,11 @@ async function bookingTurn({
       );
 
     if (today && date < today) {
-      gather(
-        response,
-        ingress,
-        binding,
-        "That date has already passed. Please choose another date.",
-        state
-      );
+      retry("That date has already passed. Please choose another date.");
       return;
     }
 
+    state.booking.failures = 0;
     state.booking.date = date;
     state.booking.stage = "time";
 
@@ -783,20 +515,15 @@ async function bookingTurn({
   }
 
   if (state.booking.stage === "time") {
-    const time = bookingTime(speech);
-
-    if (!time) {
-      gather(
-        response,
-        ingress,
-        binding,
-        "I couldn't verify that time. Please say a time such as 10 AM or 2:30 PM.",
-        state
-      );
+    const parsed = parseSpokenTime(speech);
+    if (parsed.kind !== "valid") {
+      retry(parsed.kind === "ambiguous"
+        ? `Did you mean ${spokenTime(parsed.options[0])} or ${spokenTime(parsed.options[1])}? Please say the full time with AM or PM.`
+        : "I couldn't interpret that time. Please say a valid time such as one PM or two thirty PM.");
       return;
     }
-
-    state.booking.time = time;
+    state.booking.failures = 0;
+    state.booking.time = parsed.value;
     state.booking.stage = "confirm";
 
     gather(
@@ -811,16 +538,8 @@ async function bookingTurn({
     return;
   }
 
-  if (!YES.test(speech)) {
-    gather(
-      response,
-      ingress,
-      binding,
-      `Please say yes to book ${bookingSummary(
-        state
-      )}, or no to cancel.`,
-      state
-    );
+  if (interpretConfirmation(speech) !== "yes") {
+    retry(`Please say yes to book ${bookingSummary(state)}, or no to cancel.`);
     return;
   }
 
@@ -834,7 +553,7 @@ async function bookingTurn({
     !booking.time
   ) {
     response.say(
-      { voice: "alice" },
+      voiceOptions(),
       "I couldn't verify all of the booking details. No appointment was booked. Please call again."
     );
     response.hangup();
@@ -846,7 +565,7 @@ async function bookingTurn({
 
   if (!PHONE.test(phone)) {
     response.say(
-      { voice: "alice" },
+      voiceOptions(),
       "I couldn't verify a callback phone number for this appointment. No appointment was booked."
     );
     response.hangup();
@@ -870,7 +589,7 @@ async function bookingTurn({
 
   if (!result.success) {
     response.say(
-      { voice: "alice" },
+      voiceOptions(),
       result.message
     );
     response.hangup();
@@ -887,7 +606,7 @@ async function bookingTurn({
     : " I couldn't verify the text confirmation status.";
 
   response.say(
-    { voice: "alice" },
+    voiceOptions(),
     `${confirmation}${sms} Thanks for calling. Goodbye.`
   );
   response.hangup();
@@ -922,7 +641,7 @@ export async function buildVoiceResponse({
     );
 
     response.say(
-      { voice: "alice" },
+      voiceOptions(),
       "I'm sorry, AnaAI could not identify the business for this phone number."
     );
     response.hangup();
@@ -953,7 +672,7 @@ export async function buildVoiceResponse({
       );
     } catch {
       response.say(
-        { voice: "alice" },
+        voiceOptions(),
         "This conversation has expired. No appointment was changed. Please call again. Goodbye."
       );
       response.hangup();
@@ -970,6 +689,12 @@ export async function buildVoiceResponse({
 
   if (state) {
     state.turns++;
+  }
+
+  if (state && (state.turns >= 30 || state.expires <= Date.now())) {
+    response.say(voiceOptions(), "This conversation has ended. Please call again if you need help. Goodbye.");
+    response.hangup();
+    return response.toString();
   }
 
   const speech = read("SpeechResult");
@@ -1010,7 +735,7 @@ export async function buildVoiceResponse({
 
   if (goodbye) {
     response.say(
-      { voice: "alice" },
+      voiceOptions(),
       "Thanks for calling. Goodbye!"
     );
     response.hangup();
@@ -1029,7 +754,7 @@ export async function buildVoiceResponse({
         (mode === "retry" ? 1 : 0)) >= 1
     ) {
       response.say(
-        { voice: "alice" },
+        voiceOptions(),
         "I couldn't hear you. Please call again when you're ready. Goodbye."
       );
       response.hangup();
