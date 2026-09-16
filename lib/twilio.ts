@@ -11,6 +11,11 @@ type SendSmsResult =
       outcome?: "failed" | "uncertain";
     };
 
+type TwilioProviderError = Error & {
+  code?: number;
+  status?: number;
+};
+
 function normalizePhoneNumber(phone: string) {
   const trimmed = phone.trim();
 
@@ -29,6 +34,28 @@ function normalizePhoneNumber(phone: string) {
   }
 
   return trimmed;
+}
+
+function providerErrorDetails(error: unknown) {
+  if (!(error instanceof Error)) {
+    return {
+      code: null,
+      status: null,
+    };
+  }
+
+  const providerError = error as TwilioProviderError;
+
+  return {
+    code:
+      typeof providerError.code === "number"
+        ? providerError.code
+        : null,
+    status:
+      typeof providerError.status === "number"
+        ? providerError.status
+        : null,
+  };
 }
 
 export async function sendSms({
@@ -86,19 +113,16 @@ export async function sendSms({
       messageSid: message.sid,
     };
   } catch (error: unknown) {
-    console.error("AnaAI SMS provider request failed.");
+    const details = providerErrorDetails(error);
 
-    if (error instanceof Error) {
-      return {
-        success: false,
-        error: "SMS provider request failed.",
-        outcome: "uncertain",
-      };
-    }
+    console.error("AnaAI SMS provider request failed.", {
+      code: details.code,
+      status: details.status,
+    });
 
     return {
       success: false,
-      error: "Unknown Twilio SMS error.",
+      error: "SMS provider request failed.",
       outcome: "uncertain",
     };
   }
