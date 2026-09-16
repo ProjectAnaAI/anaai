@@ -414,6 +414,10 @@ function addConfigurationError(response: twilio.twiml.VoiceResponse) {
 }
 
 export async function POST(request: Request) {
+  console.log(
+    "[voice diagnostic] request header names:",
+    Array.from(request.headers.keys()).sort()
+  );
   try {
     const url = new URL(request.url);
     const mode = url.searchParams.get("mode") || "";
