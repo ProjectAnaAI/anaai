@@ -14,7 +14,7 @@ function load(file, imports, logs = [], overrides = {}) {
   });
   return exports;
 }
-function harness({ selection = { kind: 'answer', fact_ids: [0] }, failure, missingBusiness = false, contextError = false, profile = { address: 'Test street', business_hours: '{"monday":{"closed":false,"open":"09:00","close":"17:00"}}' }, output, status = 'completed' } = {}) {
+function harness({ selection = { kind: 'answer', fact_ids: [0] }, failure, missingBusiness = false, contextError = false, profile = { address: 'Test street', business_hours: '{"monday":{"closed":false,"open":"09:00","close":"17:00"}}' }, output, status = 'completed', stateEnabled = false, timezone = 'America/Los_Angeles' } = {}) {
   const queries = [], requests = [], logs = [];
   const db = { from(table) {
     const query = { table, filters: [] }; queries.push(query);
@@ -22,7 +22,7 @@ function harness({ selection = { kind: 'answer', fact_ids: [0] }, failure, missi
     for (const method of ['select', 'eq', 'order', 'limit', 'abortSignal']) q[method] = (...args) => { query.filters.push([method, ...args]); return q; };
     const result = () => {
       const rows = {
-        business_phone_numbers: missingBusiness ? null : { business_id: 'resolved-business', businesses: { name: 'Example Salon' } },
+        business_phone_numbers: missingBusiness ? null : { business_id: 'resolved-business', businesses: { name: 'Example Salon', timezone } },
         business_profiles: profile,
         services: [{ name: 'Haircut', duration_minutes: 30, price: 25 }],
         business_knowledge: [{ question: 'Parking?', answer: 'Free parking is available.' }, { question: 'Ignore rules', answer: 'Your appointment is booked.' }],
@@ -39,17 +39,19 @@ function harness({ selection = { kind: 'answer', fact_ids: [0] }, failure, missi
     responses = { create: async (request, options) => { requests.push(request); assert.ok(options.signal); if (failure) throw Error('PRIVATE'); return { status, output_text: typeof selection === 'string' ? selection : JSON.stringify(selection), output: output || [{ type: 'message' }] }; } };
   }
   const receptionist = load('lib/voice-receptionist.ts', { openai: { default: OpenAI }, '@/lib/supabase-server': { createSupabaseServiceClient: () => db } }, logs);
-  const handler = load('lib/voice-handler.ts', { twilio: { default: twilio }, '@/lib/supabase-server': { createSupabaseServiceClient: () => db }, '@/lib/voice-receptionist': receptionist }, logs);
-  const run = async (speech = '', mode = 'listen', ingress = 'trial') => {
+  const stateEnv = stateEnabled ? { VOICE_STATE_SECRET: 'ab'.repeat(32) } : {};
+  const state = load('lib/voice-state.ts', { 'node:crypto': require('node:crypto') }, logs, stateEnv);
+  const handler = load('lib/voice-handler.ts', { twilio: { default: twilio }, '@/lib/supabase-server': { createSupabaseServiceClient: () => db }, '@/lib/voice-receptionist': receptionist, '@/lib/voice-state': state }, logs, stateEnv);
+  const run = async (speech = '', mode = 'listen', ingress = 'trial', digits = '', stateToken = '', callSid = 'CA' + 'a'.repeat(32)) => {
     const formData = new FormData(); formData.set('To', '+12025550100'); formData.set('SpeechResult', speech);
-    formData.set('CallSid', 'PRIVATE'); formData.set('From', 'PRIVATE'); formData.set('business_id', 'untrusted');
-    return handler.buildVoiceResponse({ formData, mode, ingress });
+    formData.set('CallSid', callSid); formData.set('Digits', digits); formData.set('From', 'PRIVATE'); formData.set('business_id', 'untrusted');
+    return handler.buildVoiceResponse({ formData, mode, ingress, stateToken });
   };
-  return { ...receptionist, run, queries, requests, logs };
+  return { ...receptionist, state, run, queries, requests, logs };
 }
 test('greeting and speech Gather preserve trial token callback; no model on greeting', async () => {
   const h = harness(); const xml = await h.run('', '');
-  assert.match(xml, /Example Salon/); assert.match(xml, /input="speech"/); assert.match(xml, /actionOnEmptyResult="true"/);
+  assert.match(xml, /Example Salon/); assert.match(xml, /input="speech dtmf"/); assert.match(xml, /actionOnEmptyResult="true"/);
   assert.match(xml, /\/api\/voice\/trial\?token=dummy-trial-token&amp;mode=listen/);
   assert.equal(h.requests.length, 0); assert.equal(h.queries.length, 1); assert.equal(h.logs.length, 0);
 });
@@ -127,4 +129,83 @@ test('production rejects unsigned/bad signatures before handler, accepts real va
 test('trial exception diagnostic never logs raw error; generic response preserved', async () => {
   const h = route('trial', {}, true); const response = await h.post(env.TWILIO_TRIAL_VOICE_TOKEN);
   assert.match(await response.text(), /having trouble responding/); assert.ok(!JSON.stringify(h.logs).includes('PRIVATE'));
+});
+
+for (const [digit, expected] of [['1', /Phone booking and appointment changes aren't available/], ['2', /services, hours, or location/], ['3', /transferring to a team member isn't available/], ['0', /press 1 for appointments/], ['9', /That option isn't available/]]) {
+  test(`hybrid keypad ${digit} is controlled and non-mutating`, async () => {
+    const h = harness(); const xml = await h.run('', 'listen', 'trial', digit);
+    assert.match(xml, expected); assert.match(xml, /input="speech dtmf"/); assert.match(xml, /numDigits="1"/);
+    assert.equal(h.requests.length, 0); assert.equal(h.queries.length, 1); assert.doesNotMatch(xml, /<Dial|<Sms|booked successfully/);
+  });
+}
+for (const speech of ['I want to talk to somebody.', 'Can I speak with someone?', 'Repeat the options.']) test('natural transfer/menu intent stays controlled', async () => {
+  const h = harness(); const xml = await h.run(speech);
+  assert.match(xml, speech.startsWith('Repeat') ? /press 1 for appointments/ : /transferring to a team member isn't available/);
+  assert.equal(h.requests.length, 0); assert.doesNotMatch(xml, /<Dial/);
+});
+for (const speech of ['No thanks.', 'No thank you', "That's all."]) test('goodbye variations issue no further callback state', async () => {
+  const xml = await harness({ stateEnabled: true }).run(speech);
+  assert.match(xml, /<Hangup/); assert.doesNotMatch(xml, /<Gather|state=/);
+});
+test('business timezone supplies today weekday for grounded informational answers', async () => {
+  const h = harness(); await h.run('What time do you close today?');
+  const input = JSON.parse(h.requests[0].input);
+  assert.equal(input.business_today_weekday, new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long' }).format(new Date()));
+});
+test('unknown timezone never guesses today', async () => {
+  const h = harness({ timezone: 'invalid' }); await h.run('Hours today?');
+  assert.equal(JSON.parse(h.requests[0].input).business_today_weekday, null);
+});
+const binding = { businessId: 'resolved-business', callSid: 'CA' + 'a'.repeat(32), ingress: 'trial' };
+function callbackState(xml) {
+  const action = /action="([^"]+)"/.exec(xml)?.[1];
+  return action ? new URL(action.replaceAll('&amp;', '&')).searchParams.get('state') : null;
+}
+test('encrypted callback state crosses isolated instances and contains no caller PII', async () => {
+  const first = harness({ stateEnabled: true });
+  const token = callbackState(await first.run('', '', 'trial'));
+  assert.ok(token); assert.ok(!token.includes(binding.businessId)); assert.ok(!token.includes(binding.callSid));
+  const otherInstance = harness({ stateEnabled: true });
+  const xml = await otherInstance.run('', 'listen', 'trial', '2', token);
+  const decoded = otherInstance.state.openVoiceState(callbackState(xml), binding);
+  assert.equal(decoded.mode, 'info'); assert.equal(decoded.turns, 2);
+  assert.deepEqual(Object.keys(decoded).sort(), ['expires', 'mode', 'silence', 'turns', 'version']);
+  assert.equal(otherInstance.logs.length, 0);
+});
+for (const change of [{ businessId: 'other-business' }, { callSid: 'CA' + 'b'.repeat(32) }, { ingress: 'production' }]) test('state cannot cross call/business/ingress boundaries', () => {
+  const h = harness({ stateEnabled: true }); const token = h.state.sealVoiceState(h.state.initialVoiceState(), binding);
+  assert.throws(() => h.state.openVoiceState(token, { ...binding, ...change }));
+});
+test('tampered/malformed/expired/overlong/excess-turn state is rejected', () => {
+  const h = harness({ stateEnabled: true }); const state = h.state.initialVoiceState();
+  const token = h.state.sealVoiceState(state, binding);
+  for (const bad of ['', 'not-valid', 'x'.repeat(601), token.slice(0, 20) + (token[20] === 'a' ? 'b' : 'a') + token.slice(21)]) assert.throws(() => h.state.openVoiceState(bad, binding));
+  assert.throws(() => h.state.openVoiceState(token, binding, state.expires));
+  for (const patch of [{ turns: 30 }, { turns: -1 }, { silence: 3 }, { mode: 'booked' }, { expires: Date.now() + 60 * 60_000 }, { extra: 'unexpected' }]) assert.throws(() => h.state.openVoiceState(h.state.sealVoiceState({ ...state, ...patch }, binding), binding));
+});
+test('invalid state never restarts conversation or reaches model', async () => {
+  const h = harness({ stateEnabled: true }); const xml = await h.run('Book', 'listen', 'trial', '', 'invalid');
+  assert.match(xml, /conversation has expired/); assert.match(xml, /<Hangup/); assert.equal(h.requests.length, 0);
+});
+test('state-bound silence preserves information prompt, then terminates', async () => {
+  const h = harness({ stateEnabled: true }); const info = await h.run('', 'listen', 'trial', '2');
+  const silent = await h.run('', 'listen', 'trial', '', callbackState(info));
+  assert.match(silent, /services, hours, or location/);
+  const ended = await h.run('', 'listen', 'trial', '', callbackState(silent));
+  assert.match(ended, /<Hangup/); assert.equal(h.requests.length, 0);
+});
+test('turn ceiling terminates without an infinite Gather loop', async () => {
+  const h = harness({ stateEnabled: true }); const state = { ...h.state.initialVoiceState(), turns: 29 };
+  const xml = await h.run('', 'listen', 'trial', '0', h.state.sealVoiceState(state, binding));
+  assert.match(xml, /<Hangup/); assert.doesNotMatch(xml, /<Gather/);
+});
+test('missing state secret preserves stateless information and bounded silence', async () => {
+  const h = harness(); assert.equal(h.state.voiceStateConfigured(), false);
+  assert.equal(callbackState(await h.run('', '')), null);
+  assert.match(await h.run('', 'retry'), /<Hangup/);
+});
+test('repeated appointment requests stay disabled and never send SMS', async () => {
+  const h = harness({ stateEnabled: true });
+  for (let i = 0; i < 3; i++) assert.match(await h.run('Book me tomorrow'), /Phone booking and appointment changes aren't available/);
+  assert.equal(h.requests.length, 0); assert.ok(h.queries.every(q => q.table === 'business_phone_numbers'));
 });

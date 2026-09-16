@@ -137,6 +137,7 @@ export async function POST(request: Request) {
     const xml = await buildVoiceResponse({
       formData,
       mode,
+      stateToken: url.searchParams.get("state") || "",
       ingress: "production",
     });
 
