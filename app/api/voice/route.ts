@@ -23,6 +23,7 @@ type TwilioVerificationResult =
         | "missing-signature"
         | "invalid-signature"
         | "missing-auth-token"
+        | "missing-webhook-url"
         | "validation-error";
     };
 
@@ -44,30 +45,55 @@ function forbiddenResponse() {
   });
 }
 
-function getPublicRequestUrl(request: Request) {
-  const requestUrl = new URL(request.url);
+function getConfiguredVoiceWebhookUrl() {
+  const value = process.env.TWILIO_VOICE_WEBHOOK_URL?.trim();
 
-  const forwardedProto =
-    request.headers.get("x-forwarded-proto") ||
-    requestUrl.protocol.replace(":", "");
+  if (!value) {
+    return "";
+  }
 
-  const forwardedHost =
-    request.headers.get("x-forwarded-host") ||
-    request.headers.get("host") ||
-    requestUrl.host;
+  try {
+    const url = new URL(value);
 
-  return `${forwardedProto}://${forwardedHost}${requestUrl.pathname}${requestUrl.search}`;
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return "";
+    }
+
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
-function getVoiceUrl(request: Request, mode?: string) {
-  const publicRequestUrl = new URL(getPublicRequestUrl(request));
-  const url = new URL("/api/voice", publicRequestUrl.origin);
+function getVoiceUrl(mode?: string) {
+  const configuredUrl = getConfiguredVoiceWebhookUrl();
+
+  if (!configuredUrl) {
+    throw new Error("TWILIO_VOICE_WEBHOOK_URL is missing or invalid.");
+  }
+
+  const url = new URL(configuredUrl);
 
   if (mode) {
     url.searchParams.set("mode", mode);
   }
 
   return url.toString();
+}
+
+function getValidationUrl(request: Request) {
+  const configuredUrl = getConfiguredVoiceWebhookUrl();
+
+  if (!configuredUrl) {
+    return "";
+  }
+
+  const incomingUrl = new URL(request.url);
+  const validationUrl = new URL(configuredUrl);
+
+  validationUrl.search = incomingUrl.search;
+
+  return validationUrl.toString();
 }
 
 function formDataToTwilioParams(formData: FormData) {
@@ -158,7 +184,10 @@ async function resolveBusinessByCalledNumber(
       : "";
 
   if (!data.business_id || !businessName) {
-    console.error("AnaAI voice business lookup returned incomplete routing data.");
+    console.error(
+      "AnaAI voice business lookup returned incomplete routing data."
+    );
+
     throw new Error("Voice business routing data is incomplete.");
   }
 
@@ -198,13 +227,23 @@ function verifyTwilioWebhook({
     };
   }
 
-  try {
-    const publicUrl = getPublicRequestUrl(request);
+  const validationUrl = getValidationUrl(request);
 
+  if (!validationUrl) {
+    console.error("TWILIO_VOICE_WEBHOOK_URL is missing or invalid.");
+
+    return {
+      allowed: false,
+      verified: false,
+      reason: "missing-webhook-url",
+    };
+  }
+
+  try {
     const isValid = twilio.validateRequest(
       authToken,
       signature,
-      publicUrl,
+      validationUrl,
       params
     );
 
@@ -236,13 +275,12 @@ function verifyTwilioWebhook({
 
 function addMainMenu(
   response: twilio.twiml.VoiceResponse,
-  request: Request,
   business: BusinessContext
 ) {
   const gather = response.gather({
     input: ["dtmf", "speech"],
     numDigits: 1,
-    action: getVoiceUrl(request, "menu"),
+    action: getVoiceUrl("menu"),
     method: "POST",
     timeout: 6,
     speechTimeout: "auto",
@@ -266,7 +304,7 @@ function addMainMenu(
     {
       method: "POST",
     },
-    getVoiceUrl(request)
+    getVoiceUrl()
   );
 }
 
@@ -332,13 +370,10 @@ function normalizeChoice({
   return "";
 }
 
-function addAppointmentTest(
-  response: twilio.twiml.VoiceResponse,
-  request: Request
-) {
+function addAppointmentTest(response: twilio.twiml.VoiceResponse) {
   const gather = response.gather({
     input: ["speech"],
-    action: getVoiceUrl(request, "appointment-test"),
+    action: getVoiceUrl("appointment-test"),
     method: "POST",
     timeout: 6,
     speechTimeout: "auto",
@@ -363,13 +398,11 @@ function addAppointmentTest(
     {
       method: "POST",
     },
-    getVoiceUrl(request)
+    getVoiceUrl()
   );
 }
 
-function addConfigurationError(
-  response: twilio.twiml.VoiceResponse
-) {
+function addConfigurationError(response: twilio.twiml.VoiceResponse) {
   response.say(
     {
       voice: "alice",
@@ -425,7 +458,7 @@ export async function POST(request: Request) {
     });
 
     if (!mode) {
-      addMainMenu(response, request, business);
+      addMainMenu(response, business);
       return twimlResponse(response.toString());
     }
 
@@ -436,7 +469,7 @@ export async function POST(request: Request) {
       });
 
       if (choice === "1") {
-        addAppointmentTest(response, request);
+        addAppointmentTest(response);
         return twimlResponse(response.toString());
       }
 
@@ -452,7 +485,7 @@ export async function POST(request: Request) {
           {
             method: "POST",
           },
-          getVoiceUrl(request)
+          getVoiceUrl()
         );
 
         return twimlResponse(response.toString());
@@ -470,14 +503,14 @@ export async function POST(request: Request) {
           {
             method: "POST",
           },
-          getVoiceUrl(request)
+          getVoiceUrl()
         );
 
         return twimlResponse(response.toString());
       }
 
       if (choice === "4") {
-        addMainMenu(response, request, business);
+        addMainMenu(response, business);
         return twimlResponse(response.toString());
       }
 
@@ -488,7 +521,7 @@ export async function POST(request: Request) {
         "I'm sorry, I didn't understand your selection."
       );
 
-      addMainMenu(response, request, business);
+      addMainMenu(response, business);
       return twimlResponse(response.toString());
     }
 
@@ -501,7 +534,7 @@ export async function POST(request: Request) {
           "I'm sorry, I didn't hear the service."
         );
 
-        addAppointmentTest(response, request);
+        addAppointmentTest(response);
         return twimlResponse(response.toString());
       }
 
@@ -519,11 +552,11 @@ export async function POST(request: Request) {
         "Returning to the main menu."
       );
 
-      addMainMenu(response, request, business);
+      addMainMenu(response, business);
       return twimlResponse(response.toString());
     }
 
-    addMainMenu(response, request, business);
+    addMainMenu(response, business);
     return twimlResponse(response.toString());
   } catch {
     console.error("AnaAI voice menu request failed.");
