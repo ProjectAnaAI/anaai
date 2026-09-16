@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
 
+import { createSupabaseServiceClient } from "@/lib/supabase-server";
+
 export const runtime = "nodejs";
 
 type BusinessContext = {
@@ -15,14 +17,10 @@ type TwilioVerificationResult =
       reason: "verified";
     }
   | {
-      allowed: true;
-      verified: false;
-      reason: "trial-missing-signature";
-    }
-  | {
       allowed: false;
       verified: false;
       reason:
+        | "missing-signature"
         | "invalid-signature"
         | "missing-auth-token"
         | "validation-error";
@@ -92,7 +90,8 @@ function normalizePhoneNumber(phone: string) {
   }
 
   if (trimmed.startsWith("+")) {
-    return `+${trimmed.slice(1).replace(/\D/g, "")}`;
+    const digits = trimmed.slice(1).replace(/\D/g, "");
+    return digits ? `+${digits}` : "";
   }
 
   const digits = trimmed.replace(/\D/g, "");
@@ -108,68 +107,64 @@ function normalizePhoneNumber(phone: string) {
   return digits ? `+${digits}` : "";
 }
 
-function lastFour(phone: string) {
-  const digits = phone.replace(/\D/g, "");
+async function resolveBusinessByCalledNumber(
+  calledNumber: string
+): Promise<BusinessContext | null> {
+  const normalizedCalledNumber = normalizePhoneNumber(calledNumber);
 
-  if (digits.length < 4) {
-    return "unknown";
+  if (!normalizedCalledNumber) {
+    return null;
   }
 
-  return digits.slice(-4);
-}
+  const supabase = createSupabaseServiceClient();
 
-function resolveTrialBusiness(
-  calledNumber: string
-): BusinessContext | null {
-  const configuredTwilioNumber =
-    process.env.TWILIO_PHONE_NUMBER || "";
+  const { data, error } = await supabase
+    .from("business_phone_numbers")
+    .select(
+      `
+        business_id,
+        businesses!inner (
+          name
+        )
+      `
+    )
+    .eq("phone_number", normalizedCalledNumber)
+    .eq("provider", "twilio")
+    .eq("is_active", true)
+    .maybeSingle();
 
-  const businessId =
-    process.env.ANAAI_TRIAL_BUSINESS_ID || "";
+  if (error) {
+    console.error("AnaAI voice business lookup failed.", {
+      code: error.code || "unknown",
+    });
+
+    throw new Error("Voice business lookup failed.");
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const relatedBusiness = Array.isArray(data.businesses)
+    ? data.businesses[0]
+    : data.businesses;
 
   const businessName =
-    process.env.ANAAI_TRIAL_BUSINESS_NAME || "";
+    relatedBusiness &&
+    typeof relatedBusiness === "object" &&
+    "name" in relatedBusiness &&
+    typeof relatedBusiness.name === "string"
+      ? relatedBusiness.name.trim()
+      : "";
 
-  if (!configuredTwilioNumber || !businessId || !businessName) {
-    console.error(
-      "AnaAI trial business configuration is incomplete.",
-      {
-        hasTwilioPhoneNumber: Boolean(configuredTwilioNumber),
-        hasBusinessId: Boolean(businessId),
-        hasBusinessName: Boolean(businessName),
-      }
-    );
-
-    return null;
-  }
-
-  const normalizedCalledNumber =
-    normalizePhoneNumber(calledNumber);
-
-  const normalizedConfiguredNumber =
-    normalizePhoneNumber(configuredTwilioNumber);
-
-  console.log("AnaAI business-number comparison:", {
-    incomingLast4: lastFour(normalizedCalledNumber),
-    configuredLast4: lastFour(normalizedConfiguredNumber),
-    incomingLength: normalizedCalledNumber.length,
-    configuredLength: normalizedConfiguredNumber.length,
-  });
-
-  if (
-    !normalizedCalledNumber ||
-    normalizedCalledNumber !== normalizedConfiguredNumber
-  ) {
-    console.warn(
-      "AnaAI voice request did not match the configured trial business number."
-    );
-
-    return null;
+  if (!data.business_id || !businessName) {
+    console.error("AnaAI voice business lookup returned incomplete routing data.");
+    throw new Error("Voice business routing data is incomplete.");
   }
 
   return {
-    businessId,
-    businessName: businessName.trim(),
+    businessId: data.business_id,
+    businessName,
   };
 }
 
@@ -180,20 +175,16 @@ function verifyTwilioWebhook({
   request: Request;
   params: Record<string, string>;
 }): TwilioVerificationResult {
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const signature = request.headers.get(
-    "x-twilio-signature"
-  );
+  const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
+  const signature = request.headers.get("x-twilio-signature")?.trim();
 
   if (!signature) {
-    console.warn(
-      "AnaAI voice request has no Twilio signature. Allowing temporary trial-mode access."
-    );
+    console.warn("AnaAI rejected unsigned Twilio voice request.");
 
     return {
-      allowed: true,
+      allowed: false,
       verified: false,
-      reason: "trial-missing-signature",
+      reason: "missing-signature",
     };
   }
 
@@ -218,12 +209,7 @@ function verifyTwilioWebhook({
     );
 
     if (!isValid) {
-      console.warn(
-        "AnaAI rejected invalid Twilio signature.",
-        {
-          validationUrl: publicUrl,
-        }
-      );
+      console.warn("AnaAI rejected invalid Twilio signature.");
 
       return {
         allowed: false,
@@ -237,11 +223,8 @@ function verifyTwilioWebhook({
       verified: true,
       reason: "verified",
     };
-  } catch (error: unknown) {
-    console.error(
-      "Twilio signature validation error:",
-      error
-    );
+  } catch {
+    console.error("AnaAI Twilio signature validation failed.");
 
     return {
       allowed: false,
@@ -355,10 +338,7 @@ function addAppointmentTest(
 ) {
   const gather = response.gather({
     input: ["speech"],
-    action: getVoiceUrl(
-      request,
-      "appointment-test"
-    ),
+    action: getVoiceUrl(request, "appointment-test"),
     method: "POST",
     timeout: 6,
     speechTimeout: "auto",
@@ -403,13 +383,10 @@ function addConfigurationError(
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
-    const mode =
-      url.searchParams.get("mode") || "";
+    const mode = url.searchParams.get("mode") || "";
 
     const formData = await request.formData();
-
-    const twilioParams =
-      formDataToTwilioParams(formData);
+    const twilioParams = formDataToTwilioParams(formData);
 
     const verification = verifyTwilioWebhook({
       request,
@@ -420,56 +397,36 @@ export async function POST(request: Request) {
       return forbiddenResponse();
     }
 
-    const calledNumber = String(
-      formData.get("To") || ""
-    ).trim();
+    const calledNumber = String(formData.get("To") || "").trim();
 
-    const business =
-      resolveTrialBusiness(calledNumber);
+    const business = await resolveBusinessByCalledNumber(calledNumber);
 
-    const response =
-      new twilio.twiml.VoiceResponse();
+    const response = new twilio.twiml.VoiceResponse();
 
     if (!business) {
-      addConfigurationError(response);
-
-      return twimlResponse(
-        response.toString()
+      console.warn(
+        "AnaAI verified voice request did not resolve to an active business."
       );
+
+      addConfigurationError(response);
+      return twimlResponse(response.toString());
     }
 
-    const digits = String(
-      formData.get("Digits") || ""
-    ).trim();
-
+    const digits = String(formData.get("Digits") || "").trim();
     const speechResult = String(
       formData.get("SpeechResult") || ""
     ).trim();
 
-    console.log(
-      "AnaAI voice request accepted:",
-      {
-        mode,
-        verifiedTwilioRequest:
-          verification.verified,
-        verificationReason:
-          verification.reason,
-        businessResolved: true,
-        hasDigits: Boolean(digits),
-        hasSpeech: Boolean(speechResult),
-      }
-    );
+    console.log("AnaAI verified voice request accepted.", {
+      mode,
+      businessResolved: true,
+      hasDigits: Boolean(digits),
+      hasSpeech: Boolean(speechResult),
+    });
 
     if (!mode) {
-      addMainMenu(
-        response,
-        request,
-        business
-      );
-
-      return twimlResponse(
-        response.toString()
-      );
+      addMainMenu(response, request, business);
+      return twimlResponse(response.toString());
     }
 
     if (mode === "menu") {
@@ -479,14 +436,8 @@ export async function POST(request: Request) {
       });
 
       if (choice === "1") {
-        addAppointmentTest(
-          response,
-          request
-        );
-
-        return twimlResponse(
-          response.toString()
-        );
+        addAppointmentTest(response, request);
+        return twimlResponse(response.toString());
       }
 
       if (choice === "2") {
@@ -504,9 +455,7 @@ export async function POST(request: Request) {
           getVoiceUrl(request)
         );
 
-        return twimlResponse(
-          response.toString()
-        );
+        return twimlResponse(response.toString());
       }
 
       if (choice === "3") {
@@ -524,21 +473,12 @@ export async function POST(request: Request) {
           getVoiceUrl(request)
         );
 
-        return twimlResponse(
-          response.toString()
-        );
+        return twimlResponse(response.toString());
       }
 
       if (choice === "4") {
-        addMainMenu(
-          response,
-          request,
-          business
-        );
-
-        return twimlResponse(
-          response.toString()
-        );
+        addMainMenu(response, request, business);
+        return twimlResponse(response.toString());
       }
 
       response.say(
@@ -548,15 +488,8 @@ export async function POST(request: Request) {
         "I'm sorry, I didn't understand your selection."
       );
 
-      addMainMenu(
-        response,
-        request,
-        business
-      );
-
-      return twimlResponse(
-        response.toString()
-      );
+      addMainMenu(response, request, business);
+      return twimlResponse(response.toString());
     }
 
     if (mode === "appointment-test") {
@@ -568,14 +501,8 @@ export async function POST(request: Request) {
           "I'm sorry, I didn't hear the service."
         );
 
-        addAppointmentTest(
-          response,
-          request
-        );
-
-        return twimlResponse(
-          response.toString()
-        );
+        addAppointmentTest(response, request);
+        return twimlResponse(response.toString());
       }
 
       response.say(
@@ -592,34 +519,16 @@ export async function POST(request: Request) {
         "Returning to the main menu."
       );
 
-      addMainMenu(
-        response,
-        request,
-        business
-      );
-
-      return twimlResponse(
-        response.toString()
-      );
+      addMainMenu(response, request, business);
+      return twimlResponse(response.toString());
     }
 
-    addMainMenu(
-      response,
-      request,
-      business
-    );
+    addMainMenu(response, request, business);
+    return twimlResponse(response.toString());
+  } catch {
+    console.error("AnaAI voice menu request failed.");
 
-    return twimlResponse(
-      response.toString()
-    );
-  } catch (error: unknown) {
-    console.error(
-      "AnaAI voice menu error:",
-      error
-    );
-
-    const response =
-      new twilio.twiml.VoiceResponse();
+    const response = new twilio.twiml.VoiceResponse();
 
     response.say(
       {
@@ -628,15 +537,12 @@ export async function POST(request: Request) {
       "I'm sorry, AnaAI is having trouble responding right now. Please try again later."
     );
 
-    return twimlResponse(
-      response.toString()
-    );
+    return twimlResponse(response.toString());
   }
 }
 
 export async function GET() {
-  const response =
-    new twilio.twiml.VoiceResponse();
+  const response = new twilio.twiml.VoiceResponse();
 
   response.say(
     {
@@ -645,7 +551,5 @@ export async function GET() {
     "AnaAI voice service is online."
   );
 
-  return twimlResponse(
-    response.toString()
-  );
+  return twimlResponse(response.toString());
 }
