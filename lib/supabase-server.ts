@@ -14,9 +14,9 @@ function requireServerEnv(name: string) {
 
 export function createSupabaseServiceClient() {
   const supabaseUrl = requireServerEnv("NEXT_PUBLIC_SUPABASE_URL");
-  const serviceRoleKey = requireServerEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseSecretKey = requireServerEnv("SUPABASE_SECRET_KEY");
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  return createClient(supabaseUrl, supabaseSecretKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
