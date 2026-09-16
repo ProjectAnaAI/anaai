@@ -80,8 +80,18 @@ export async function POST(request: Request) {
     });
 
     return twimlResponse(xml);
-  } catch {
-    console.error("AnaAI trial voice menu request failed.");
+  } catch (error) {
+    console.error(
+      "AnaAI trial voice menu request failed.",
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+          }
+        : {
+            name: "UnknownError",
+          }
+    );
 
     const response = new twilio.twiml.VoiceResponse();
 
