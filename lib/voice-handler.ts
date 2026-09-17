@@ -43,6 +43,7 @@ import {
 
 import {
   understandVoiceTurn,
+  type VoiceTurnUnderstanding,
 } from "@/lib/voice-understanding";
 
 export type VoiceIngress =
@@ -54,6 +55,14 @@ type BusinessContext = {
   businessName: string;
   timezone: string | null;
 };
+
+type VoiceService = Awaited<
+  ReturnType<typeof loadVoiceServices>
+>[number];
+
+type AvailabilityResult = Awaited<
+  ReturnType<typeof checkVoiceAvailability>
+>;
 
 const INFO_PROMPT =
   "What would you like to know about our services, hours, or location?";
@@ -486,6 +495,263 @@ function beginBooking(
   );
 }
 
+function recognitionConfidence(
+  formData: FormData
+) {
+  const raw =
+    formData.get(
+      "Confidence"
+    );
+
+  if (
+    typeof raw !==
+    "string" ||
+    !raw.trim()
+  ) {
+    return "missing";
+  }
+
+  const value =
+    Number(raw);
+
+  if (
+    !Number.isFinite(
+      value
+    ) ||
+    value < 0 ||
+    value > 1
+  ) {
+    return "invalid";
+  }
+
+  if (value < 0.35) {
+    return "low";
+  }
+
+  if (value < 0.7) {
+    return "medium";
+  }
+
+  return "high";
+}
+
+function logRecognition({
+  stage,
+  speech,
+  confidence,
+}: {
+  stage: string;
+  speech: string;
+  confidence: string;
+}) {
+  const length =
+    speech.length;
+
+  const speechLength =
+    length === 0
+      ? "empty"
+      : length <= 20
+        ? "short"
+        : length <= 80
+          ? "medium"
+          : "long";
+
+  console.info(
+    `AnaAI voice recognition stage=${stage} speech_present=${
+      Boolean(speech)
+    } speech_length=${speechLength} confidence=${confidence}`
+  );
+}
+
+function semanticFields(
+  understanding:
+    VoiceTurnUnderstanding
+) {
+  return [
+    understanding
+      .serviceName
+      ? "service"
+      : "",
+    understanding
+      .dateExpression
+      ? "date"
+      : "",
+    understanding
+      .timeExpression
+      ? "time"
+      : "",
+    understanding
+      .confirmation
+      ? "confirmation"
+      : "",
+    understanding
+      .correction
+      ? "correction"
+      : "",
+  ]
+    .filter(Boolean)
+    .join("+") || "none";
+}
+
+async function understand({
+  stage,
+  speech,
+  services = [],
+}: {
+  stage:
+    | "service"
+    | "date"
+    | "time"
+    | "confirm";
+  speech: string;
+  services?: VoiceService[];
+}) {
+  const result =
+    await understandVoiceTurn({
+      stage,
+      speech,
+      services:
+        services.map(
+          (service) =>
+            service.name
+        ),
+    });
+
+  console.info(
+    `AnaAI voice semantic result stage=${stage} meaningful=${result.meaningful} fields=${semanticFields(
+      result
+    )}`
+  );
+
+  return result;
+}
+
+function resolveService(
+  services: VoiceService[],
+  name: string | null
+) {
+  if (!name) {
+    return null;
+  }
+
+  return (
+    services.find(
+      (service) =>
+        service.name === name
+    ) || null
+  );
+}
+
+function validateDateExpression(
+  expression: string,
+  business: BusinessContext
+) {
+  const date =
+    bookingDate(
+      expression,
+      business.timezone
+    );
+
+  if (!date) {
+    return {
+      valid: false as const,
+      reason:
+        "invalid" as const,
+    };
+  }
+
+  const today =
+    businessLocalDate(
+      business.timezone
+    );
+
+  if (
+    today &&
+    date < today
+  ) {
+    return {
+      valid: false as const,
+      reason:
+        "past" as const,
+    };
+  }
+
+  return {
+    valid: true as const,
+    date,
+  };
+}
+
+function validateTimeExpression(
+  expression: string
+) {
+  return parseSpokenTime(
+    expression
+  );
+}
+
+async function availabilityForState(
+  business: BusinessContext,
+  state: VoiceBookingState,
+  time: string
+): Promise<AvailabilityResult | null> {
+  if (
+    !state.booking
+      .serviceId ||
+    !state.booking.date
+  ) {
+    return null;
+  }
+
+  const started =
+    Date.now();
+
+  const result =
+    await checkVoiceAvailability({
+      businessId:
+        business.businessId,
+
+      serviceId:
+        state.booking
+          .serviceId,
+
+      date:
+        state.booking.date,
+
+      time,
+    });
+
+  console.info(
+    `AnaAI voice availability completed duration_ms=${
+      Date.now() -
+      started
+    } result=${
+      result.available
+        ? "available"
+        : result.reason
+    }`
+  );
+
+  return result;
+}
+
+function resetAfterServiceChange(
+  state: VoiceBookingState
+) {
+  state.booking.date =
+    null;
+
+  state.booking.time =
+    null;
+}
+
+function resetAfterDateChange(
+  state: VoiceBookingState
+) {
+  state.booking.time =
+    null;
+}
+
 async function bookingTurn({
   response,
   ingress,
@@ -510,7 +776,7 @@ async function bookingTurn({
     ) {
       response.say(
         voiceOptions(),
-        "I couldn't hear you. No appointment was booked. Please call again when you're ready. Goodbye."
+        "I couldn't hear you clearly. No appointment was booked. Please call again when you're ready. Goodbye."
       );
 
       response.hangup();
@@ -525,16 +791,16 @@ async function bookingTurn({
         ? "I didn't hear the name. What name should I put on the appointment?"
         : state.booking.stage ===
             "service"
-          ? "I didn't hear the service. Which service would you like?"
+          ? "I didn't hear the service clearly. Which service would you like?"
           : state.booking.stage ===
               "date"
-            ? "I didn't hear the date. Please say the month and day, such as September 24th."
+            ? "I didn't hear the date clearly. You can say something like October second, tomorrow, or next Friday."
             : state.booking.stage ===
                 "time"
-              ? "I didn't hear the time. Please say a time such as 10 AM or 2:30 PM."
-              : `I didn't hear your answer. ${bookingSummary(
+              ? "I didn't hear the time clearly. Please say a time such as 10 AM or 2:30 PM."
+              : `I didn't hear your answer clearly. ${bookingSummary(
                   state
-                )}. Say yes to book it, or no to cancel.`;
+                )}. Say yes to book it, no to cancel, or tell me what you want to change.`;
 
     gather(
       response,
@@ -549,11 +815,6 @@ async function bookingTurn({
 
   state.silence = 0;
 
-  /*
-   * Preserve the existing global explicit cancellation
-   * behavior. A clear deterministic "no" never requires
-   * an AI call.
-   */
   if (
     interpretConfirmation(
       speech
@@ -582,7 +843,7 @@ async function bookingTurn({
     ) {
       response.say(
         voiceOptions(),
-        "I'm sorry, I couldn't verify those details. No appointment was booked. Please contact the business for help. Goodbye."
+        "I'm sorry, I couldn't verify those details clearly enough. No appointment was booked. Please contact the business for help. Goodbye."
       );
 
       response.hangup();
@@ -597,6 +858,139 @@ async function bookingTurn({
         names
       );
     }
+  };
+
+  const askForDate = (
+    serviceName: string
+  ) => {
+    state.booking.stage =
+      "date";
+
+    gather(
+      response,
+      ingress,
+      binding,
+      `What date would you like for ${serviceName}? You can say tomorrow, a month and day, or a weekday such as next Friday.`,
+      state
+    );
+  };
+
+  const askForTime = () => {
+    state.booking.stage =
+      "time";
+
+    gather(
+      response,
+      ingress,
+      binding,
+      "What time would you like? For example, say 10 AM or 2:30 PM.",
+      state
+    );
+  };
+
+  const handleAvailability = async (
+    time: string
+  ) => {
+    const availability =
+      await availabilityForState(
+        business,
+        state,
+        time
+      );
+
+    if (!availability) {
+      response.say(
+        voiceOptions(),
+        "I couldn't verify all of the booking details. No appointment was booked. Please call again."
+      );
+
+      response.hangup();
+
+      return false;
+    }
+
+    if (
+      !availability.available
+    ) {
+      state.booking.time =
+        null;
+
+      if (
+        availability.reason ===
+        "slot_unavailable"
+      ) {
+        retry(
+          "That time is not available. Please choose another time."
+        );
+
+        return false;
+      }
+
+      if (
+        availability.reason ===
+        "outside_hours"
+      ) {
+        retry(
+          "That time is outside the business hours for that day. Please choose another time."
+        );
+
+        return false;
+      }
+
+      if (
+        availability.reason ===
+        "closed"
+      ) {
+        state.booking.failures =
+          0;
+
+        state.booking.date =
+          null;
+
+        state.booking.stage =
+          "date";
+
+        gather(
+          response,
+          ingress,
+          binding,
+          "The business is closed on that date. Please choose another date.",
+          state
+        );
+
+        return false;
+      }
+
+      response.say(
+        voiceOptions(),
+        "I'm sorry, I couldn't verify appointment availability right now. No appointment was booked. Please contact the business for help. Goodbye."
+      );
+
+      response.hangup();
+
+      return false;
+    }
+
+    state.booking.failures =
+      0;
+
+    state.booking.time =
+      time;
+
+    state.booking.stage =
+      "confirm";
+
+    gather(
+      response,
+      ingress,
+      binding,
+      `I have ${bookingSummary(
+        state
+      )}. Say yes to book this appointment, no to cancel, or tell me what you'd like to change.`,
+      state
+    );
+
+    return true;
   };
 
   if (
@@ -664,7 +1058,7 @@ async function bookingTurn({
       response,
       ingress,
       binding,
-      `Which service would you like? Available services include ${names}.`,
+      `Which service would you like? Available services include ${names}. You can also tell me the date and time in the same sentence.`,
       state,
       "listen",
       services.map(
@@ -685,13 +1079,19 @@ async function bookingTurn({
         business.businessId
       );
 
-    /*
-     * FAST PATH:
-     *
-     * Existing deterministic service matching remains
-     * first. Normal obvious requests therefore do not
-     * incur an OpenAI round trip.
-     */
+    if (
+      !services.length
+    ) {
+      response.say(
+        voiceOptions(),
+        "I'm sorry, I can't find any services available for phone booking right now. No appointment was booked."
+      );
+
+      response.hangup();
+
+      return;
+    }
+
     const deterministic =
       matchVoiceService(
         services,
@@ -701,44 +1101,24 @@ async function bookingTurn({
     let service =
       deterministic.match;
 
-    /*
-     * SEMANTIC FALLBACK:
-     *
-     * Only when the deterministic matcher cannot safely
-     * select a service do we ask the narrow understanding
-     * layer to interpret the natural utterance.
-     *
-     * The model receives service display names only.
-     * It never receives service IDs or business IDs.
-     */
+    let understanding:
+      | VoiceTurnUnderstanding
+      | null = null;
+
     if (!service) {
-      const understanding =
-        await understandVoiceTurn({
+      understanding =
+        await understand({
           stage: "service",
           speech,
-          services:
-            services.map(
-              (item) =>
-                item.name
-            ),
+          services,
         });
 
-      if (
-        understanding.kind ===
-        "service"
-      ) {
-        /*
-         * Never trust the model as the service authority.
-         * Map its display-name selection back onto the
-         * actual server-loaded service record.
-         */
-        service =
-          services.find(
-            (item) =>
-              item.name ===
-              understanding.serviceName
-          ) || null;
-      }
+      service =
+        resolveService(
+          services,
+          understanding
+            .serviceName
+        );
     }
 
     if (!service) {
@@ -757,7 +1137,8 @@ async function bookingTurn({
           .join(", ");
 
       retry(
-        deterministic.candidates
+        deterministic
+          .candidates
           .length > 1
           ? `Which service did you mean: ${choices}?`
           : `I couldn't match that service. ${
@@ -783,15 +1164,89 @@ async function bookingTurn({
     state.booking.serviceName =
       service.name;
 
-    state.booking.stage =
-      "date";
-
-    gather(
-      response,
-      ingress,
-      binding,
-      `What date would you like for ${service.name}? You can say tomorrow, or a month and day.`,
+    resetAfterServiceChange(
       state
+    );
+
+    if (
+      understanding
+        ?.dateExpression
+    ) {
+      const parsedDate =
+        validateDateExpression(
+          understanding
+            .dateExpression,
+          business
+        );
+
+      if (
+        !parsedDate.valid
+      ) {
+        state.booking.stage =
+          "date";
+
+        retry(
+          parsedDate.reason ===
+            "past"
+            ? `I understood ${service.name}, but that date has already passed. Please choose another date.`
+            : `I understood ${service.name}, but I couldn't verify the date. Please say the date again.`
+        );
+
+        return;
+      }
+
+      state.booking.date =
+        parsedDate.date;
+    }
+
+    if (
+      understanding
+        ?.timeExpression &&
+      state.booking.date
+    ) {
+      const parsedTime =
+        validateTimeExpression(
+          understanding
+            .timeExpression
+        );
+
+      if (
+        parsedTime.kind ===
+        "valid"
+      ) {
+        await handleAvailability(
+          parsedTime.value
+        );
+
+        return;
+      }
+
+      state.booking.stage =
+        "time";
+
+      retry(
+        parsedTime.kind ===
+          "ambiguous"
+          ? `I understood ${service.name} and the date, but I need AM or PM for the time. Did you mean ${spokenTime(
+              parsedTime.options[0]
+            )} or ${spokenTime(
+              parsedTime.options[1]
+            )}?`
+          : `I understood ${service.name} and the date, but I couldn't verify the time. Please say the time again.`
+      );
+
+      return;
+    }
+
+    if (
+      state.booking.date
+    ) {
+      askForTime();
+      return;
+    }
+
+    askForDate(
+      service.name
     );
 
     return;
@@ -801,15 +1256,55 @@ async function bookingTurn({
     state.booking.stage ===
     "date"
   ) {
-    const date =
+    let date =
       bookingDate(
         speech,
         business.timezone
       );
 
+    let understanding:
+      | VoiceTurnUnderstanding
+      | null = null;
+
+    if (!date) {
+      understanding =
+        await understand({
+          stage: "date",
+          speech,
+        });
+
+      if (
+        understanding
+          .dateExpression
+      ) {
+        const parsedDate =
+          validateDateExpression(
+            understanding
+              .dateExpression,
+            business
+          );
+
+        if (
+          parsedDate.valid
+        ) {
+          date =
+            parsedDate.date;
+        } else if (
+          parsedDate.reason ===
+          "past"
+        ) {
+          retry(
+            "That date has already passed. Please choose another date."
+          );
+
+          return;
+        }
+      }
+    }
+
     if (!date) {
       retry(
-        "I couldn't verify that date. Please say the month, day, and year."
+        "I couldn't verify that date. Please say the month and day, or a date such as next Friday."
       );
 
       return;
@@ -837,19 +1332,49 @@ async function bookingTurn({
     state.booking.date =
       date;
 
-    state.booking.time =
-      null;
-
-    state.booking.stage =
-      "time";
-
-    gather(
-      response,
-      ingress,
-      binding,
-      "What time would you like? For example, say 10 AM or 2:30 PM.",
+    resetAfterDateChange(
       state
     );
+
+    if (
+      understanding
+        ?.timeExpression
+    ) {
+      const parsedTime =
+        validateTimeExpression(
+          understanding
+            .timeExpression
+        );
+
+      if (
+        parsedTime.kind ===
+        "valid"
+      ) {
+        await handleAvailability(
+          parsedTime.value
+        );
+
+        return;
+      }
+
+      state.booking.stage =
+        "time";
+
+      retry(
+        parsedTime.kind ===
+          "ambiguous"
+          ? `I have the date. For the time, did you mean ${spokenTime(
+              parsedTime.options[0]
+            )} or ${spokenTime(
+              parsedTime.options[1]
+            )}? Please say AM or PM.`
+          : "I have the date, but I couldn't verify the time. Please say the time again."
+      );
+
+      return;
+    }
+
+    askForTime();
 
     return;
   }
@@ -858,10 +1383,36 @@ async function bookingTurn({
     state.booking.stage ===
     "time"
   ) {
-    const parsed =
+    let parsed =
       parseSpokenTime(
         speech
       );
+
+    let understanding:
+      | VoiceTurnUnderstanding
+      | null = null;
+
+    if (
+      parsed.kind ===
+      "invalid"
+    ) {
+      understanding =
+        await understand({
+          stage: "time",
+          speech,
+        });
+
+      if (
+        understanding
+          .timeExpression
+      ) {
+        parsed =
+          parseSpokenTime(
+            understanding
+              .timeExpression
+          );
+      }
+    }
 
     if (
       parsed.kind !==
@@ -881,199 +1432,276 @@ async function bookingTurn({
       return;
     }
 
-    if (
-      !state.booking
-        .serviceId ||
-      !state.booking.date
-    ) {
-      response.say(
-        voiceOptions(),
-        "I couldn't verify all of the booking details. No appointment was booked. Please call again."
-      );
-
-      response.hangup();
-      return;
-    }
-
-    /*
-     * Advisory read-only availability check.
-     *
-     * This does not reserve anything and does not
-     * authorize the final booking mutation.
-     */
-    const availabilityStarted =
-      Date.now();
-
-    const availability =
-      await checkVoiceAvailability({
-        businessId:
-          business.businessId,
-
-        serviceId:
-          state.booking
-            .serviceId,
-
-        date:
-          state.booking.date,
-
-        time:
-          parsed.value,
-      });
-
-    console.info(
-      `AnaAI voice availability completed duration_ms=${
-        Date.now() -
-        availabilityStarted
-      } result=${
-        availability.available
-          ? "available"
-          : availability.reason
-      }`
-    );
-
-    if (
-      !availability.available
-    ) {
-      state.booking.time =
-        null;
-
-      if (
-        availability.reason ===
-        "slot_unavailable"
-      ) {
-        retry(
-          "That time is not available. Please choose another time."
-        );
-
-        return;
-      }
-
-      if (
-        availability.reason ===
-        "outside_hours"
-      ) {
-        retry(
-          "That time is outside the business hours for that day. Please choose another time."
-        );
-
-        return;
-      }
-
-      if (
-        availability.reason ===
-        "closed"
-      ) {
-        state.booking.failures =
-          0;
-
-        state.booking.date =
-          null;
-
-        state.booking.stage =
-          "date";
-
-        gather(
-          response,
-          ingress,
-          binding,
-          "The business is closed on that date. Please choose another date.",
-          state
-        );
-
-        return;
-      }
-
-      /*
-       * Unknown/malformed availability results fail
-       * closed. We never claim that an unverified slot
-       * is available.
-       */
-      response.say(
-        voiceOptions(),
-        "I'm sorry, I couldn't verify appointment availability right now. No appointment was booked. Please contact the business for help. Goodbye."
-      );
-
-      response.hangup();
-      return;
-    }
-
-    state.booking.failures =
-      0;
-
-    state.booking.time =
-      parsed.value;
-
-    state.booking.stage =
-      "confirm";
-
-    gather(
-      response,
-      ingress,
-      binding,
-      `I have ${bookingSummary(
-        state
-      )}. Say yes to book this appointment, or no to cancel.`,
-      state
+    await handleAvailability(
+      parsed.value
     );
 
     return;
   }
 
-  /*
-   * FINAL CONFIRMATION
-   *
-   * The deterministic confirmation parser remains the
-   * fast path.
-   */
   let confirmation =
     interpretConfirmation(
       speech
     );
 
-  /*
-   * If deterministic parsing does not clearly authorize
-   * or reject the appointment, use the narrow semantic
-   * interpreter.
-   *
-   * The interpreter still cannot mutate anything.
-   */
   if (
-    confirmation !== "yes" &&
-    confirmation !== "no"
+    confirmation === "yes"
   ) {
+    /*
+     * Continue to the authoritative mutation boundary.
+     */
+  } else {
+    const services =
+      await loadVoiceServices(
+        business.businessId
+      );
+
     const understanding =
-      await understandVoiceTurn({
+      await understand({
         stage: "confirm",
         speech,
+        services,
       });
 
     if (
-      understanding.kind ===
-      "confirmation"
+      understanding.correction
+    ) {
+      if (
+        understanding
+          .serviceName
+      ) {
+        const service =
+          resolveService(
+            services,
+            understanding
+              .serviceName
+          );
+
+        if (!service) {
+          retry(
+            "I understood that you want to change the service, but I couldn't verify which service you meant."
+          );
+
+          return;
+        }
+
+        state.booking.serviceId =
+          service.id;
+
+        state.booking.serviceName =
+          service.name;
+
+        resetAfterServiceChange(
+          state
+        );
+
+        state.booking.failures =
+          0;
+
+        if (
+          understanding
+            .dateExpression
+        ) {
+          const parsedDate =
+            validateDateExpression(
+              understanding
+                .dateExpression,
+              business
+            );
+
+          if (
+            parsedDate.valid
+          ) {
+            state.booking.date =
+              parsedDate.date;
+          }
+        }
+
+        if (
+          state.booking.date &&
+          understanding
+            .timeExpression
+        ) {
+          const parsedTime =
+            validateTimeExpression(
+              understanding
+                .timeExpression
+            );
+
+          if (
+            parsedTime.kind ===
+            "valid"
+          ) {
+            await handleAvailability(
+              parsedTime.value
+            );
+
+            return;
+          }
+        }
+
+        if (
+          state.booking.date
+        ) {
+          askForTime();
+        } else {
+          askForDate(
+            service.name
+          );
+        }
+
+        return;
+      }
+
+      if (
+        understanding
+          .dateExpression
+      ) {
+        const parsedDate =
+          validateDateExpression(
+            understanding
+              .dateExpression,
+            business
+          );
+
+        if (
+          !parsedDate.valid
+        ) {
+          state.booking.stage =
+            "date";
+
+          retry(
+            parsedDate.reason ===
+              "past"
+              ? "That new date has already passed. Please choose another date."
+              : "I understood that you want to change the date, but I couldn't verify the new date."
+          );
+
+          return;
+        }
+
+        state.booking.date =
+          parsedDate.date;
+
+        resetAfterDateChange(
+          state
+        );
+
+        state.booking.failures =
+          0;
+
+        if (
+          understanding
+            .timeExpression
+        ) {
+          const parsedTime =
+            validateTimeExpression(
+              understanding
+                .timeExpression
+            );
+
+          if (
+            parsedTime.kind ===
+            "valid"
+          ) {
+            await handleAvailability(
+              parsedTime.value
+            );
+
+            return;
+          }
+        }
+
+        askForTime();
+
+        return;
+      }
+
+      if (
+        understanding
+          .timeExpression
+      ) {
+        const parsedTime =
+          validateTimeExpression(
+            understanding
+              .timeExpression
+          );
+
+        if (
+          parsedTime.kind !==
+          "valid"
+        ) {
+          retry(
+            parsedTime.kind ===
+              "ambiguous"
+              ? `I understand you want to change the time. Did you mean ${spokenTime(
+                  parsedTime.options[0]
+                )} or ${spokenTime(
+                  parsedTime.options[1]
+                )}? Please say AM or PM.`
+              : "I understand you want to change the time, but I couldn't verify the new time."
+          );
+
+          return;
+        }
+
+        state.booking.time =
+          null;
+
+        await handleAvailability(
+          parsedTime.value
+        );
+
+        return;
+      }
+
+      retry(
+        `I understand you want to change something. You can tell me the service, date, or time you'd like instead. I currently have ${bookingSummary(
+          state
+        )}.`
+      );
+
+      return;
+    }
+
+    if (
+      understanding
+        .confirmation ===
+        "no"
+    ) {
+      response.say(
+        voiceOptions(),
+        "Okay. No appointment was booked. Thanks for calling. Goodbye."
+      );
+
+      response.hangup();
+
+      return;
+    }
+
+    if (
+      understanding
+        .confirmation ===
+        "yes"
     ) {
       confirmation =
-        understanding.value;
+        "yes";
+    } else {
+      retry(
+        understanding
+          .meaningful
+          ? `I haven't booked it yet. I have ${bookingSummary(
+              state
+            )}. Say yes to book it, no to cancel, or tell me what you'd like to change.`
+          : `I couldn't understand that clearly enough to book anything. I have ${bookingSummary(
+              state
+            )}. Say yes to book it, no to cancel, or tell me what you'd like to change.`
+      );
+
+      return;
     }
   }
 
-  if (
-    confirmation === "no"
-  ) {
-    response.say(
-      voiceOptions(),
-      "Okay. No appointment was booked. Thanks for calling. Goodbye."
-    );
-
-    response.hangup();
-    return;
-  }
-
-  /*
-   * Anything except a clear YES remains non-authorizing.
-   *
-   * Questions, corrections, uncertainty and background
-   * speech therefore cannot trigger executeVoiceBooking.
-   */
   if (
     confirmation !== "yes"
   ) {
@@ -1125,11 +1753,11 @@ async function bookingTurn({
   /*
    * AUTHORITATIVE MUTATION BOUNDARY
    *
-   * Nothing above this point creates an appointment.
+   * The semantic model cannot reach the booking RPC
+   * without explicit confirmation above.
    *
-   * The existing secure voice booking RPC remains the
-   * final authority and re-checks the slot after explicit
-   * confirmation.
+   * The database remains authoritative and revalidates
+   * the booking.
    */
   const bookingStarted =
     Date.now();
@@ -1189,12 +1817,6 @@ async function bookingTurn({
       ? "Your original booking was already completed. No duplicate appointment was created."
       : "Your appointment has been booked successfully.";
 
-  /*
-   * Booking truth and SMS truth remain independent.
-   *
-   * A Twilio/carrier problem cannot convert a verified
-   * database appointment into a failed appointment.
-   */
   const sms =
     result.smsSent
       ? " A confirmation text was submitted for sending."
@@ -1333,10 +1955,32 @@ export async function buildVoiceResponse({
   const callerPhone =
     read("From");
 
+  /*
+   * Privacy-safe ASR observability.
+   *
+   * We deliberately do NOT log:
+   * - transcript contents
+   * - exact transcript length
+   * - caller phone
+   * - CallSid
+   * - business/customer/appointment IDs
+   * - state token
+   * - Twilio signatures
+   */
   if (
     state?.mode ===
     "booking"
   ) {
+    logRecognition({
+      stage:
+        state.booking.stage,
+      speech,
+      confidence:
+        recognitionConfidence(
+          formData
+        ),
+    });
+
     await bookingTurn({
       response,
       ingress,
