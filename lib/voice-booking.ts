@@ -35,6 +35,19 @@ type VoiceBookingRequest = {
   time: string;
 };
 
+export type VoiceAvailabilityResult =
+  | {
+      available: true;
+    }
+  | {
+      available: false;
+      reason:
+        | "slot_unavailable"
+        | "closed"
+        | "outside_hours"
+        | "unverified";
+    };
+
 export type VoiceBookingResult =
   | {
       success: true;
@@ -88,6 +101,21 @@ function object(
   );
 }
 
+function validSchedulingInput(
+  businessId: string,
+  serviceId: string,
+  date: string,
+  time: string
+) {
+  return (
+    isUuid(businessId) &&
+    isUuid(serviceId) &&
+    validDate(date) &&
+    /^\d{2}:\d{2}$/.test(time) &&
+    canonicalTime(time) !== null
+  );
+}
+
 export async function loadVoiceServices(
   businessId: string
 ): Promise<Service[]> {
@@ -135,6 +163,120 @@ export async function resolveVoiceService(
 ): Promise<Service | null> {
   const services = await loadVoiceServices(businessId);
   return matchVoiceService(services, spokenName).match;
+}
+
+export async function checkVoiceAvailability({
+  businessId,
+  serviceId,
+  date,
+  time,
+}: {
+  businessId: string;
+  serviceId: string;
+  date: string;
+  time: string;
+}): Promise<VoiceAvailabilityResult> {
+  if (
+    !validSchedulingInput(
+      businessId,
+      serviceId,
+      date,
+      time
+    )
+  ) {
+    return {
+      available: false,
+      reason: "unverified",
+    };
+  }
+
+  try {
+    const db = createSupabaseServiceClient();
+
+    const { data, error } = await db.rpc(
+      "voice_check_appointment_availability",
+      {
+        p_business_id: businessId,
+        p_service_id: serviceId,
+        p_appointment_date: date,
+        p_appointment_time: time,
+      }
+    );
+
+    if (
+      error ||
+      !object(data) ||
+      typeof data.available !== "boolean" ||
+      typeof data.code !== "string"
+    ) {
+      console.error(
+        "AnaAI voice availability check failed."
+      );
+
+      return {
+        available: false,
+        reason: "unverified",
+      };
+    }
+
+    if (data.available === true) {
+      if (
+        data.code !== "AVAILABLE" ||
+        data.service_id !== serviceId ||
+        data.date !== date ||
+        typeof data.time !== "string" ||
+        canonicalTime(data.time) !== canonicalTime(time)
+      ) {
+        console.error(
+          "AnaAI voice availability returned an unverified result."
+        );
+
+        return {
+          available: false,
+          reason: "unverified",
+        };
+      }
+
+      return {
+        available: true,
+      };
+    }
+
+    if (data.code === "SLOT_CONFLICT") {
+      return {
+        available: false,
+        reason: "slot_unavailable",
+      };
+    }
+
+    if (data.code === "CLOSED") {
+      return {
+        available: false,
+        reason: "closed",
+      };
+    }
+
+    if (data.code === "OUTSIDE_HOURS") {
+      return {
+        available: false,
+        reason: "outside_hours",
+      };
+    }
+
+    return {
+      available: false,
+      reason: "unverified",
+    };
+  } catch {
+    console.error(
+      "AnaAI voice availability check failed."
+    );
+
+    return {
+      available: false,
+      reason: "unverified",
+    };
+  }
 }
 
 function voiceBookingReceipt(
@@ -277,17 +419,18 @@ export async function executeVoiceBooking(
     .trim();
 
   if (
-    !isUuid(request.businessId) ||
+    !validSchedulingInput(
+      request.businessId,
+      request.serviceId,
+      request.date,
+      request.time
+    ) ||
     !isUuid(request.idempotencyKey) ||
-    !isUuid(request.serviceId) ||
     !customerName ||
     customerName.length > 120 ||
     !PHONE.test(customerPhone) ||
     !serviceName ||
-    serviceName.length > 120 ||
-    !validDate(request.date) ||
-    !/^\d{2}:\d{2}$/.test(request.time) ||
-    !canonicalTime(request.time)
+    serviceName.length > 120
   ) {
     return {
       success: false,
@@ -386,6 +529,14 @@ export async function executeVoiceBooking(
     };
   }
 
+  /*
+   * SMS is deliberately downstream of authoritative booking success.
+   *
+   * Booking success and SMS delivery are separate outcomes:
+   * - booking failure => no notification/SMS attempt
+   * - booking success + SMS accepted => smsSent true
+   * - booking success + SMS failed/uncertain => booking remains successful
+   */
   const smsSent = await deliverVoiceNotification(
     db,
     request.businessId,

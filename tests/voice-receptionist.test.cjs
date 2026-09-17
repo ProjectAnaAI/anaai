@@ -67,9 +67,11 @@ function handlerHarness({
   timezone = 'America/Los_Angeles',
   bookingResult = { success: true, replayed: false, smsSent: true },
   bookingExecutor,
+  availabilityResult = { available: true },
+  availabilityExecutor,
   services = [{ id: SERVICE_ID, name: 'Haircut' }],
 } = {}) {
-  const queries = [], requests = [], logs = [], bookings = [], serviceLoads = [], serviceResolutions = [];
+  const queries = [], requests = [], logs = [], bookings = [], availabilityChecks = [], serviceLoads = [], serviceResolutions = [];
 
   const db = {
     from(table) {
@@ -146,6 +148,12 @@ function handlerHarness({
       serviceLoads.push(businessId);
       return services;
     },
+    checkVoiceAvailability: async request => {
+      availabilityChecks.push(request);
+      return availabilityExecutor
+        ? availabilityExecutor(request)
+        : availabilityResult;
+    },
     resolveVoiceService: async (businessId, spoken) => {
       serviceResolutions.push({ businessId, spoken });
       const normalized = spoken.trim().toLowerCase();
@@ -194,7 +202,7 @@ function handlerHarness({
 
   return {
     ...receptionist, state, run, queries, requests, logs,
-    bookings, serviceLoads, serviceResolutions,
+    bookings, availabilityChecks, serviceLoads, serviceResolutions,
   };
 }
 
@@ -362,6 +370,157 @@ test('phone booking rejects impossible natural spoken dates', async () => {
   );
 
   assert.equal(h.bookings.length, 0);
+});
+
+
+test('availability is checked before confirmation and does not mutate', async () => {
+  const h = handlerHarness({ stateEnabled: true });
+  const flow = await advanceBooking(h);
+
+  assert.match(flow.timed, /Say yes to book this appointment/);
+  assert.equal(h.availabilityChecks.length, 1);
+  assert.equal(h.availabilityChecks[0].businessId, BUSINESS_ID);
+  assert.equal(h.availabilityChecks[0].serviceId, SERVICE_ID);
+  assert.equal(h.availabilityChecks[0].date, '2099-09-20');
+  assert.equal(h.availabilityChecks[0].time, '10:00');
+  assert.equal(h.bookings.length, 0);
+});
+
+test('unavailable slot never reaches confirmation and never mutates', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    availabilityResult: {
+      available: false,
+      reason: 'slot_unavailable',
+    },
+  });
+
+  const flow = await advanceBooking(h);
+
+  assert.match(flow.timed, /That time is not available/);
+  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.equal(h.availabilityChecks.length, 1);
+  assert.equal(h.bookings.length, 0);
+
+  const binding = {
+    businessId: BUSINESS_ID,
+    callSid: CALL_SID,
+    ingress: 'trial',
+  };
+
+  const state = h.state.openVoiceState(
+    callbackState(flow.timed),
+    binding
+  );
+
+  assert.equal(state.booking.stage, 'time');
+  assert.equal(state.booking.time, null);
+});
+
+test('outside-hours slot remains in time selection without mutation', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    availabilityResult: {
+      available: false,
+      reason: 'outside_hours',
+    },
+  });
+
+  const flow = await advanceBooking(h);
+
+  assert.match(flow.timed, /outside the business hours/);
+  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.equal(h.bookings.length, 0);
+
+  const state = h.state.openVoiceState(
+    callbackState(flow.timed),
+    {
+      businessId: BUSINESS_ID,
+      callSid: CALL_SID,
+      ingress: 'trial',
+    }
+  );
+
+  assert.equal(state.booking.stage, 'time');
+  assert.equal(state.booking.time, null);
+});
+
+test('closed date returns to date selection without mutation', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    availabilityResult: {
+      available: false,
+      reason: 'closed',
+    },
+  });
+
+  const flow = await advanceBooking(h);
+
+  assert.match(flow.timed, /business is closed on that date/);
+  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.equal(h.bookings.length, 0);
+
+  const state = h.state.openVoiceState(
+    callbackState(flow.timed),
+    {
+      businessId: BUSINESS_ID,
+      callSid: CALL_SID,
+      ingress: 'trial',
+    }
+  );
+
+  assert.equal(state.booking.stage, 'date');
+  assert.equal(state.booking.date, null);
+  assert.equal(state.booking.time, null);
+});
+
+test('unverified availability fails closed without confirmation or mutation', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    availabilityResult: {
+      available: false,
+      reason: 'unverified',
+    },
+  });
+
+  const flow = await advanceBooking(h);
+
+  assert.match(flow.timed, /couldn't verify appointment availability/);
+  assert.match(flow.timed, /No appointment was booked/);
+  assert.match(flow.timed, /<Hangup/);
+  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.equal(callbackState(flow.timed), null);
+  assert.equal(h.bookings.length, 0);
+});
+
+test('authoritative booking can still reject a race after successful availability precheck', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    availabilityResult: { available: true },
+    bookingResult: {
+      success: false,
+      message: 'That time is no longer available. Please choose another time.',
+    },
+  });
+
+  const flow = await advanceBooking(h);
+
+  assert.equal(h.availabilityChecks.length, 1);
+  assert.equal(h.bookings.length, 0);
+  assert.match(flow.timed, /Say yes to book/);
+
+  const xml = await h.run({
+    speech: 'yes',
+    stateToken: flow.confirmToken,
+    from: CALLER,
+  });
+
+  assert.match(xml, /no longer available/);
+  assert.doesNotMatch(
+    xml,
+    /booked successfully|confirmation text was submitted/
+  );
+  assert.equal(h.bookings.length, 1);
 });
 
 test('explicit no at confirmation performs no mutation', async () => {
@@ -656,6 +815,8 @@ test('route exception diagnostics never expose raw error', async () => {
 function bookingModuleHarness({
   rpcResult,
   rpcError = null,
+  availabilityResult,
+  availabilityError = null,
   services = [{ id: SERVICE_ID, name: 'Haircut' }],
   smsResult = { success: true, messageSid: 'SM' + 'a'.repeat(32) },
   claim = {
@@ -697,6 +858,23 @@ function bookingModuleHarness({
     },
     rpc: async (name, args) => {
       calls.push({ name, args });
+      if (name === 'voice_check_appointment_availability') {
+        const defaultAvailability = {
+          available: true,
+          code: 'AVAILABLE',
+          service_id: SERVICE_ID,
+          service: 'Haircut',
+          date: '2099-09-20',
+          time: '10:00:00',
+          duration_minutes: 30,
+        };
+        return {
+          data: availabilityResult === undefined
+            ? defaultAvailability
+            : availabilityResult,
+          error: availabilityError,
+        };
+      }
       if (name === 'voice_book_appointment_business') {
         return { data: rpcResult === undefined ? defaultResult : rpcResult, error: rpcError };
       }
@@ -791,6 +969,66 @@ test('voice service normalization rejects ambiguous matches', async () => {
   );
 
   assert.equal(match, null);
+});
+
+test('real voice availability module uses only the read-only availability RPC', async () => {
+  const h = bookingModuleHarness();
+
+  const result = await h.module.checkVoiceAvailability({
+    businessId: BUSINESS_ID,
+    serviceId: SERVICE_ID,
+    date: '2099-09-20',
+    time: '10:00',
+  });
+
+  assert.equal(result.available, true);
+  assert.deepEqual(h.calls.map(call => call.name), [
+    'voice_check_appointment_availability',
+  ]);
+  assert.equal(h.sms.length, 0);
+
+  const check = h.calls[0].args;
+  assert.equal(check.p_business_id, BUSINESS_ID);
+  assert.equal(check.p_service_id, SERVICE_ID);
+  assert.equal(check.p_appointment_date, '2099-09-20');
+  assert.equal(check.p_appointment_time, '10:00');
+});
+
+test('real voice availability module maps slot conflict without mutation or SMS', async () => {
+  const h = bookingModuleHarness({
+    availabilityResult: {
+      available: false,
+      code: 'SLOT_CONFLICT',
+      service_id: SERVICE_ID,
+      service: 'Haircut',
+      date: '2099-09-20',
+      time: '10:00:00',
+      duration_minutes: 30,
+    },
+  });
+
+  const result = await h.module.checkVoiceAvailability({
+    businessId: BUSINESS_ID,
+    serviceId: SERVICE_ID,
+    date: '2099-09-20',
+    time: '10:00',
+  });
+
+  assert.equal(result.available, false);
+  assert.equal(result.reason, 'slot_unavailable');
+
+  assert.deepEqual(h.calls.map(call => call.name), [
+    'voice_check_appointment_availability',
+  ]);
+
+  assert.equal(
+    h.calls.some(
+      call => call.name === 'voice_book_appointment_business'
+    ),
+    false
+  );
+
+  assert.equal(h.sms.length, 0);
 });
 
 test('real voice booking module calls only voice booking and voice notification RPCs', async () => {

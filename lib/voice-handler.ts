@@ -3,6 +3,7 @@ import "server-only";
 import twilio from "twilio";
 
 import {
+  checkVoiceAvailability,
   executeVoiceBooking,
   loadVoiceServices,
 } from "@/lib/voice-booking";
@@ -21,11 +22,21 @@ import {
   type VoiceBookingState,
   type VoiceState,
 } from "@/lib/voice-state";
+import {
+  bookingDate,
+  businessLocalDate,
+  parseSpokenTime,
+  confirmation as interpretConfirmation,
+  matchVoiceService,
+} from "@/lib/voice-parsing";
+import {
+  voiceOptions,
+  gatherOptions,
+} from "@/lib/voice-config";
 
-import { bookingDate, businessLocalDate, parseSpokenTime, confirmation as interpretConfirmation, matchVoiceService } from "@/lib/voice-parsing";
-import { voiceOptions, gatherOptions } from "@/lib/voice-config";
-
-export type VoiceIngress = "production" | "trial";
+export type VoiceIngress =
+  | "production"
+  | "trial";
 
 type BusinessContext = {
   businessId: string;
@@ -141,7 +152,8 @@ function normalizePhone(value: string) {
     return digits ? `+${digits}` : "";
   }
 
-  const digits = trimmed.replace(/\D/g, "");
+  const digits =
+    trimmed.replace(/\D/g, "");
 
   if (digits.length === 10) {
     return `+1${digits}`;
@@ -160,13 +172,15 @@ function normalizePhone(value: string) {
 async function resolveBusinessByCalledNumber(
   calledNumber: string
 ): Promise<BusinessContext | null> {
-  const phone = normalizePhone(calledNumber);
+  const phone =
+    normalizePhone(calledNumber);
 
   if (!phone) {
     return null;
   }
 
-  const db = createSupabaseServiceClient();
+  const db =
+    createSupabaseServiceClient();
 
   const { data, error } = await db
     .from("business_phone_numbers")
@@ -182,7 +196,9 @@ async function resolveBusinessByCalledNumber(
     .eq("phone_number", phone)
     .eq("provider", "twilio")
     .eq("is_active", true)
-    .abortSignal(AbortSignal.timeout(3000))
+    .abortSignal(
+      AbortSignal.timeout(3000)
+    )
     .maybeSingle();
 
   if (error) {
@@ -198,9 +214,10 @@ async function resolveBusinessByCalledNumber(
     return null;
   }
 
-  const related = Array.isArray(data.businesses)
-    ? data.businesses[0]
-    : data.businesses;
+  const related =
+    Array.isArray(data.businesses)
+      ? data.businesses[0]
+      : data.businesses;
 
   const businessName =
     related &&
@@ -210,7 +227,10 @@ async function resolveBusinessByCalledNumber(
       ? related.name.trim()
       : "";
 
-  if (!data.business_id || !businessName) {
+  if (
+    !data.business_id ||
+    !businessName
+  ) {
     console.error(
       "AnaAI voice business lookup returned incomplete routing data."
     );
@@ -226,7 +246,8 @@ async function resolveBusinessByCalledNumber(
       related &&
       typeof related === "object" &&
       "timezone" in related &&
-      typeof related.timezone === "string"
+      typeof related.timezone ===
+        "string"
         ? related.timezone
         : null,
   };
@@ -234,7 +255,8 @@ async function resolveBusinessByCalledNumber(
 
 function mainMenu(name: string) {
   return `Hi, this is AnaAI from ${
-    safeVoiceText(name, 100) || "the business"
+    safeVoiceText(name, 100) ||
+    "the business"
   }. How can I help? Speak naturally, or press 1 to book an appointment, 2 for business information, 3 for a team member, or 0 to repeat these options.`;
 }
 
@@ -261,12 +283,24 @@ function gather(
   }
 
   const token = state
-    ? sealVoiceState(state, binding)
+    ? sealVoiceState(
+        state,
+        binding
+      )
     : undefined;
 
   const input = response.gather({
-    ...gatherOptions(state?.mode === "booking" ? state.booking.stage : undefined, services),
-    action: callbackUrl(ingress, mode, token),
+    ...gatherOptions(
+      state?.mode === "booking"
+        ? state.booking.stage
+        : undefined,
+      services
+    ),
+    action: callbackUrl(
+      ingress,
+      mode,
+      token
+    ),
   });
 
   input.say(
@@ -289,9 +323,13 @@ function spokenTime(value: string) {
     return value;
   }
 
-  const suffix = hour >= 12 ? "PM" : "AM";
+  const suffix =
+    hour >= 12 ? "PM" : "AM";
+
   const displayHour =
-    hour % 12 === 0 ? 12 : hour % 12;
+    hour % 12 === 0
+      ? 12
+      : hour % 12;
 
   return minute === 0
     ? `${displayHour} ${suffix}`
@@ -324,7 +362,9 @@ function beginBooking(
     return;
   }
 
-  const state = initialBookingState();
+  const state =
+    initialBookingState();
+
   state.turns = 1;
 
   gather(
@@ -368,11 +408,14 @@ async function bookingTurn({
     const prompt =
       state.booking.stage === "name"
         ? "I didn't hear the name. What name should I put on the appointment?"
-        : state.booking.stage === "service"
+        : state.booking.stage ===
+            "service"
           ? "I didn't hear the service. Which service would you like?"
-          : state.booking.stage === "date"
+          : state.booking.stage ===
+              "date"
             ? "I didn't hear the date. Please say the month and day, such as September 24th."
-            : state.booking.stage === "time"
+            : state.booking.stage ===
+                "time"
               ? "I didn't hear the time. Please say a time such as 10 AM or 2:30 PM."
               : `I didn't hear your answer. ${bookingSummary(
                   state
@@ -390,7 +433,10 @@ async function bookingTurn({
 
   state.silence = 0;
 
-  if (interpretConfirmation(speech) === "no") {
+  if (
+    interpretConfirmation(speech) ===
+    "no"
+  ) {
     response.say(
       voiceOptions(),
       "Okay. No appointment was booked. Thanks for calling. Goodbye."
@@ -399,15 +445,38 @@ async function bookingTurn({
     return;
   }
 
-  const retry = (message: string, names: string[] = []) => {
-    state.booking.failures = (state.booking.failures || 0) + 1;
-    if (state.booking.failures >= 3) {
-      response.say(voiceOptions(), "I'm sorry, I couldn't verify those details. No appointment was booked. Please contact the business for help. Goodbye.");
+  const retry = (
+    message: string,
+    names: string[] = []
+  ) => {
+    state.booking.failures =
+      (state.booking.failures || 0) +
+      1;
+
+    if (
+      state.booking.failures >= 3
+    ) {
+      response.say(
+        voiceOptions(),
+        "I'm sorry, I couldn't verify those details. No appointment was booked. Please contact the business for help. Goodbye."
+      );
       response.hangup();
-    } else gather(response, ingress, binding, message, state, "listen", names);
+    } else {
+      gather(
+        response,
+        ingress,
+        binding,
+        message,
+        state,
+        "listen",
+        names
+      );
+    }
   };
 
-  if (state.booking.stage === "name") {
+  if (
+    state.booking.stage === "name"
+  ) {
     const name = speech
       .replace(/\s+/g, " ")
       .trim();
@@ -417,13 +486,17 @@ async function bookingTurn({
       name.length > 120 ||
       /[<>\x00-\x1f]/.test(name)
     ) {
-      retry("I couldn't use that name. Please say the name for the appointment.");
+      retry(
+        "I couldn't use that name. Please say the name for the appointment."
+      );
       return;
     }
 
     state.booking.failures = 0;
-    state.booking.customerName = name;
-    state.booking.stage = "service";
+    state.booking.customerName =
+      name;
+    state.booking.stage =
+      "service";
 
     const services =
       await loadVoiceServices(
@@ -441,7 +514,10 @@ async function bookingTurn({
 
     const names = services
       .slice(0, 6)
-      .map((service) => service.name)
+      .map(
+        (service) =>
+          service.name
+      )
       .join(", ");
 
     gather(
@@ -449,22 +525,61 @@ async function bookingTurn({
       ingress,
       binding,
       `Which service would you like? Available services include ${names}.`,
-      state, "listen", services.map(service => service.name)
+      state,
+      "listen",
+      services.map(
+        (service) =>
+          service.name
+      )
     );
     return;
   }
 
-  if (state.booking.stage === "service") {
-    const services = await loadVoiceServices(business.businessId);
-    const { match: service, candidates } = matchVoiceService(services, speech);
+  if (
+    state.booking.stage ===
+    "service"
+  ) {
+    const services =
+      await loadVoiceServices(
+        business.businessId
+      );
+
+    const {
+      match: service,
+      candidates,
+    } = matchVoiceService(
+      services,
+      speech
+    );
+
     if (!service) {
-      const choices = (candidates.length ? candidates : services).slice(0, 3).map(s => s.name).join(", ");
-      retry(candidates.length > 1 ? `Which service did you mean: ${choices}?` :
-        `I couldn't match that service. ${choices ? `Available options include ${choices}.` : "Please contact the business for services."}`, services.map(s => s.name));
+      const choices = (
+        candidates.length
+          ? candidates
+          : services
+      )
+        .slice(0, 3)
+        .map((item) => item.name)
+        .join(", ");
+
+      retry(
+        candidates.length > 1
+          ? `Which service did you mean: ${choices}?`
+          : `I couldn't match that service. ${
+              choices
+                ? `Available options include ${choices}.`
+                : "Please contact the business for services."
+            }`,
+        services.map(
+          (item) => item.name
+        )
+      );
       return;
     }
+
     state.booking.failures = 0;
-    state.booking.serviceId = service.id;
+    state.booking.serviceId =
+      service.id;
     state.booking.serviceName =
       service.name;
     state.booking.stage = "date";
@@ -479,14 +594,18 @@ async function bookingTurn({
     return;
   }
 
-  if (state.booking.stage === "date") {
+  if (
+    state.booking.stage === "date"
+  ) {
     const date = bookingDate(
       speech,
       business.timezone
     );
 
     if (!date) {
-      retry("I couldn't verify that date. Please say the month, day, and year.");
+      retry(
+        "I couldn't verify that date. Please say the month, day, and year."
+      );
       return;
     }
 
@@ -495,13 +614,19 @@ async function bookingTurn({
         business.timezone
       );
 
-    if (today && date < today) {
-      retry("That date has already passed. Please choose another date.");
+    if (
+      today &&
+      date < today
+    ) {
+      retry(
+        "That date has already passed. Please choose another date."
+      );
       return;
     }
 
     state.booking.failures = 0;
     state.booking.date = date;
+    state.booking.time = null;
     state.booking.stage = "time";
 
     gather(
@@ -514,17 +639,123 @@ async function bookingTurn({
     return;
   }
 
-  if (state.booking.stage === "time") {
-    const parsed = parseSpokenTime(speech);
-    if (parsed.kind !== "valid") {
-      retry(parsed.kind === "ambiguous"
-        ? `Did you mean ${spokenTime(parsed.options[0])} or ${spokenTime(parsed.options[1])}? Please say the full time with AM or PM.`
-        : "I couldn't interpret that time. Please say a valid time such as one PM or two thirty PM.");
+  if (
+    state.booking.stage === "time"
+  ) {
+    const parsed =
+      parseSpokenTime(speech);
+
+    if (
+      parsed.kind !== "valid"
+    ) {
+      retry(
+        parsed.kind ===
+          "ambiguous"
+          ? `Did you mean ${spokenTime(
+              parsed.options[0]
+            )} or ${spokenTime(
+              parsed.options[1]
+            )}? Please say the full time with AM or PM.`
+          : "I couldn't interpret that time. Please say a valid time such as one PM or two thirty PM."
+      );
       return;
     }
+
+    if (
+      !state.booking.serviceId ||
+      !state.booking.date
+    ) {
+      response.say(
+        voiceOptions(),
+        "I couldn't verify all of the booking details. No appointment was booked. Please call again."
+      );
+      response.hangup();
+      return;
+    }
+
+    /*
+     * This is an advisory read-only check.
+     *
+     * It improves the caller experience by rejecting
+     * a known unavailable time before asking the caller
+     * to confirm.
+     *
+     * It does NOT reserve the slot. The authoritative
+     * booking RPC runs again after explicit confirmation.
+     */
+    const availability =
+      await checkVoiceAvailability({
+        businessId:
+          business.businessId,
+        serviceId:
+          state.booking.serviceId,
+        date: state.booking.date,
+        time: parsed.value,
+      });
+
+    if (!availability.available) {
+      state.booking.time = null;
+
+      if (
+        availability.reason ===
+        "slot_unavailable"
+      ) {
+        retry(
+          "That time is not available. Please choose another time."
+        );
+        return;
+      }
+
+      if (
+        availability.reason ===
+        "outside_hours"
+      ) {
+        retry(
+          "That time is outside the business hours for that day. Please choose another time."
+        );
+        return;
+      }
+
+      if (
+        availability.reason ===
+        "closed"
+      ) {
+        /*
+         * A different time on the same date cannot fix
+         * a closed day, so move back to date selection.
+         */
+        state.booking.failures = 0;
+        state.booking.date = null;
+        state.booking.stage = "date";
+
+        gather(
+          response,
+          ingress,
+          binding,
+          "The business is closed on that date. Please choose another date.",
+          state
+        );
+        return;
+      }
+
+      /*
+       * Fail closed for malformed database results,
+       * configuration problems, or availability-system
+       * failures. Do not claim the slot is available.
+       */
+      response.say(
+        voiceOptions(),
+        "I'm sorry, I couldn't verify appointment availability right now. No appointment was booked. Please contact the business for help. Goodbye."
+      );
+      response.hangup();
+      return;
+    }
+
     state.booking.failures = 0;
-    state.booking.time = parsed.value;
-    state.booking.stage = "confirm";
+    state.booking.time =
+      parsed.value;
+    state.booking.stage =
+      "confirm";
 
     gather(
       response,
@@ -538,8 +769,20 @@ async function bookingTurn({
     return;
   }
 
-  if (interpretConfirmation(speech) !== "yes") {
-    retry(`Please say yes to book ${bookingSummary(state)}, or no to cancel.`);
+  /*
+   * Confirmation remains explicit. An availability
+   * precheck never authorizes a booking mutation.
+   */
+  if (
+    interpretConfirmation(
+      speech
+    ) !== "yes"
+  ) {
+    retry(
+      `Please say yes to book ${bookingSummary(
+        state
+      )}, or no to cancel.`
+    );
     return;
   }
 
@@ -572,15 +815,28 @@ async function bookingTurn({
     return;
   }
 
+  /*
+   * This remains the authoritative mutation boundary.
+   *
+   * The booking RPC re-checks availability after the
+   * caller's explicit confirmation. A race can therefore
+   * still safely reject here.
+   *
+   * executeVoiceBooking also starts the existing SMS
+   * notification pipeline only after a verified booking
+   * receipt.
+   */
   const result =
     await executeVoiceBooking({
-      businessId: business.businessId,
+      businessId:
+        business.businessId,
       idempotencyKey:
         booking.idempotencyKey,
       customerName:
         booking.customerName,
       customerPhone: phone,
-      serviceId: booking.serviceId,
+      serviceId:
+        booking.serviceId,
       serviceName:
         booking.serviceName,
       date: booking.date,
@@ -601,6 +857,11 @@ async function bookingTurn({
       ? "Your original booking was already completed. No duplicate appointment was created."
       : "Your appointment has been booked successfully.";
 
+  /*
+   * Booking success and SMS status deliberately remain
+   * independent. SMS failure or uncertainty never turns
+   * a verified database booking into a failed booking.
+   */
   const sms = result.smsSent
     ? " A confirmation text was submitted for sending."
     : " I couldn't verify the text confirmation status.";
@@ -623,7 +884,8 @@ export async function buildVoiceResponse({
   ingress: VoiceIngress;
   stateToken?: string;
 }) {
-  const called = formData.get("To");
+  const called =
+    formData.get("To");
 
   const business =
     await resolveBusinessByCalledNumber(
@@ -650,19 +912,25 @@ export async function buildVoiceResponse({
   }
 
   const read = (key: string) => {
-    const value = formData.get(key);
-    return typeof value === "string"
+    const value =
+      formData.get(key);
+
+    return typeof value ===
+      "string"
       ? value.trim()
       : "";
   };
 
   const binding: VoiceBinding = {
-    businessId: business.businessId,
+    businessId:
+      business.businessId,
     callSid: read("CallSid"),
     ingress,
   };
 
-  let state: VoiceState | null = null;
+  let state:
+    | VoiceState
+    | null = null;
 
   if (stateToken) {
     try {
@@ -676,6 +944,7 @@ export async function buildVoiceResponse({
         "This conversation has expired. No appointment was changed. Please call again. Goodbye."
       );
       response.hangup();
+
       return response.toString();
     }
   } else if (
@@ -684,24 +953,40 @@ export async function buildVoiceResponse({
       binding.callSid
     )
   ) {
-    state = initialVoiceState();
+    state =
+      initialVoiceState();
   }
 
   if (state) {
     state.turns++;
   }
 
-  if (state && (state.turns >= 30 || state.expires <= Date.now())) {
-    response.say(voiceOptions(), "This conversation has ended. Please call again if you need help. Goodbye.");
+  if (
+    state &&
+    (state.turns >= 30 ||
+      state.expires <= Date.now())
+  ) {
+    response.say(
+      voiceOptions(),
+      "This conversation has ended. Please call again if you need help. Goodbye."
+    );
     response.hangup();
+
     return response.toString();
   }
 
-  const speech = read("SpeechResult");
-  const digits = read("Digits");
-  const callerPhone = read("From");
+  const speech =
+    read("SpeechResult");
 
-  if (state?.mode === "booking") {
+  const digits =
+    read("Digits");
+
+  const callerPhone =
+    read("From");
+
+  if (
+    state?.mode === "booking"
+  ) {
     await bookingTurn({
       response,
       ingress,
@@ -746,12 +1031,19 @@ export async function buildVoiceResponse({
     !digits
   ) {
     listen(
-      mainMenu(business.businessName)
+      mainMenu(
+        business.businessName
+      )
     );
-  } else if (!speech && !digits) {
+  } else if (
+    !speech &&
+    !digits
+  ) {
     if (
       (state?.silence ??
-        (mode === "retry" ? 1 : 0)) >= 1
+        (mode === "retry"
+          ? 1
+          : 0)) >= 1
     ) {
       response.say(
         voiceOptions(),
@@ -788,18 +1080,24 @@ export async function buildVoiceResponse({
       }
 
       listen(
-        mainMenu(business.businessName)
+        mainMenu(
+          business.businessName
+        )
       );
     } else if (
       digits === "1" ||
-      BOOKING_INTENT.test(speech)
+      BOOKING_INTENT.test(
+        speech
+      )
     ) {
       beginBooking(
         response,
         ingress,
         binding
       );
-    } else if (digits === "2") {
+    } else if (
+      digits === "2"
+    ) {
       if (state) {
         state.mode = "info";
       }
@@ -811,7 +1109,9 @@ export async function buildVoiceResponse({
         speech
       )
     ) {
-      listen(TRANSFER_UNAVAILABLE);
+      listen(
+        TRANSFER_UNAVAILABLE
+      );
     } else if (digits) {
       listen(
         `That option isn't available. ${mainMenu(

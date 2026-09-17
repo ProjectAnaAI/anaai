@@ -98,3 +98,33 @@ test('conversational booking wrappers preserve authority and ambiguity', () => {
   const literal = { name: 'Could I book a facial' };
   assert.equal(p.matchVoiceService([literal, { name: 'facial' }], literal.name).match, literal);
 });
+
+test('production afternoon phrase parses as explicit PM time', () => {
+  const result = p.parseSpokenTime('2:30 in the afternoon');
+  assert.equal(result.kind, 'valid');
+  assert.equal(result.value, '14:30');
+});
+
+test('speech-recognition omission of the article in afternoon phrase remains explicit PM', () => {
+  for (const speech of [
+    '2:30 in afternoon',
+    'two thirty in afternoon',
+  ]) {
+    const result = p.parseSpokenTime(speech);
+    assert.equal(result.kind, 'valid');
+    assert.equal(result.value, '14:30');
+  }
+});
+
+test('period-of-day article omission is controlled and bare time remains ambiguous', () => {
+  const morning = p.parseSpokenTime('three in morning');
+  assert.equal(morning.kind, 'valid');
+  assert.equal(morning.value, '03:00');
+
+  const evening = p.parseSpokenTime('three in evening');
+  assert.equal(evening.kind, 'valid');
+  assert.equal(evening.value, '15:00');
+
+  const bare = p.parseSpokenTime('two thirty');
+  assert.equal(bare.kind, 'ambiguous');
+});
