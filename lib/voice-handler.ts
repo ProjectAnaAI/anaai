@@ -7,11 +7,16 @@ import {
   executeVoiceBooking,
   loadVoiceServices,
 } from "@/lib/voice-booking";
+
 import {
   answerVoiceQuestion,
   safeVoiceText,
 } from "@/lib/voice-receptionist";
-import { createSupabaseServiceClient } from "@/lib/supabase-server";
+
+import {
+  createSupabaseServiceClient,
+} from "@/lib/supabase-server";
+
 import {
   initialBookingState,
   initialVoiceState,
@@ -22,6 +27,7 @@ import {
   type VoiceBookingState,
   type VoiceState,
 } from "@/lib/voice-state";
+
 import {
   bookingDate,
   businessLocalDate,
@@ -29,10 +35,15 @@ import {
   confirmation as interpretConfirmation,
   matchVoiceService,
 } from "@/lib/voice-parsing";
+
 import {
   voiceOptions,
   gatherOptions,
 } from "@/lib/voice-config";
+
+import {
+  understandVoiceTurn,
+} from "@/lib/voice-understanding";
 
 export type VoiceIngress =
   | "production"
@@ -56,7 +67,8 @@ const BOOKING_STATE_UNAVAILABLE =
 const BOOKING_INTENT =
   /\b(?:book|booking|schedule|reserve)\b/i;
 
-const PHONE = /^\+[1-9]\d{7,14}$/;
+const PHONE =
+  /^\+[1-9]\d{7,14}$/;
 
 function productionVoiceUrl() {
   const value =
@@ -67,7 +79,8 @@ function productionVoiceUrl() {
   }
 
   try {
-    const url = new URL(value);
+    const url =
+      new URL(value);
 
     if (
       url.protocol !== "https:" &&
@@ -87,7 +100,8 @@ function callbackUrl(
   mode: string,
   state?: string
 ) {
-  const configured = productionVoiceUrl();
+  const configured =
+    productionVoiceUrl();
 
   if (!configured) {
     throw new Error(
@@ -95,15 +109,24 @@ function callbackUrl(
     );
   }
 
-  if (ingress === "production") {
-    const url = new URL(configured);
+  if (
+    ingress === "production"
+  ) {
+    const url =
+      new URL(configured);
 
     if (mode) {
-      url.searchParams.set("mode", mode);
+      url.searchParams.set(
+        "mode",
+        mode
+      );
     }
 
     if (state) {
-      url.searchParams.set("state", state);
+      url.searchParams.set(
+        "state",
+        state
+      );
     }
 
     return url.toString();
@@ -118,44 +141,69 @@ function callbackUrl(
     );
   }
 
-  const production = new URL(configured);
-  const url = new URL(
-    "/api/voice/trial",
-    production.origin
+  const production =
+    new URL(configured);
+
+  const url =
+    new URL(
+      "/api/voice/trial",
+      production.origin
+    );
+
+  url.searchParams.set(
+    "token",
+    token
   );
 
-  url.searchParams.set("token", token);
-
   if (mode) {
-    url.searchParams.set("mode", mode);
+    url.searchParams.set(
+      "mode",
+      mode
+    );
   }
 
   if (state) {
-    url.searchParams.set("state", state);
+    url.searchParams.set(
+      "state",
+      state
+    );
   }
 
   return url.toString();
 }
 
-function normalizePhone(value: string) {
-  const trimmed = value.trim();
+function normalizePhone(
+  value: string
+) {
+  const trimmed =
+    value.trim();
 
   if (!trimmed) {
     return "";
   }
 
-  if (trimmed.startsWith("+")) {
-    const digits = trimmed
-      .slice(1)
-      .replace(/\D/g, "");
+  if (
+    trimmed.startsWith("+")
+  ) {
+    const digits =
+      trimmed
+        .slice(1)
+        .replace(/\D/g, "");
 
-    return digits ? `+${digits}` : "";
+    return digits
+      ? `+${digits}`
+      : "";
   }
 
   const digits =
-    trimmed.replace(/\D/g, "");
+    trimmed.replace(
+      /\D/g,
+      ""
+    );
 
-  if (digits.length === 10) {
+  if (
+    digits.length === 10
+  ) {
     return `+1${digits}`;
   }
 
@@ -166,14 +214,18 @@ function normalizePhone(value: string) {
     return `+${digits}`;
   }
 
-  return digits ? `+${digits}` : "";
+  return digits
+    ? `+${digits}`
+    : "";
 }
 
 async function resolveBusinessByCalledNumber(
   calledNumber: string
 ): Promise<BusinessContext | null> {
   const phone =
-    normalizePhone(calledNumber);
+    normalizePhone(
+      calledNumber
+    );
 
   if (!phone) {
     return null;
@@ -182,8 +234,13 @@ async function resolveBusinessByCalledNumber(
   const db =
     createSupabaseServiceClient();
 
-  const { data, error } = await db
-    .from("business_phone_numbers")
+  const {
+    data,
+    error,
+  } = await db
+    .from(
+      "business_phone_numbers"
+    )
     .select(
       `
         business_id,
@@ -193,11 +250,22 @@ async function resolveBusinessByCalledNumber(
         )
       `
     )
-    .eq("phone_number", phone)
-    .eq("provider", "twilio")
-    .eq("is_active", true)
+    .eq(
+      "phone_number",
+      phone
+    )
+    .eq(
+      "provider",
+      "twilio"
+    )
+    .eq(
+      "is_active",
+      true
+    )
     .abortSignal(
-      AbortSignal.timeout(3000)
+      AbortSignal.timeout(
+        3000
+      )
     )
     .maybeSingle();
 
@@ -205,6 +273,7 @@ async function resolveBusinessByCalledNumber(
     console.error(
       "AnaAI voice business lookup failed."
     );
+
     throw new Error(
       "Voice business lookup failed."
     );
@@ -215,15 +284,19 @@ async function resolveBusinessByCalledNumber(
   }
 
   const related =
-    Array.isArray(data.businesses)
+    Array.isArray(
+      data.businesses
+    )
       ? data.businesses[0]
       : data.businesses;
 
   const businessName =
     related &&
-    typeof related === "object" &&
+    typeof related ===
+      "object" &&
     "name" in related &&
-    typeof related.name === "string"
+    typeof related.name ===
+      "string"
       ? related.name.trim()
       : "";
 
@@ -234,17 +307,22 @@ async function resolveBusinessByCalledNumber(
     console.error(
       "AnaAI voice business lookup returned incomplete routing data."
     );
+
     throw new Error(
       "Voice business routing data is incomplete."
     );
   }
 
   return {
-    businessId: data.business_id,
+    businessId:
+      data.business_id,
+
     businessName,
+
     timezone:
       related &&
-      typeof related === "object" &&
+      typeof related ===
+        "object" &&
       "timezone" in related &&
       typeof related.timezone ===
         "string"
@@ -253,15 +331,20 @@ async function resolveBusinessByCalledNumber(
   };
 }
 
-function mainMenu(name: string) {
+function mainMenu(
+  name: string
+) {
   return `Hi, this is AnaAI from ${
-    safeVoiceText(name, 100) ||
-    "the business"
+    safeVoiceText(
+      name,
+      100
+    ) || "the business"
   }. How can I help? Speak naturally, or press 1 to book an appointment, 2 for business information, 3 for a team member, or 0 to repeat these options.`;
 }
 
 function gather(
-  response: twilio.twiml.VoiceResponse,
+  response:
+    twilio.twiml.VoiceResponse,
   ingress: VoiceIngress,
   binding: VoiceBinding,
   message: string,
@@ -272,36 +355,43 @@ function gather(
   if (
     state &&
     (state.turns >= 30 ||
-      state.expires <= Date.now())
+      state.expires <=
+        Date.now())
   ) {
     response.say(
       voiceOptions(),
       "Thanks for calling. Please call again if you need more help. Goodbye."
     );
+
     response.hangup();
     return;
   }
 
-  const token = state
-    ? sealVoiceState(
-        state,
-        binding
-      )
-    : undefined;
+  const token =
+    state
+      ? sealVoiceState(
+          state,
+          binding
+        )
+      : undefined;
 
-  const input = response.gather({
-    ...gatherOptions(
-      state?.mode === "booking"
-        ? state.booking.stage
-        : undefined,
-      services
-    ),
-    action: callbackUrl(
-      ingress,
-      mode,
-      token
-    ),
-  });
+  const input =
+    response.gather({
+      ...gatherOptions(
+        state?.mode ===
+          "booking"
+          ? state.booking.stage
+          : undefined,
+        services
+      ),
+
+      action:
+        callbackUrl(
+          ingress,
+          mode,
+          token
+        ),
+    });
 
   input.say(
     voiceOptions(),
@@ -309,22 +399,35 @@ function gather(
   );
 }
 
-function spokenTime(value: string) {
-  const [hours, minutes] =
-    value.split(":");
+function spokenTime(
+  value: string
+) {
+  const [
+    hours,
+    minutes,
+  ] = value.split(":");
 
-  const hour = Number(hours);
-  const minute = Number(minutes);
+  const hour =
+    Number(hours);
+
+  const minute =
+    Number(minutes);
 
   if (
-    !Number.isInteger(hour) ||
-    !Number.isInteger(minute)
+    !Number.isInteger(
+      hour
+    ) ||
+    !Number.isInteger(
+      minute
+    )
   ) {
     return value;
   }
 
   const suffix =
-    hour >= 12 ? "PM" : "AM";
+    hour >= 12
+      ? "PM"
+      : "AM";
 
   const displayHour =
     hour % 12 === 0
@@ -335,7 +438,10 @@ function spokenTime(value: string) {
     ? `${displayHour} ${suffix}`
     : `${displayHour}:${String(
         minute
-      ).padStart(2, "0")} ${suffix}`;
+      ).padStart(
+        2,
+        "0"
+      )} ${suffix}`;
 }
 
 function bookingSummary(
@@ -347,11 +453,14 @@ function bookingSummary(
 }
 
 function beginBooking(
-  response: twilio.twiml.VoiceResponse,
+  response:
+    twilio.twiml.VoiceResponse,
   ingress: VoiceIngress,
   binding: VoiceBinding
 ) {
-  if (!voiceStateConfigured()) {
+  if (
+    !voiceStateConfigured()
+  ) {
     gather(
       response,
       ingress,
@@ -359,6 +468,7 @@ function beginBooking(
       BOOKING_STATE_UNAVAILABLE,
       null
     );
+
     return;
   }
 
@@ -385,7 +495,8 @@ async function bookingTurn({
   speech,
   callerPhone,
 }: {
-  response: twilio.twiml.VoiceResponse;
+  response:
+    twilio.twiml.VoiceResponse;
   ingress: VoiceIngress;
   binding: VoiceBinding;
   business: BusinessContext;
@@ -394,11 +505,14 @@ async function bookingTurn({
   callerPhone: string;
 }) {
   if (!speech) {
-    if (state.silence >= 1) {
+    if (
+      state.silence >= 1
+    ) {
       response.say(
         voiceOptions(),
         "I couldn't hear you. No appointment was booked. Please call again when you're ready. Goodbye."
       );
+
       response.hangup();
       return;
     }
@@ -406,7 +520,8 @@ async function bookingTurn({
     state.silence = 1;
 
     const prompt =
-      state.booking.stage === "name"
+      state.booking.stage ===
+      "name"
         ? "I didn't hear the name. What name should I put on the appointment?"
         : state.booking.stage ===
             "service"
@@ -428,19 +543,27 @@ async function bookingTurn({
       prompt,
       state
     );
+
     return;
   }
 
   state.silence = 0;
 
+  /*
+   * Preserve the existing global explicit cancellation
+   * behavior. A clear deterministic "no" never requires
+   * an AI call.
+   */
   if (
-    interpretConfirmation(speech) ===
-    "no"
+    interpretConfirmation(
+      speech
+    ) === "no"
   ) {
     response.say(
       voiceOptions(),
       "Okay. No appointment was booked. Thanks for calling. Goodbye."
     );
+
     response.hangup();
     return;
   }
@@ -450,16 +573,18 @@ async function bookingTurn({
     names: string[] = []
   ) => {
     state.booking.failures =
-      (state.booking.failures || 0) +
-      1;
+      (state.booking.failures ||
+        0) + 1;
 
     if (
-      state.booking.failures >= 3
+      state.booking.failures >=
+      3
     ) {
       response.say(
         voiceOptions(),
         "I'm sorry, I couldn't verify those details. No appointment was booked. Please contact the business for help. Goodbye."
       );
+
       response.hangup();
     } else {
       gather(
@@ -475,26 +600,37 @@ async function bookingTurn({
   };
 
   if (
-    state.booking.stage === "name"
+    state.booking.stage ===
+    "name"
   ) {
-    const name = speech
-      .replace(/\s+/g, " ")
-      .trim();
+    const name =
+      speech
+        .replace(
+          /\s+/g,
+          " "
+        )
+        .trim();
 
     if (
       name.length < 2 ||
       name.length > 120 ||
-      /[<>\x00-\x1f]/.test(name)
+      /[<>\x00-\x1f]/.test(
+        name
+      )
     ) {
       retry(
         "I couldn't use that name. Please say the name for the appointment."
       );
+
       return;
     }
 
-    state.booking.failures = 0;
+    state.booking.failures =
+      0;
+
     state.booking.customerName =
       name;
+
     state.booking.stage =
       "service";
 
@@ -503,22 +639,26 @@ async function bookingTurn({
         business.businessId
       );
 
-    if (!services.length) {
+    if (
+      !services.length
+    ) {
       response.say(
         voiceOptions(),
         "I'm sorry, I can't find any services available for phone booking right now. No appointment was booked."
       );
+
       response.hangup();
       return;
     }
 
-    const names = services
-      .slice(0, 6)
-      .map(
-        (service) =>
-          service.name
-      )
-      .join(", ");
+    const names =
+      services
+        .slice(0, 6)
+        .map(
+          (service) =>
+            service.name
+        )
+        .join(", ");
 
     gather(
       response,
@@ -532,6 +672,7 @@ async function bookingTurn({
           service.name
       )
     );
+
     return;
   }
 
@@ -544,26 +685,80 @@ async function bookingTurn({
         business.businessId
       );
 
-    const {
-      match: service,
-      candidates,
-    } = matchVoiceService(
-      services,
-      speech
-    );
+    /*
+     * FAST PATH:
+     *
+     * Existing deterministic service matching remains
+     * first. Normal obvious requests therefore do not
+     * incur an OpenAI round trip.
+     */
+    const deterministic =
+      matchVoiceService(
+        services,
+        speech
+      );
+
+    let service =
+      deterministic.match;
+
+    /*
+     * SEMANTIC FALLBACK:
+     *
+     * Only when the deterministic matcher cannot safely
+     * select a service do we ask the narrow understanding
+     * layer to interpret the natural utterance.
+     *
+     * The model receives service display names only.
+     * It never receives service IDs or business IDs.
+     */
+    if (!service) {
+      const understanding =
+        await understandVoiceTurn({
+          stage: "service",
+          speech,
+          services:
+            services.map(
+              (item) =>
+                item.name
+            ),
+        });
+
+      if (
+        understanding.kind ===
+        "service"
+      ) {
+        /*
+         * Never trust the model as the service authority.
+         * Map its display-name selection back onto the
+         * actual server-loaded service record.
+         */
+        service =
+          services.find(
+            (item) =>
+              item.name ===
+              understanding.serviceName
+          ) || null;
+      }
+    }
 
     if (!service) {
-      const choices = (
-        candidates.length
-          ? candidates
-          : services
-      )
-        .slice(0, 3)
-        .map((item) => item.name)
-        .join(", ");
+      const choices =
+        (
+          deterministic.candidates
+            .length
+            ? deterministic.candidates
+            : services
+        )
+          .slice(0, 3)
+          .map(
+            (item) =>
+              item.name
+          )
+          .join(", ");
 
       retry(
-        candidates.length > 1
+        deterministic.candidates
+          .length > 1
           ? `Which service did you mean: ${choices}?`
           : `I couldn't match that service. ${
               choices
@@ -571,18 +766,25 @@ async function bookingTurn({
                 : "Please contact the business for services."
             }`,
         services.map(
-          (item) => item.name
+          (item) =>
+            item.name
         )
       );
+
       return;
     }
 
-    state.booking.failures = 0;
+    state.booking.failures =
+      0;
+
     state.booking.serviceId =
       service.id;
+
     state.booking.serviceName =
       service.name;
-    state.booking.stage = "date";
+
+    state.booking.stage =
+      "date";
 
     gather(
       response,
@@ -591,21 +793,25 @@ async function bookingTurn({
       `What date would you like for ${service.name}? You can say tomorrow, or a month and day.`,
       state
     );
+
     return;
   }
 
   if (
-    state.booking.stage === "date"
+    state.booking.stage ===
+    "date"
   ) {
-    const date = bookingDate(
-      speech,
-      business.timezone
-    );
+    const date =
+      bookingDate(
+        speech,
+        business.timezone
+      );
 
     if (!date) {
       retry(
         "I couldn't verify that date. Please say the month, day, and year."
       );
+
       return;
     }
 
@@ -621,13 +827,21 @@ async function bookingTurn({
       retry(
         "That date has already passed. Please choose another date."
       );
+
       return;
     }
 
-    state.booking.failures = 0;
-    state.booking.date = date;
-    state.booking.time = null;
-    state.booking.stage = "time";
+    state.booking.failures =
+      0;
+
+    state.booking.date =
+      date;
+
+    state.booking.time =
+      null;
+
+    state.booking.stage =
+      "time";
 
     gather(
       response,
@@ -636,17 +850,22 @@ async function bookingTurn({
       "What time would you like? For example, say 10 AM or 2:30 PM.",
       state
     );
+
     return;
   }
 
   if (
-    state.booking.stage === "time"
+    state.booking.stage ===
+    "time"
   ) {
     const parsed =
-      parseSpokenTime(speech);
+      parseSpokenTime(
+        speech
+      );
 
     if (
-      parsed.kind !== "valid"
+      parsed.kind !==
+      "valid"
     ) {
       retry(
         parsed.kind ===
@@ -658,43 +877,65 @@ async function bookingTurn({
             )}? Please say the full time with AM or PM.`
           : "I couldn't interpret that time. Please say a valid time such as one PM or two thirty PM."
       );
+
       return;
     }
 
     if (
-      !state.booking.serviceId ||
+      !state.booking
+        .serviceId ||
       !state.booking.date
     ) {
       response.say(
         voiceOptions(),
         "I couldn't verify all of the booking details. No appointment was booked. Please call again."
       );
+
       response.hangup();
       return;
     }
 
     /*
-     * This is an advisory read-only check.
+     * Advisory read-only availability check.
      *
-     * It improves the caller experience by rejecting
-     * a known unavailable time before asking the caller
-     * to confirm.
-     *
-     * It does NOT reserve the slot. The authoritative
-     * booking RPC runs again after explicit confirmation.
+     * This does not reserve anything and does not
+     * authorize the final booking mutation.
      */
+    const availabilityStarted =
+      Date.now();
+
     const availability =
       await checkVoiceAvailability({
         businessId:
           business.businessId,
+
         serviceId:
-          state.booking.serviceId,
-        date: state.booking.date,
-        time: parsed.value,
+          state.booking
+            .serviceId,
+
+        date:
+          state.booking.date,
+
+        time:
+          parsed.value,
       });
 
-    if (!availability.available) {
-      state.booking.time = null;
+    console.info(
+      `AnaAI voice availability completed duration_ms=${
+        Date.now() -
+        availabilityStarted
+      } result=${
+        availability.available
+          ? "available"
+          : availability.reason
+      }`
+    );
+
+    if (
+      !availability.available
+    ) {
+      state.booking.time =
+        null;
 
       if (
         availability.reason ===
@@ -703,6 +944,7 @@ async function bookingTurn({
         retry(
           "That time is not available. Please choose another time."
         );
+
         return;
       }
 
@@ -713,6 +955,7 @@ async function bookingTurn({
         retry(
           "That time is outside the business hours for that day. Please choose another time."
         );
+
         return;
       }
 
@@ -720,13 +963,14 @@ async function bookingTurn({
         availability.reason ===
         "closed"
       ) {
-        /*
-         * A different time on the same date cannot fix
-         * a closed day, so move back to date selection.
-         */
-        state.booking.failures = 0;
-        state.booking.date = null;
-        state.booking.stage = "date";
+        state.booking.failures =
+          0;
+
+        state.booking.date =
+          null;
+
+        state.booking.stage =
+          "date";
 
         gather(
           response,
@@ -735,25 +979,30 @@ async function bookingTurn({
           "The business is closed on that date. Please choose another date.",
           state
         );
+
         return;
       }
 
       /*
-       * Fail closed for malformed database results,
-       * configuration problems, or availability-system
-       * failures. Do not claim the slot is available.
+       * Unknown/malformed availability results fail
+       * closed. We never claim that an unverified slot
+       * is available.
        */
       response.say(
         voiceOptions(),
         "I'm sorry, I couldn't verify appointment availability right now. No appointment was booked. Please contact the business for help. Goodbye."
       );
+
       response.hangup();
       return;
     }
 
-    state.booking.failures = 0;
+    state.booking.failures =
+      0;
+
     state.booking.time =
       parsed.value;
+
     state.booking.stage =
       "confirm";
 
@@ -766,27 +1015,79 @@ async function bookingTurn({
       )}. Say yes to book this appointment, or no to cancel.`,
       state
     );
+
     return;
   }
 
   /*
-   * Confirmation remains explicit. An availability
-   * precheck never authorizes a booking mutation.
+   * FINAL CONFIRMATION
+   *
+   * The deterministic confirmation parser remains the
+   * fast path.
    */
-  if (
+  let confirmation =
     interpretConfirmation(
       speech
-    ) !== "yes"
+    );
+
+  /*
+   * If deterministic parsing does not clearly authorize
+   * or reject the appointment, use the narrow semantic
+   * interpreter.
+   *
+   * The interpreter still cannot mutate anything.
+   */
+  if (
+    confirmation !== "yes" &&
+    confirmation !== "no"
+  ) {
+    const understanding =
+      await understandVoiceTurn({
+        stage: "confirm",
+        speech,
+      });
+
+    if (
+      understanding.kind ===
+      "confirmation"
+    ) {
+      confirmation =
+        understanding.value;
+    }
+  }
+
+  if (
+    confirmation === "no"
+  ) {
+    response.say(
+      voiceOptions(),
+      "Okay. No appointment was booked. Thanks for calling. Goodbye."
+    );
+
+    response.hangup();
+    return;
+  }
+
+  /*
+   * Anything except a clear YES remains non-authorizing.
+   *
+   * Questions, corrections, uncertainty and background
+   * speech therefore cannot trigger executeVoiceBooking.
+   */
+  if (
+    confirmation !== "yes"
   ) {
     retry(
       `Please say yes to book ${bookingSummary(
         state
       )}, or no to cancel.`
     );
+
     return;
   }
 
-  const booking = state.booking;
+  const booking =
+    state.booking;
 
   if (
     !booking.customerName ||
@@ -799,77 +1100,111 @@ async function bookingTurn({
       voiceOptions(),
       "I couldn't verify all of the booking details. No appointment was booked. Please call again."
     );
+
     response.hangup();
     return;
   }
 
   const phone =
-    normalizePhone(callerPhone);
+    normalizePhone(
+      callerPhone
+    );
 
-  if (!PHONE.test(phone)) {
+  if (
+    !PHONE.test(phone)
+  ) {
     response.say(
       voiceOptions(),
       "I couldn't verify a callback phone number for this appointment. No appointment was booked."
     );
+
     response.hangup();
     return;
   }
 
   /*
-   * This remains the authoritative mutation boundary.
+   * AUTHORITATIVE MUTATION BOUNDARY
    *
-   * The booking RPC re-checks availability after the
-   * caller's explicit confirmation. A race can therefore
-   * still safely reject here.
+   * Nothing above this point creates an appointment.
    *
-   * executeVoiceBooking also starts the existing SMS
-   * notification pipeline only after a verified booking
-   * receipt.
+   * The existing secure voice booking RPC remains the
+   * final authority and re-checks the slot after explicit
+   * confirmation.
    */
+  const bookingStarted =
+    Date.now();
+
   const result =
     await executeVoiceBooking({
       businessId:
         business.businessId,
+
       idempotencyKey:
         booking.idempotencyKey,
+
       customerName:
         booking.customerName,
-      customerPhone: phone,
+
+      customerPhone:
+        phone,
+
       serviceId:
         booking.serviceId,
+
       serviceName:
         booking.serviceName,
-      date: booking.date,
-      time: booking.time,
+
+      date:
+        booking.date,
+
+      time:
+        booking.time,
     });
+
+  console.info(
+    `AnaAI voice booking completed duration_ms=${
+      Date.now() -
+      bookingStarted
+    } result=${
+      result.success
+        ? result.replayed
+          ? "replayed"
+          : "success"
+        : "rejected"
+    }`
+  );
 
   if (!result.success) {
     response.say(
       voiceOptions(),
       result.message
     );
+
     response.hangup();
     return;
   }
 
-  const confirmation =
+  const bookingConfirmation =
     result.replayed
       ? "Your original booking was already completed. No duplicate appointment was created."
       : "Your appointment has been booked successfully.";
 
   /*
-   * Booking success and SMS status deliberately remain
-   * independent. SMS failure or uncertainty never turns
-   * a verified database booking into a failed booking.
+   * Booking truth and SMS truth remain independent.
+   *
+   * A Twilio/carrier problem cannot convert a verified
+   * database appointment into a failed appointment.
    */
-  const sms = result.smsSent
-    ? " A confirmation text was submitted for sending."
-    : " I couldn't verify the text confirmation status.";
+  const sms =
+    result.smsSent
+      ? " A confirmation text was submitted for sending."
+      : " I couldn't verify the text confirmation status.";
 
   response.say(
     voiceOptions(),
-    `${confirmation}${sms} Thanks for calling. Goodbye.`
+    `${bookingConfirmation}${sms} Thanks for calling. Goodbye.`
   );
+
   response.hangup();
 }
 
@@ -884,12 +1219,16 @@ export async function buildVoiceResponse({
   ingress: VoiceIngress;
   stateToken?: string;
 }) {
+  const requestStarted =
+    Date.now();
+
   const called =
     formData.get("To");
 
   const business =
     await resolveBusinessByCalledNumber(
-      typeof called === "string"
+      typeof called ===
+        "string"
         ? called
         : ""
     );
@@ -906,12 +1245,15 @@ export async function buildVoiceResponse({
       voiceOptions(),
       "I'm sorry, AnaAI could not identify the business for this phone number."
     );
+
     response.hangup();
 
     return response.toString();
   }
 
-  const read = (key: string) => {
+  const read = (
+    key: string
+  ) => {
     const value =
       formData.get(key);
 
@@ -924,7 +1266,10 @@ export async function buildVoiceResponse({
   const binding: VoiceBinding = {
     businessId:
       business.businessId,
-    callSid: read("CallSid"),
+
+    callSid:
+      read("CallSid"),
+
     ingress,
   };
 
@@ -934,15 +1279,17 @@ export async function buildVoiceResponse({
 
   if (stateToken) {
     try {
-      state = openVoiceState(
-        stateToken,
-        binding
-      );
+      state =
+        openVoiceState(
+          stateToken,
+          binding
+        );
     } catch {
       response.say(
         voiceOptions(),
         "This conversation has expired. No appointment was changed. Please call again. Goodbye."
       );
+
       response.hangup();
 
       return response.toString();
@@ -964,12 +1311,14 @@ export async function buildVoiceResponse({
   if (
     state &&
     (state.turns >= 30 ||
-      state.expires <= Date.now())
+      state.expires <=
+        Date.now())
   ) {
     response.say(
       voiceOptions(),
       "This conversation has ended. Please call again if you need help. Goodbye."
     );
+
     response.hangup();
 
     return response.toString();
@@ -985,7 +1334,8 @@ export async function buildVoiceResponse({
     read("From");
 
   if (
-    state?.mode === "booking"
+    state?.mode ===
+    "booking"
   ) {
     await bookingTurn({
       response,
@@ -996,6 +1346,13 @@ export async function buildVoiceResponse({
       speech,
       callerPhone,
     });
+
+    console.info(
+      `AnaAI voice request completed flow=booking stage=${state.booking.stage} duration_ms=${
+        Date.now() -
+        requestStarted
+      }`
+    );
 
     return response.toString();
   }
@@ -1023,6 +1380,7 @@ export async function buildVoiceResponse({
       voiceOptions(),
       "Thanks for calling. Goodbye!"
     );
+
     response.hangup();
   } else if (
     !mode &&
@@ -1040,15 +1398,18 @@ export async function buildVoiceResponse({
     !digits
   ) {
     if (
-      (state?.silence ??
+      (
+        state?.silence ??
         (mode === "retry"
           ? 1
-          : 0)) >= 1
+          : 0)
+      ) >= 1
     ) {
       response.say(
         voiceOptions(),
         "I couldn't hear you. Please call again when you're ready. Goodbye."
       );
+
       response.hangup();
     } else {
       if (state) {
@@ -1057,7 +1418,8 @@ export async function buildVoiceResponse({
 
       listen(
         `I didn't hear anything. ${
-          state?.mode === "info"
+          state?.mode ===
+          "info"
             ? INFO_PROMPT
             : "Speak naturally, or press 0 to hear the options."
         }`,
@@ -1076,7 +1438,8 @@ export async function buildVoiceResponse({
       )
     ) {
       if (state) {
-        state.mode = "menu";
+        state.mode =
+          "menu";
       }
 
       listen(
@@ -1099,10 +1462,13 @@ export async function buildVoiceResponse({
       digits === "2"
     ) {
       if (state) {
-        state.mode = "info";
+        state.mode =
+          "info";
       }
 
-      listen(INFO_PROMPT);
+      listen(
+        INFO_PROMPT
+      );
     } else if (
       digits === "3" ||
       /\b(transfer|representative|human|speak (?:with|to) (?:someone|somebody|a person)|talk to (?:someone|somebody|a person))\b/i.test(
@@ -1112,7 +1478,9 @@ export async function buildVoiceResponse({
       listen(
         TRANSFER_UNAVAILABLE
       );
-    } else if (digits) {
+    } else if (
+      digits
+    ) {
       listen(
         `That option isn't available. ${mainMenu(
           business.businessName
@@ -1120,7 +1488,8 @@ export async function buildVoiceResponse({
       );
     } else {
       if (state) {
-        state.mode = "info";
+        state.mode =
+          "info";
       }
 
       const answer =
@@ -1136,6 +1505,15 @@ export async function buildVoiceResponse({
       );
     }
   }
+
+  console.info(
+    `AnaAI voice request completed flow=${
+      state?.mode || "menu"
+    } duration_ms=${
+      Date.now() -
+      requestStarted
+    }`
+  );
 
   return response.toString();
 }

@@ -62,7 +62,7 @@ test('Gather settings are bounded, stage-specific and contain only supplied hint
   assert.equal(c.gatherOptions('confirm').speechTimeout,'1');
   assert.equal(c.gatherOptions('time').speechTimeout,'2');
   assert.equal(c.gatherOptions().speechModel,'experimental_conversations');
-  assert.equal(c.gatherOptions('service').speechModel,'experimental_utterances');
+  assert.equal(c.gatherOptions('service').speechModel,'experimental_conversations');
   assert.equal(c.gatherOptions('service',['Haircut','bad,entry','<invalid>']).hints,'Haircut');
   assert.equal(c.gatherOptions('service',Array(40).fill('Haircut')).hints.split(',').length,30);
 });

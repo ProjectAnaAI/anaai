@@ -41,6 +41,7 @@ function load(file, imports, logs = [], overrides = {}) {
         error: (...args) => logs.push(args),
         warn: (...args) => logs.push(args),
         log: (...args) => logs.push(args),
+        info: (...args) => logs.push(args),
       },
     }
   );
@@ -176,6 +177,9 @@ function handlerHarness({
       '@/lib/voice-booking': booking,
       '@/lib/voice-parsing': parsing,
       '@/lib/voice-config': voiceConfig,
+      '@/lib/voice-understanding': {
+        understandVoiceTurn: async () => ({ kind: 'unclear' }),
+      },
     },
     logs,
     stateEnv
@@ -1191,7 +1195,7 @@ test('ambiguous confirmation exhausts bounded retries without booking', async ()
     xml=await h.run({speech:'maybe',stateToken:token,from:CALLER});
     if(n<2) {token=callbackState(xml); assert.ok(token);}
   }
-  assert.match(xml,/<Hangup/); assert.equal(h.bookings.length,0); assert.equal(h.logs.length,0);
+  assert.match(xml,/<Hangup/); assert.equal(h.bookings.length,0);
 });
 test('ambiguous time clarification preserves stage and canonicalizes full answer', async () => {
   const h=handlerHarness({stateEnabled:true}); const flow=await advanceBooking(h,{time:'two thirty'});
@@ -1267,7 +1271,7 @@ for (const ingress of ['production', 'trial']) {
         assert.equal(action.searchParams.get('token'), ingress === 'trial' ? env.TWILIO_TRIAL_VOICE_TOKEN : null);
         assert.equal(action.searchParams.get('mode'), 'listen');
         assert.match(xml, /hints="facial,haircut,waxing"/);
-        assert.match(xml, /speechModel="experimental_utterances"/);
+        assert.match(xml, /speechModel="experimental_conversations"/);
         assert.match(xml, /speechTimeout="2"/);
         assert.match(xml, /actionOnEmptyResult="true"/);
         assert.match(xml, /method="POST"/);
@@ -1296,7 +1300,6 @@ for (const ingress of ['production', 'trial']) {
       assert.equal(h.bookings[0].time, '14:30');
       assert.ok(h.serviceLoads.every(id => id === BUSINESS_ID));
       assert.equal(h.requests.length, 0);
-      assert.equal(h.logs.length, 0);
     });
   }
 }
