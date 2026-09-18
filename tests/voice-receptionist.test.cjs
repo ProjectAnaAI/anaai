@@ -72,6 +72,7 @@ function handlerHarness({
   availabilityExecutor,
   services = [{ id: SERVICE_ID, name: 'Haircut' }],
   understandingResult = { kind: 'unclear' },
+  handoffSettings = null,
 } = {}) {
   const queries = [], requests = [], logs = [], bookings = [], availabilityChecks = [], serviceLoads = [], serviceResolutions = [];
 
@@ -92,6 +93,7 @@ function handlerHarness({
             business_id: BUSINESS_ID,
             businesses: { name: 'Example Salon', timezone },
           },
+          voice_handoff_settings: handoffSettings,
           business_profiles: profile,
           services: [{ name: 'Haircut', duration_minutes: 30, price: 25 }],
           business_knowledge: [
@@ -710,6 +712,164 @@ test('transfer, menu, goodbye and unsupported keypad remain controlled', async (
   const goodbye = await h.run({ speech: 'No thank you' });
   assert.match(goodbye, /<Hangup/);
   assert.doesNotMatch(goodbye, /<Gather/);
+  assert.equal(h.bookings.length, 0);
+});
+
+test('configured human request dials only the private server-side destination', async () => {
+  const destination = '+14085550123';
+  const h = handlerHarness({
+    stateEnabled: true,
+    handoffSettings: {
+      human_transfer_phone: destination,
+      is_enabled: true,
+    },
+  });
+
+  const xml = await h.run({
+    speech: 'Please connect me to someone at the salon.',
+    from: CALLER,
+  });
+
+  assert.match(xml, /connect you with someone at the salon/);
+  assert.match(xml, /<Dial/);
+  assert.match(xml, /<Number>\+14085550123<\/Number>/);
+  assert.doesNotMatch(xml, /<Gather/);
+  assert.equal(h.bookings.length, 0);
+
+  const handoffQuery = h.queries.find(
+    query => query.table === 'voice_handoff_settings'
+  );
+
+  assert.ok(handoffQuery);
+  assert.ok(
+    handoffQuery.filters.some(
+      filter =>
+        filter[0] === 'eq' &&
+        filter[1] === 'business_id' &&
+        filter[2] === BUSINESS_ID
+    )
+  );
+});
+
+test('menu digit 3 uses the configured private human destination', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    handoffSettings: {
+      human_transfer_phone: '+14085550123',
+      is_enabled: true,
+    },
+  });
+
+  const xml = await h.run({
+    digits: '3',
+    from: CALLER,
+  });
+
+  assert.match(xml, /<Dial/);
+  assert.match(xml, /<Number>\+14085550123<\/Number>/);
+  assert.doesNotMatch(xml, /<Gather/);
+  assert.equal(h.bookings.length, 0);
+});
+
+test('configured human request during confirmation transfers without booking', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    handoffSettings: {
+      human_transfer_phone: '+14085550123',
+      is_enabled: true,
+    },
+  });
+
+  const flow = await advanceBooking(h);
+
+  assert.equal(h.bookings.length, 0);
+
+  const xml = await h.run({
+    speech: 'I want a real person.',
+    stateToken: flow.confirmToken,
+    from: CALLER,
+  });
+
+  assert.match(xml, /<Dial/);
+  assert.doesNotMatch(xml, /booked successfully/);
+  assert.doesNotMatch(xml, /<Gather/);
+  assert.equal(h.bookings.length, 0);
+});
+
+test('disabled invalid and missing human destinations fail closed', async () => {
+  const cases = [
+    null,
+    {
+      human_transfer_phone: '+14085550123',
+      is_enabled: false,
+    },
+    {
+      human_transfer_phone: '408-555-0123',
+      is_enabled: true,
+    },
+  ];
+
+  for (const handoffSettings of cases) {
+    const h = handlerHarness({
+      stateEnabled: true,
+      handoffSettings,
+    });
+
+    const xml = await h.run({
+      speech: 'representative',
+      from: CALLER,
+    });
+
+    assert.doesNotMatch(xml, /<Dial/);
+    assert.match(
+      xml,
+      /transferring to a team member isn't available/
+    );
+    assert.match(xml, /<Gather/);
+    assert.equal(h.bookings.length, 0);
+  }
+});
+
+test('human destination equal to inbound AnaAI number is rejected to prevent transfer loops', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    handoffSettings: {
+      human_transfer_phone: '+12025550100',
+      is_enabled: true,
+    },
+  });
+
+  const xml = await h.run({
+    speech: 'agent',
+    from: CALLER,
+  });
+
+  assert.doesNotMatch(xml, /<Dial/);
+  assert.match(
+    xml,
+    /transferring to a team member isn't available/
+  );
+  assert.match(xml, /<Gather/);
+  assert.equal(h.bookings.length, 0);
+});
+
+test('caller supplied phone number cannot override configured human destination', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    handoffSettings: {
+      human_transfer_phone: '+14085550123',
+      is_enabled: true,
+    },
+  });
+
+  const xml = await h.run({
+    speech: 'Connect me to a human at 650-555-9999.',
+    from: CALLER,
+  });
+
+  assert.match(xml, /<Number>\+14085550123<\/Number>/);
+  assert.doesNotMatch(xml, /6505559999/);
+  assert.doesNotMatch(xml, /\+16505559999/);
   assert.equal(h.bookings.length, 0);
 });
 

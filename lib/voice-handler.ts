@@ -70,6 +70,9 @@ const INFO_PROMPT =
 const TRANSFER_UNAVAILABLE =
   "I'm sorry, transferring to a team member isn't available right now. I can still help with business information.";
 
+const TRANSFER_CONNECTING =
+  "Okay. I'll connect you with someone at the salon.";
+
 const HUMAN_REQUEST =
   /\b(?:transfer(?: me)?(?: to| with)?(?: someone| somebody| a person| a human| a representative| an agent| a team member| someone at the (?:salon|store))?|representative|agent|human|real person|team member|store employee|someone at the (?:salon|store)|connect me (?:to|with) (?:someone|somebody|a person|a human|a representative|an agent|a team member|someone at the (?:salon|store))|(?:speak|talk) (?:with|to) (?:someone|somebody|a person|a human|a representative|an agent|a team member|someone at the (?:salon|store)))\b/i;
 
@@ -237,6 +240,93 @@ function normalizePhone(
   return digits
     ? `+${digits}`
     : "";
+}
+
+async function transferToHuman({
+  response,
+  businessId,
+  inboundPhone,
+}: {
+  response: InstanceType<
+    typeof twilio.twiml.VoiceResponse
+  >;
+  businessId: string;
+  inboundPhone: string;
+}) {
+  const db =
+    createSupabaseServiceClient();
+
+  const {
+    data,
+    error,
+  } = await db
+    .from(
+      "voice_handoff_settings"
+    )
+    .select(
+      "human_transfer_phone,is_enabled"
+    )
+    .eq(
+      "business_id",
+      businessId
+    )
+    .abortSignal(
+      AbortSignal.timeout(
+        3000
+      )
+    )
+    .maybeSingle();
+
+  if (
+    error ||
+    !data ||
+    data.is_enabled !== true ||
+    typeof data.human_transfer_phone !==
+      "string"
+  ) {
+    if (error) {
+      console.error(
+        "AnaAI voice handoff lookup failed."
+      );
+    }
+
+    return false;
+  }
+
+  const destination =
+    data.human_transfer_phone.trim();
+
+  const inbound =
+    normalizePhone(
+      inboundPhone
+    );
+
+  if (
+    !PHONE.test(
+      destination
+    ) ||
+    !inbound ||
+    destination === inbound
+  ) {
+    console.warn(
+      "AnaAI voice handoff destination is unavailable or unsafe."
+    );
+
+    return false;
+  }
+
+  response.say(
+    voiceOptions(),
+    TRANSFER_CONNECTING
+  );
+
+  response
+    .dial()
+    .number(
+      destination
+    );
+
+  return true;
 }
 
 async function resolveBusinessByCalledNumber(
@@ -2074,8 +2164,8 @@ export async function buildVoiceResponse({
    * not booking details. Intercept them before booking dispatch so
    * an explicit request can never submit an in-progress appointment.
    *
-   * Actual transfer remains disabled until a validated, server-side
-   * private handoff destination is configured.
+   * Transfer uses only the validated, server-side private handoff
+   * destination for the authoritatively resolved business.
    */
   if (
     speech &&
@@ -2083,14 +2173,28 @@ export async function buildVoiceResponse({
       speech
     )
   ) {
-    gather(
-      response,
-      ingress,
-      binding,
-      TRANSFER_UNAVAILABLE,
-      state,
-      "listen"
-    );
+    const transferred =
+      await transferToHuman({
+        response,
+        businessId:
+          business.businessId,
+        inboundPhone:
+          typeof called ===
+          "string"
+            ? called
+            : "",
+      });
+
+    if (!transferred) {
+      gather(
+        response,
+        ingress,
+        binding,
+        TRANSFER_UNAVAILABLE,
+        state,
+        "listen"
+      );
+    }
 
     console.info(
       `AnaAI voice request completed flow=human-request duration_ms=${
@@ -2254,9 +2358,23 @@ export async function buildVoiceResponse({
         speech
       )
     ) {
-      listen(
-        TRANSFER_UNAVAILABLE
-      );
+      const transferred =
+        await transferToHuman({
+          response,
+          businessId:
+            business.businessId,
+          inboundPhone:
+            typeof called ===
+            "string"
+              ? called
+              : "",
+        });
+
+      if (!transferred) {
+        listen(
+          TRANSFER_UNAVAILABLE
+        );
+      }
     } else if (
       digits
     ) {
