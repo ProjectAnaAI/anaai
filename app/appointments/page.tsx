@@ -5,7 +5,11 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { activeBusinessHeaders } from "@/lib/active-business";
-import { saveCustomer, normalizeCustomerPhone } from "@/lib/customer-mutations";
+import { parseBusinessHours } from "@/lib/business-hours";
+import {
+  saveCustomer,
+  normalizeCustomerPhone,
+} from "@/lib/customer-mutations";
 import { supabase } from "@/lib/supabase";
 
 import AppLayout from "@/components/layout/AppLayout";
@@ -44,22 +48,6 @@ type Service = {
   id: string;
   name: string;
   duration_minutes: number | null;
-};
-
-type BusinessDay = {
-  open: string;
-  close: string;
-  closed: boolean;
-};
-
-type BusinessHours = {
-  monday?: BusinessDay;
-  tuesday?: BusinessDay;
-  wednesday?: BusinessDay;
-  thursday?: BusinessDay;
-  friday?: BusinessDay;
-  saturday?: BusinessDay;
-  sunday?: BusinessDay;
 };
 
 type BusinessProfile = {
@@ -111,23 +99,32 @@ function normalizeCustomerName(value: string) {
   return value.trim().toLowerCase();
 }
 
-function findCustomerMatches(customers: Customer[], name: string, phone: string) {
+function findCustomerMatches(
+  customers: Customer[],
+  name: string,
+  phone: string
+) {
   const normalizedName = normalizeCustomerName(name);
   const normalizedPhone = normalizeCustomerPhone(phone);
 
   // Phone takes precedence over names; never infer identity from a name alone.
   if (phone.trim()) {
     if (!normalizedPhone) return [];
+
     const exactMatches = customers.filter(
-      (customer) => normalizeCustomerPhone(customer.phone || "") === normalizedPhone
+      (customer) =>
+        normalizeCustomerPhone(customer.phone || "") === normalizedPhone
     );
+
     if (exactMatches.length) return exactMatches;
+
     return customers.filter((customer) =>
       normalizeCustomerPhone(customer.phone || "").includes(normalizedPhone)
     );
   }
 
   if (!normalizedName) return [];
+
   return customers.filter((customer) =>
     normalizeCustomerName(customer.full_name).includes(normalizedName)
   );
@@ -183,24 +180,6 @@ function getDayKey(date: string) {
   ] as const;
 
   return dayKeys[parsed.getUTCDay()];
-}
-
-function parseBusinessHours(value: string | null): BusinessHours | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-
-    return parsed as BusinessHours;
-  } catch {
-    return null;
-  }
 }
 
 function intervalsOverlap(
@@ -275,27 +254,47 @@ export default function AppointmentsPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
+
   const createInFlight = useRef(false);
   const actionKeys = useRef(createRequestKeyStore());
   const mutationInFlight = useRef(false);
 
-  const matchingCustomers = findCustomerMatches(customers, customerName, customerPhone);
+  const matchingCustomers = findCustomerMatches(
+    customers,
+    customerName,
+    customerPhone
+  );
+
   const selectedCreateCustomer = customers.find(
     (customer) => customer.id === createForm.customerId
   );
 
-  function updateCustomerLookup(field: "name" | "phone", value: string) {
-    if (field === "name") setCustomerName(value);
-    else setCustomerPhone(value);
+  function updateCustomerLookup(
+    field: "name" | "phone",
+    value: string
+  ) {
+    if (field === "name") {
+      setCustomerName(value);
+    } else {
+      setCustomerPhone(value);
+    }
+
     // Require explicit selection again after editing either identity field.
-    setCreateForm((current) => ({ ...current, customerId: "" }));
+    setCreateForm((current) => ({
+      ...current,
+      customerId: "",
+    }));
   }
 
   function selectCreateCustomer(customer: Customer) {
     setCustomerEmail(customer.email || "");
     setCustomerName(customer.full_name);
     setCustomerPhone(customer.phone || "");
-    setCreateForm((current) => ({ ...current, customerId: customer.id }));
+
+    setCreateForm((current) => ({
+      ...current,
+      customerId: customer.id,
+    }));
   }
 
   const [editingAppointmentId, setEditingAppointmentId] =
@@ -352,7 +351,11 @@ export default function AppointmentsPage() {
       error: sessionError,
     } = await supabase.auth.getSession();
 
-    if (sessionError || !session?.access_token || !session.user) {
+    if (
+      sessionError ||
+      !session?.access_token ||
+      !session.user
+    ) {
       return null;
     }
 
@@ -364,10 +367,19 @@ export default function AppointmentsPage() {
       },
     });
 
-    const data = (await response.json()) as CurrentBusinessResponse;
+    const data =
+      (await response.json()) as CurrentBusinessResponse;
 
-    if (!response.ok || !data.success || !data.business) {
-      console.error("Could not resolve current business:", data.error);
+    if (
+      !response.ok ||
+      !data.success ||
+      !data.business
+    ) {
+      console.error(
+        "Could not resolve current business:",
+        data.error
+      );
+
       return null;
     }
 
@@ -397,7 +409,8 @@ export default function AppointmentsPage() {
   }
 
   async function loadAppointments(selectedBusinessId?: string) {
-    const activeBusinessId = selectedBusinessId ?? businessId;
+    const activeBusinessId =
+      selectedBusinessId ?? businessId;
 
     if (!activeBusinessId) {
       return;
@@ -439,10 +452,6 @@ export default function AppointmentsPage() {
         .from("business_profiles")
         .select("id, business_hours")
         .eq("business_id", activeBusinessId)
-        .order("created_at", {
-          ascending: false,
-        })
-        .limit(1)
         .maybeSingle(),
     ]);
 
@@ -505,9 +514,11 @@ export default function AppointmentsPage() {
       };
     }
 
-    const durationMinutes = selectedService.duration_minutes;
+    const durationMinutes =
+      selectedService.duration_minutes;
 
-    const requestedStart = timeToMinutes(appointmentTime);
+    const requestedStart =
+      timeToMinutes(appointmentTime);
 
     if (requestedStart == null) {
       return {
@@ -516,7 +527,8 @@ export default function AppointmentsPage() {
       };
     }
 
-    const requestedEnd = requestedStart + durationMinutes;
+    const requestedEnd =
+      requestedStart + durationMinutes;
 
     const businessHours = parseBusinessHours(
       businessProfile?.business_hours ?? null
@@ -541,18 +553,11 @@ export default function AppointmentsPage() {
 
     const dayHours = businessHours[dayKey];
 
-    if (!dayHours) {
-      return {
-        valid: false,
-        message:
-          "Business hours are not configured for the selected day.",
-      };
-    }
-
     if (dayHours.closed) {
       return {
         valid: false,
-        message: "The business is closed on the selected day.",
+        message:
+          "The business is closed on the selected day.",
       };
     }
 
@@ -581,9 +586,14 @@ export default function AppointmentsPage() {
       };
     }
 
-    const { data: sameDayAppointments, error } = await supabase
+    const {
+      data: sameDayAppointments,
+      error,
+    } = await supabase
       .from("appointments")
-      .select("id, service_id, service, appointment_time, status")
+      .select(
+        "id, service_id, service, appointment_time, status"
+      )
       .eq("business_id", activeBusinessId)
       .eq("appointment_date", appointmentDate)
       .in("status", ["Booked", "Confirmed"]);
@@ -595,7 +605,9 @@ export default function AppointmentsPage() {
       };
     }
 
-    for (const existingAppointment of sameDayAppointments || []) {
+    for (
+      const existingAppointment of sameDayAppointments || []
+    ) {
       if (
         excludeAppointmentId &&
         existingAppointment.id === excludeAppointmentId
@@ -612,10 +624,14 @@ export default function AppointmentsPage() {
       }
 
       let existingService = services.find(
-        (service) => service.id === existingAppointment.service_id
+        (service) =>
+          service.id === existingAppointment.service_id
       );
 
-      if (!existingService && existingAppointment.service) {
+      if (
+        !existingService &&
+        existingAppointment.service
+      ) {
         existingService = services.find(
           (service) =>
             service.name.toLowerCase() ===
@@ -636,7 +652,8 @@ export default function AppointmentsPage() {
       }
 
       const existingEnd =
-        existingStart + existingService.duration_minutes;
+        existingStart +
+        existingService.duration_minutes;
 
       if (
         intervalsOverlap(
@@ -675,50 +692,81 @@ export default function AppointmentsPage() {
       | "cancel"
       | "none";
   }) {
-    if (!businessId) throw new Error("Business context is unavailable.");
+    if (!businessId) {
+      throw new Error(
+        "Business context is unavailable."
+      );
+    }
 
     const accessToken = await getAccessToken();
 
     if (!accessToken) {
-      throw new Error("Your session has expired. Please log in again.");
-    }
-
-    if (mutationInFlight.current) throw new Error("An appointment action is already in progress.");
-    mutationInFlight.current = true;
-    try {
-    const idempotencyKey = actionKeys.current.forRequest({ userId, businessId, creating, appointmentId, updates });
-    const response = await fetch("/api/appointments", {
-      method: creating ? "POST" : "PATCH",
-      headers: {
-        "Idempotency-Key": idempotencyKey,
-        ...activeBusinessHeaders(),
-        "x-anaai-business-id": businessId,
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        appointmentId,
-        ...updates,
-        notificationType,
-      }),
-    });
-
-    const result =
-      (await response.json()) as AppointmentUpdateResponse;
-
-    if (!response.ok || result?.success !== true) {
       throw new Error(
-        result?.error || "Appointment update failed."
+        "Your session has expired. Please log in again."
       );
     }
 
-    actionKeys.current.clear();
-    return result;
-    } finally { mutationInFlight.current = false; }
+    if (mutationInFlight.current) {
+      throw new Error(
+        "An appointment action is already in progress."
+      );
+    }
+
+    mutationInFlight.current = true;
+
+    try {
+      const idempotencyKey =
+        actionKeys.current.forRequest({
+          userId,
+          businessId,
+          creating,
+          appointmentId,
+          updates,
+        });
+
+      const response = await fetch(
+        "/api/appointments",
+        {
+          method: creating ? "POST" : "PATCH",
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            ...activeBusinessHeaders(),
+            "x-anaai-business-id": businessId,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            appointmentId,
+            ...updates,
+            notificationType,
+          }),
+        }
+      );
+
+      const result =
+        (await response.json()) as AppointmentUpdateResponse;
+
+      if (
+        !response.ok ||
+        result?.success !== true
+      ) {
+        throw new Error(
+          result?.error ||
+            "Appointment update failed."
+        );
+      }
+
+      actionKeys.current.clear();
+
+      return result;
+    } finally {
+      mutationInFlight.current = false;
+    }
   }
 
   async function handleCreateAppointment() {
     if (createInFlight.current) return;
+
     if (!businessId || !userId) {
       showNotice(
         "error",
@@ -728,24 +776,39 @@ export default function AppointmentsPage() {
     }
 
     let selectedCustomer = customers.find(
-      (customer) => customer.id === createForm.customerId
+      (customer) =>
+        customer.id === createForm.customerId
     );
 
     const selectedService = services.find(
-      (service) => service.id === createForm.serviceId
+      (service) =>
+        service.id === createForm.serviceId
     );
 
     if (
-      createForm.customerId && (!selectedCustomer ||
-      normalizeCustomerName(customerName) !== normalizeCustomerName(selectedCustomer.full_name) ||
-      normalizeCustomerPhone(customerPhone) !== normalizeCustomerPhone(selectedCustomer.phone || ""))
+      createForm.customerId &&
+      (!selectedCustomer ||
+        normalizeCustomerName(customerName) !==
+          normalizeCustomerName(
+            selectedCustomer.full_name
+          ) ||
+        normalizeCustomerPhone(customerPhone) !==
+          normalizeCustomerPhone(
+            selectedCustomer.phone || ""
+          ))
     ) {
-      showNotice("warning", "Please select an existing customer from the matches.");
+      showNotice(
+        "warning",
+        "Please select an existing customer from the matches."
+      );
       return;
     }
 
     if (!selectedService) {
-      showNotice("warning", "Please select a service.");
+      showNotice(
+        "warning",
+        "Please select a service."
+      );
       return;
     }
 
@@ -770,32 +833,65 @@ export default function AppointmentsPage() {
 
     try {
       if (!selectedCustomer) {
-        selectedCustomer = await saveCustomer(businessId, { name: customerName, phone: customerPhone, email: customerEmail });
+        selectedCustomer = await saveCustomer(
+          businessId,
+          {
+            name: customerName,
+            phone: customerPhone,
+            email: customerEmail,
+          }
+        );
+
         // Preserve selection even when booking fails, so retry never creates
         // another customer. Editing identity explicitly clears this selection.
         const savedCustomer = selectedCustomer;
-        setCustomers(current => [...current.filter(item => item.id !== savedCustomer.id), savedCustomer]);
+
+        setCustomers((current) => [
+          ...current.filter(
+            (item) =>
+              item.id !== savedCustomer.id
+          ),
+          savedCustomer,
+        ]);
+
         selectCreateCustomer(savedCustomer);
       }
-      const result = await sendAppointmentUpdate({
-        creating: true,
-        updates: {
-          customerId: selectedCustomer.id,
-          serviceId: selectedService.id,
-          appointmentDate: createForm.appointmentDate,
-          appointmentTime: createForm.appointmentTime,
-          notes: createForm.notes.trim() || null,
-        },
-        notificationType: "none",
-      });
-      showNotice("success", result.message || "Appointment action succeeded.");
+
+      const result =
+        await sendAppointmentUpdate({
+          creating: true,
+          updates: {
+            customerId: selectedCustomer.id,
+            serviceId: selectedService.id,
+            appointmentDate:
+              createForm.appointmentDate,
+            appointmentTime:
+              createForm.appointmentTime,
+            notes:
+              createForm.notes.trim() || null,
+          },
+          notificationType: "none",
+        });
+
+      showNotice(
+        "success",
+        result.message ||
+          "Appointment action succeeded."
+      );
+
       setCreateForm(emptyForm);
       setCustomerName("");
       setCustomerPhone("");
       setCustomerEmail("");
+
       await loadAppointments();
     } catch (error) {
-      showNotice("error", error instanceof Error ? error.message : "Could not create appointment.");
+      showNotice(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not create appointment."
+      );
     } finally {
       createInFlight.current = false;
       setSubmitting(false);
@@ -808,9 +904,12 @@ export default function AppointmentsPage() {
     setEditingAppointmentId(appointment.id);
 
     setEditForm({
-      customerId: appointment.customer_id || "",
-      serviceId: appointment.service_id || "",
-      appointmentDate: appointment.appointment_date || "",
+      customerId:
+        appointment.customer_id || "",
+      serviceId:
+        appointment.service_id || "",
+      appointmentDate:
+        appointment.appointment_date || "",
       appointmentTime: normalizeTime(
         appointment.appointment_time
       ),
@@ -837,20 +936,28 @@ export default function AppointmentsPage() {
     }
 
     const selectedCustomer = customers.find(
-      (customer) => customer.id === editForm.customerId
+      (customer) =>
+        customer.id === editForm.customerId
     );
 
     const selectedService = services.find(
-      (service) => service.id === editForm.serviceId
+      (service) =>
+        service.id === editForm.serviceId
     );
 
     if (!selectedCustomer) {
-      showNotice("warning", "Please select a customer.");
+      showNotice(
+        "warning",
+        "Please select a customer."
+      );
       return;
     }
 
     if (!selectedService) {
-      showNotice("warning", "Please select a service.");
+      showNotice(
+        "warning",
+        "Please select a service."
+      );
       return;
     }
 
@@ -878,30 +985,48 @@ export default function AppointmentsPage() {
         editForm.appointmentDate;
 
       const timeChanged =
-        normalizeTime(appointment.appointment_time) !==
-        normalizeTime(editForm.appointmentTime);
+        normalizeTime(
+          appointment.appointment_time
+        ) !==
+        normalizeTime(
+          editForm.appointmentTime
+        );
 
       const serviceChanged =
-        appointment.service_id !== selectedService.id;
+        appointment.service_id !==
+        selectedService.id;
 
       const wasRescheduled =
-        dateChanged || timeChanged || serviceChanged;
+        dateChanged ||
+        timeChanged ||
+        serviceChanged;
 
-      const result = await sendAppointmentUpdate({
-        appointmentId: appointment.id,
-        updates: {
-          customerId: selectedCustomer.id,
-          serviceId: selectedService.id,
-          appointmentDate: editForm.appointmentDate,
-          appointmentTime: editForm.appointmentTime,
-          notes: editForm.notes.trim() || null,
-        },
-        notificationType: wasRescheduled
-          ? "reschedule"
-          : "none",
-      });
+      const result =
+        await sendAppointmentUpdate({
+          appointmentId: appointment.id,
+          updates: {
+            customerId:
+              selectedCustomer.id,
+            serviceId:
+              selectedService.id,
+            appointmentDate:
+              editForm.appointmentDate,
+            appointmentTime:
+              editForm.appointmentTime,
+            notes:
+              editForm.notes.trim() || null,
+          },
+          notificationType:
+            wasRescheduled
+              ? "reschedule"
+              : "none",
+        });
 
-      showNotice("success", result.message || "Appointment action succeeded.");
+      showNotice(
+        "success",
+        result.message ||
+          "Appointment action succeeded."
+      );
 
       setEditingAppointmentId(null);
       setEditForm(emptyForm);
@@ -933,15 +1058,20 @@ export default function AppointmentsPage() {
     setActionAppointmentId(appointment.id);
 
     try {
-      const result = await sendAppointmentUpdate({
-        appointmentId: appointment.id,
-        updates: {
-          status: "Confirmed",
-        },
-        notificationType: "confirm",
-      });
+      const result =
+        await sendAppointmentUpdate({
+          appointmentId: appointment.id,
+          updates: {
+            status: "Confirmed",
+          },
+          notificationType: "confirm",
+        });
 
-      showNotice("success", result.message || "Appointment action succeeded.");
+      showNotice(
+        "success",
+        result.message ||
+          "Appointment action succeeded."
+      );
 
       await loadAppointments();
     } catch (error) {
@@ -970,15 +1100,20 @@ export default function AppointmentsPage() {
     setActionAppointmentId(appointment.id);
 
     try {
-      const result = await sendAppointmentUpdate({
-        appointmentId: appointment.id,
-        updates: {
-          status: "Cancelled",
-        },
-        notificationType: "cancel",
-      });
+      const result =
+        await sendAppointmentUpdate({
+          appointmentId: appointment.id,
+          updates: {
+            status: "Cancelled",
+          },
+          notificationType: "cancel",
+        });
 
-      showNotice("success", result.message || "Appointment action succeeded.");
+      showNotice(
+        "success",
+        result.message ||
+          "Appointment action succeeded."
+      );
 
       await loadAppointments();
     } catch (error) {
@@ -1006,7 +1141,8 @@ export default function AppointmentsPage() {
           </h1>
 
           <p className="mt-2 text-gray-500">
-            Manage bookings created by your team and AnaAI.
+            Manage bookings created by your team
+            and AnaAI.
           </p>
         </header>
 
@@ -1016,8 +1152,8 @@ export default function AppointmentsPage() {
               notice.type === "success"
                 ? "border-green-200 bg-green-50 text-green-700"
                 : notice.type === "warning"
-                ? "border-yellow-200 bg-yellow-50 text-yellow-800"
-                : "border-red-200 bg-red-50 text-red-700"
+                  ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+                  : "border-red-200 bg-red-50 text-red-700"
             }`}
           >
             {notice.message}
@@ -1026,7 +1162,9 @@ export default function AppointmentsPage() {
 
         <Card className="mt-8">
           <CardHeader>
-            <CardTitle>New appointment</CardTitle>
+            <CardTitle>
+              New appointment
+            </CardTitle>
           </CardHeader>
 
           <CardContent>
@@ -1035,60 +1173,126 @@ export default function AppointmentsPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2 text-sm font-medium">
                     <span>Customer name</span>
+
                     <Input
                       disabled={submitting}
                       value={customerName}
-                      onChange={(event) => updateCustomerLookup("name", event.target.value)}
+                      onChange={(event) =>
+                        updateCustomerLookup(
+                          "name",
+                          event.target.value
+                        )
+                      }
                       placeholder="Search by name"
                     />
                   </label>
+
                   <label className="space-y-2 text-sm font-medium">
-                    <span>Phone number (optional)</span>
+                    <span>
+                      Phone number (optional)
+                    </span>
+
                     <Input
                       type="tel"
                       disabled={submitting}
                       value={customerPhone}
-                      onChange={(event) => updateCustomerLookup("phone", event.target.value)}
+                      onChange={(event) =>
+                        updateCustomerLookup(
+                          "phone",
+                          event.target.value
+                        )
+                      }
                       placeholder="Search by phone number"
                     />
                   </label>
                 </div>
+
                 {selectedCreateCustomer ? (
-                  <p role="status" className="text-sm text-green-700">
-                    Existing customer selected: {selectedCreateCustomer.full_name}
-                    {" — "}{selectedCreateCustomer.phone || "No phone number"}
+                  <p
+                    role="status"
+                    className="text-sm text-green-700"
+                  >
+                    Existing customer selected:{" "}
+                    {
+                      selectedCreateCustomer.full_name
+                    }
+                    {" — "}
+                    {selectedCreateCustomer.phone ||
+                      "No phone number"}
                   </p>
                 ) : (
                   <div className="space-y-2 text-sm">
-                    <p className="text-gray-600" role="status">
+                    <p
+                      className="text-gray-600"
+                      role="status"
+                    >
                       {matchingCustomers.length
                         ? "Matching customers — select one, or save as a new customer if this is someone else."
-                        : customerName.trim() || customerPhone.trim()
-                        ? "New customer — created when you save the appointment."
-                        : "Enter a customer name. Phone and email are optional."}
+                        : customerName.trim() ||
+                            customerPhone.trim()
+                          ? "New customer — created when you save the appointment."
+                          : "Enter a customer name. Phone and email are optional."}
                     </p>
+
                     {customerPhone.trim() && (
-                      <p className="text-gray-500">Phone matches take priority. Clear the phone field to search by name.</p>
+                      <p className="text-gray-500">
+                        Phone matches take
+                        priority. Clear the
+                        phone field to search by
+                        name.
+                      </p>
                     )}
+
                     <div className="max-h-48 space-y-2 overflow-y-auto">
-                      {matchingCustomers.map((customer) => (
-                        <button
-                          key={customer.id}
-                          type="button"
-                          disabled={submitting}
-                          onClick={() => selectCreateCustomer(customer)}
-                          className="block w-full rounded-lg border border-input px-3 py-2 text-left hover:bg-gray-50"
-                        >
-                          {customer.full_name}{" — "}{customer.phone || "No phone number"}
-                          {customer.email ? ` · ${customer.email}` : ""}
-                        </button>
-                      ))}
+                      {matchingCustomers.map(
+                        (customer) => (
+                          <button
+                            key={customer.id}
+                            type="button"
+                            disabled={
+                              submitting
+                            }
+                            onClick={() =>
+                              selectCreateCustomer(
+                                customer
+                              )
+                            }
+                            className="block w-full rounded-lg border border-input px-3 py-2 text-left hover:bg-gray-50"
+                          >
+                            {
+                              customer.full_name
+                            }
+                            {" — "}
+                            {customer.phone ||
+                              "No phone number"}
+                            {customer.email
+                              ? ` · ${customer.email}`
+                              : ""}
+                          </button>
+                        )
+                      )}
                     </div>
                   </div>
                 )}
+
                 <label className="block space-y-2 text-sm">
                   <span>Email (optional)</span>
-                  <Input type="email" value={customerEmail} disabled={submitting || Boolean(selectedCreateCustomer)} onChange={event => setCustomerEmail(event.target.value)} />
+
+                  <Input
+                    type="email"
+                    value={customerEmail}
+                    disabled={
+                      submitting ||
+                      Boolean(
+                        selectedCreateCustomer
+                      )
+                    }
+                    onChange={(event) =>
+                      setCustomerEmail(
+                        event.target.value
+                      )
+                    }
+                  />
                 </label>
               </div>
 
@@ -1098,11 +1302,14 @@ export default function AppointmentsPage() {
                 onChange={(event) =>
                   setCreateForm((current) => ({
                     ...current,
-                    serviceId: event.target.value,
+                    serviceId:
+                      event.target.value,
                   }))
                 }
               >
-                <option value="">Select service</option>
+                <option value="">
+                  Select service
+                </option>
 
                 {services.map((service) => (
                   <option
@@ -1119,22 +1326,28 @@ export default function AppointmentsPage() {
 
               <Input
                 type="date"
-                value={createForm.appointmentDate}
+                value={
+                  createForm.appointmentDate
+                }
                 onChange={(event) =>
                   setCreateForm((current) => ({
                     ...current,
-                    appointmentDate: event.target.value,
+                    appointmentDate:
+                      event.target.value,
                   }))
                 }
               />
 
               <Input
                 type="time"
-                value={createForm.appointmentTime}
+                value={
+                  createForm.appointmentTime
+                }
                 onChange={(event) =>
                   setCreateForm((current) => ({
                     ...current,
-                    appointmentTime: event.target.value,
+                    appointmentTime:
+                      event.target.value,
                   }))
                 }
               />
@@ -1156,7 +1369,9 @@ export default function AppointmentsPage() {
               type="button"
               onClick={handleCreateAppointment}
               disabled={
-                submitting || !businessId || !userId
+                submitting ||
+                !businessId ||
+                !userId
               }
               className="mt-5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:opacity-50"
             >
@@ -1174,7 +1389,8 @@ export default function AppointmentsPage() {
             </h2>
 
             <p className="mt-1 text-sm text-gray-500">
-              Confirm, reschedule, or cancel customer appointments.
+              Confirm, reschedule, or cancel
+              customer appointments.
             </p>
           </div>
 
@@ -1189,259 +1405,369 @@ export default function AppointmentsPage() {
               </p>
 
               <p className="mt-2 text-sm text-gray-500">
-                New bookings will appear here once they are created.
+                New bookings will appear here
+                once they are created.
               </p>
             </div>
           ) : (
             <div className="mt-5 space-y-4">
-              {appointments.map((appointment) => {
-                const isEditing =
-                  editingAppointmentId === appointment.id;
+              {appointments.map(
+                (appointment) => {
+                  const isEditing =
+                    editingAppointmentId ===
+                    appointment.id;
 
-                const actionInProgress =
-                  actionAppointmentId === appointment.id;
+                  const actionInProgress =
+                    actionAppointmentId ===
+                    appointment.id;
 
-                return (
-                  <Card
-                    key={appointment.id}
-                    className="overflow-hidden"
-                  >
-                    <CardContent className="p-5">
-                      {isEditing ? (
-                        <div>
-                          <p className="text-sm font-medium text-green-600">
-                            Reschedule appointment
-                          </p>
+                  return (
+                    <Card
+                      key={appointment.id}
+                      className="overflow-hidden"
+                    >
+                      <CardContent className="p-5">
+                        {isEditing ? (
+                          <div>
+                            <p className="text-sm font-medium text-green-600">
+                              Reschedule
+                              appointment
+                            </p>
 
-                          <h3 className="mt-1 text-lg font-semibold text-gray-900">
-                            {appointment.customer_name}
-                          </h3>
-
-                          <div className="mt-5 grid gap-4 md:grid-cols-2">
-                            <select
-                              className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
-                              value={editForm.customerId}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  customerId: event.target.value,
-                                }))
+                            <h3 className="mt-1 text-lg font-semibold text-gray-900">
+                              {
+                                appointment.customer_name
                               }
-                            >
-                              {customers.map((customer) => (
-                                <option
-                                  key={customer.id}
-                                  value={customer.id}
-                                >
-                                  {customer.full_name}
-                                </option>
-                              ))}
-                            </select>
+                            </h3>
 
-                            <select
-                              className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
-                              value={editForm.serviceId}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  serviceId: event.target.value,
-                                }))
+                            <div className="mt-5 grid gap-4 md:grid-cols-2">
+                              <select
+                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
+                                value={
+                                  editForm.customerId
+                                }
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      customerId:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
+                                }
+                              >
+                                {customers.map(
+                                  (
+                                    customer
+                                  ) => (
+                                    <option
+                                      key={
+                                        customer.id
+                                      }
+                                      value={
+                                        customer.id
+                                      }
+                                    >
+                                      {
+                                        customer.full_name
+                                      }
+                                    </option>
+                                  )
+                                )}
+                              </select>
+
+                              <select
+                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
+                                value={
+                                  editForm.serviceId
+                                }
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      serviceId:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
+                                }
+                              >
+                                {services.map(
+                                  (
+                                    service
+                                  ) => (
+                                    <option
+                                      key={
+                                        service.id
+                                      }
+                                      value={
+                                        service.id
+                                      }
+                                    >
+                                      {
+                                        service.name
+                                      }
+                                    </option>
+                                  )
+                                )}
+                              </select>
+
+                              <Input
+                                type="date"
+                                value={
+                                  editForm.appointmentDate
+                                }
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      appointmentDate:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
+                                }
+                              />
+
+                              <Input
+                                type="time"
+                                value={
+                                  editForm.appointmentTime
+                                }
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditForm(
+                                    (
+                                      current
+                                    ) => ({
+                                      ...current,
+                                      appointmentTime:
+                                        event
+                                          .target
+                                          .value,
+                                    })
+                                  )
+                                }
+                              />
+                            </div>
+
+                            <Textarea
+                              className="mt-4"
+                              value={
+                                editForm.notes
                               }
-                            >
-                              {services.map((service) => (
-                                <option
-                                  key={service.id}
-                                  value={service.id}
-                                >
-                                  {service.name}
-                                </option>
-                              ))}
-                            </select>
-
-                            <Input
-                              type="date"
-                              value={editForm.appointmentDate}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  appointmentDate:
-                                    event.target.value,
-                                }))
-                              }
-                            />
-
-                            <Input
-                              type="time"
-                              value={editForm.appointmentTime}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  appointmentTime:
-                                    event.target.value,
-                                }))
-                              }
-                            />
-                          </div>
-
-                          <Textarea
-                            className="mt-4"
-                            value={editForm.notes}
-                            onChange={(event) =>
-                              setEditForm((current) => ({
-                                ...current,
-                                notes: event.target.value,
-                              }))
-                            }
-                            placeholder="Internal notes"
-                          />
-
-                          <div className="mt-5 flex gap-2">
-                            <Button
-                              onClick={() =>
-                                saveAppointmentChanges(
-                                  appointment
+                              onChange={(
+                                event
+                              ) =>
+                                setEditForm(
+                                  (
+                                    current
+                                  ) => ({
+                                    ...current,
+                                    notes:
+                                      event
+                                        .target
+                                        .value,
+                                  })
                                 )
                               }
-                              disabled={actionInProgress}
-                              className="bg-green-600 text-white hover:bg-green-700"
-                            >
-                              {actionInProgress
-                                ? "Saving..."
-                                : "Save changes"}
-                            </Button>
+                              placeholder="Internal notes"
+                            />
 
-                            <Button
-                              variant="outline"
-                              onClick={cancelEditing}
-                              disabled={actionInProgress}
-                            >
-                              Cancel editing
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <h3 className="text-lg font-semibold text-gray-900">
-                                {appointment.customer_name}
-                              </h3>
-
-                              <span
-                                className={`rounded-full border px-3 py-1 text-xs font-medium ${statusBadgeClasses(
-                                  appointment.status
-                                )}`}
+                            <div className="mt-5 flex gap-2">
+                              <Button
+                                onClick={() =>
+                                  saveAppointmentChanges(
+                                    appointment
+                                  )
+                                }
+                                disabled={
+                                  actionInProgress
+                                }
+                                className="bg-green-600 text-white hover:bg-green-700"
                               >
-                                {appointment.status || "Booked"}
-                              </span>
+                                {actionInProgress
+                                  ? "Saving..."
+                                  : "Save changes"}
+                              </Button>
+
+                              <Button
+                                variant="outline"
+                                onClick={
+                                  cancelEditing
+                                }
+                                disabled={
+                                  actionInProgress
+                                }
+                              >
+                                Cancel editing
+                              </Button>
                             </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <h3 className="text-lg font-semibold text-gray-900">
+                                  {
+                                    appointment.customer_name
+                                  }
+                                </h3>
 
-                            <div className="mt-4 grid gap-x-8 gap-y-2 text-sm text-gray-600 md:grid-cols-2">
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Phone:
-                                </span>{" "}
-                                {appointment.customer_phone ||
-                                  "Not provided"}
-                              </p>
+                                <span
+                                  className={`rounded-full border px-3 py-1 text-xs font-medium ${statusBadgeClasses(
+                                    appointment.status
+                                  )}`}
+                                >
+                                  {appointment.status ||
+                                    "Booked"}
+                                </span>
+                              </div>
 
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Email:
-                                </span>{" "}
-                                {appointment.customer_email ||
-                                  "Not provided"}
-                              </p>
-
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Service:
-                                </span>{" "}
-                                {appointment.service ||
-                                  "Not specified"}
-                              </p>
-
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Date:
-                                </span>{" "}
-                                {appointment.appointment_date ||
-                                  "Not specified"}
-                              </p>
-
-                              <p>
-                                <span className="font-medium text-gray-900">
-                                  Time:
-                                </span>{" "}
-                                {formatTimeForDisplay(
-                                  appointment.appointment_time
-                                )}
-                              </p>
-                            </div>
-
-                            {appointment.notes && (
-                              <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
-                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                  Internal notes
+                              <div className="mt-4 grid gap-x-8 gap-y-2 text-sm text-gray-600 md:grid-cols-2">
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Phone:
+                                  </span>{" "}
+                                  {appointment.customer_phone ||
+                                    "Not provided"}
                                 </p>
 
-                                <p className="mt-1 text-sm text-gray-700">
-                                  {appointment.notes}
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Email:
+                                  </span>{" "}
+                                  {appointment.customer_email ||
+                                    "Not provided"}
+                                </p>
+
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Service:
+                                  </span>{" "}
+                                  {appointment.service ||
+                                    "Not specified"}
+                                </p>
+
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Date:
+                                  </span>{" "}
+                                  {appointment.appointment_date ||
+                                    "Not specified"}
+                                </p>
+
+                                <p>
+                                  <span className="font-medium text-gray-900">
+                                    Time:
+                                  </span>{" "}
+                                  {formatTimeForDisplay(
+                                    appointment.appointment_time
+                                  )}
                                 </p>
                               </div>
-                            )}
-                          </div>
 
-                          <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-sm lg:justify-end">
-                            <Button
-                              variant="outline"
-                              onClick={() =>
-                                startEditingAppointment(
-                                  appointment
-                                )
-                              }
-                              disabled={
-                                actionInProgress ||
-                                !["Booked", "Confirmed"].includes(appointment.status || "")
-                              }
-                            >
-                              Reschedule
-                            </Button>
+                              {appointment.notes && (
+                                <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
+                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Internal
+                                    notes
+                                  </p>
 
-                            {appointment.status === "Booked" && (
+                                  <p className="mt-1 text-sm text-gray-700">
+                                    {
+                                      appointment.notes
+                                    }
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-sm lg:justify-end">
+                              <Button
+                                variant="outline"
+                                onClick={() =>
+                                  startEditingAppointment(
+                                    appointment
+                                  )
+                                }
+                                disabled={
+                                  actionInProgress ||
+                                  ![
+                                    "Booked",
+                                    "Confirmed",
+                                  ].includes(
+                                    appointment.status ||
+                                      ""
+                                  )
+                                }
+                              >
+                                Reschedule
+                              </Button>
+
+                              {appointment.status ===
+                                "Booked" && (
                                 <Button
                                   onClick={() =>
                                     confirmAppointment(
                                       appointment
                                     )
                                   }
-                                  disabled={actionInProgress}
+                                  disabled={
+                                    actionInProgress
+                                  }
                                   className="bg-green-600 text-white hover:bg-green-700"
                                 >
                                   Confirm
                                 </Button>
                               )}
 
-                            {["Booked", "Confirmed"].includes(appointment.status || "") && (
-                              <Button
-                                variant="outline"
-                                onClick={() =>
-                                  cancelAppointment(
-                                    appointment
-                                  )
-                                }
-                                disabled={actionInProgress}
-                              >
-                                Cancel
-                              </Button>
-                            )}
+                              {[
+                                "Booked",
+                                "Confirmed",
+                              ].includes(
+                                appointment.status ||
+                                  ""
+                              ) && (
+                                <Button
+                                  variant="outline"
+                                  onClick={() =>
+                                    cancelAppointment(
+                                      appointment
+                                    )
+                                  }
+                                  disabled={
+                                    actionInProgress
+                                  }
+                                >
+                                  Cancel
+                                </Button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                }
+              )}
             </div>
           )}
         </section>
