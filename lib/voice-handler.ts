@@ -70,6 +70,17 @@ const INFO_PROMPT =
 const TRANSFER_UNAVAILABLE =
   "I'm sorry, transferring to a team member isn't available right now. I can still help with business information.";
 
+const HUMAN_REQUEST =
+  /\b(?:transfer(?: me)?(?: to| with)?(?: someone| somebody| a person| a human| a representative| an agent| a team member| someone at the (?:salon|store))?|representative|agent|human|real person|team member|store employee|someone at the (?:salon|store)|connect me (?:to|with) (?:someone|somebody|a person|a human|a representative|an agent|a team member|someone at the (?:salon|store))|(?:speak|talk) (?:with|to) (?:someone|somebody|a person|a human|a representative|an agent|a team member|someone at the (?:salon|store)))\b/i;
+
+function wantsHuman(
+  speech: string
+) {
+  return HUMAN_REQUEST.test(
+    speech
+  );
+}
+
 const BOOKING_STATE_UNAVAILABLE =
   "I'm sorry, phone booking is temporarily unavailable. I can still help with business information.";
 
@@ -849,7 +860,7 @@ async function bookingTurn({
     ) {
       response.say(
         voiceOptions(),
-        "I'm sorry, I couldn't verify those details clearly enough. No appointment was booked. Please contact the business for help. Goodbye."
+        "I'm having trouble understanding. No appointment was booked. A team-member transfer isn't configured yet. Please contact someone at the salon for help. Goodbye."
       );
 
       response.hangup();
@@ -2038,6 +2049,40 @@ export async function buildVoiceResponse({
    * - state token
    * - Twilio signatures
    */
+
+  /*
+   * Human handoff requests are authoritative conversation control,
+   * not booking details. Intercept them before booking dispatch so
+   * an explicit request can never submit an in-progress appointment.
+   *
+   * Actual transfer remains disabled until a validated, server-side
+   * private handoff destination is configured.
+   */
+  if (
+    speech &&
+    wantsHuman(
+      speech
+    )
+  ) {
+    gather(
+      response,
+      ingress,
+      binding,
+      TRANSFER_UNAVAILABLE,
+      state,
+      "listen"
+    );
+
+    console.info(
+      `AnaAI voice request completed flow=human-request duration_ms=${
+        Date.now() -
+        requestStarted
+      }`
+    );
+
+    return response.toString();
+  }
+
   if (
     state?.mode ===
     "booking"
@@ -2186,7 +2231,7 @@ export async function buildVoiceResponse({
       );
     } else if (
       digits === "3" ||
-      /\b(transfer|representative|human|speak (?:with|to) (?:someone|somebody|a person)|talk to (?:someone|somebody|a person))\b/i.test(
+      wantsHuman(
         speech
       )
     ) {

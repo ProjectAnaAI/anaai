@@ -713,6 +713,163 @@ test('transfer, menu, goodbye and unsupported keypad remain controlled', async (
   assert.equal(h.bookings.length, 0);
 });
 
+test('explicit human requests are controlled across natural phrase variants', async () => {
+  const phrases = [
+    'representative',
+    'agent',
+    'human',
+    'Can I speak with a real person?',
+    'I need a team member',
+    'Can I talk to a store employee?',
+    'Please connect me to someone at the salon.',
+    'Can you connect me with someone?',
+    'I want to speak to someone at the store.',
+  ];
+
+  for (const speech of phrases) {
+    const h = handlerHarness({ stateEnabled: true });
+    const xml = await h.run({ speech });
+
+    assert.match(
+      xml,
+      /transferring to a team member isn't available/
+    );
+    assert.match(xml, /<Gather/);
+    assert.equal(h.bookings.length, 0);
+  }
+});
+
+test('explicit human request during booking cannot submit the in-progress appointment', async () => {
+  const h = handlerHarness({ stateEnabled: true });
+  const flow = await advanceBooking(h);
+
+  assert.equal(h.bookings.length, 0);
+
+  const xml = await h.run({
+    speech: 'Can I speak with a real person?',
+    stateToken: flow.confirmToken,
+    from: CALLER,
+  });
+
+  assert.match(
+    xml,
+    /transferring to a team member isn't available/
+  );
+  assert.match(xml, /<Gather/);
+  assert.doesNotMatch(xml, /booked successfully/);
+  assert.equal(h.bookings.length, 0);
+});
+
+test('explicit human request during service collection does not mutate booking state', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    services: productionServices,
+  });
+
+  let xml = await h.run({
+    digits: '1',
+    from: CALLER,
+  });
+
+  xml = await h.run({
+    speech: 'Randy',
+    stateToken: callbackState(xml),
+    from: CALLER,
+  });
+
+  const beforeToken =
+    callbackState(xml);
+
+  const before =
+    h.state.openVoiceState(
+      beforeToken,
+      {
+        businessId: BUSINESS_ID,
+        callSid: CALL_SID,
+        ingress: 'trial',
+      }
+    );
+
+  xml = await h.run({
+    speech: 'Please connect me to someone at the salon.',
+    stateToken: beforeToken,
+    from: CALLER,
+  });
+
+  assert.match(
+    xml,
+    /transferring to a team member isn't available/
+  );
+  assert.equal(h.bookings.length, 0);
+
+  const after =
+    h.state.openVoiceState(
+      callbackState(xml),
+      {
+        businessId: BUSINESS_ID,
+        callSid: CALL_SID,
+        ingress: 'trial',
+      }
+    );
+
+  assert.equal(after.booking.stage, before.booking.stage);
+  assert.equal(after.booking.customerName, before.booking.customerName);
+  assert.equal(after.booking.serviceId, null);
+  assert.equal(after.booking.failures, before.booking.failures);
+});
+
+test('third genuine booking failure escalates without mutation', async () => {
+  const h = handlerHarness({
+    stateEnabled: true,
+    services: productionServices,
+  });
+
+  let xml = await h.run({
+    digits: '1',
+    from: CALLER,
+  });
+
+  xml = await h.run({
+    speech: 'Randy',
+    stateToken: callbackState(xml),
+    from: CALLER,
+  });
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    xml = await h.run({
+      speech: 'unmatched service',
+      stateToken: callbackState(xml),
+      from: CALLER,
+    });
+
+    assert.match(xml, /<Gather/);
+    assert.doesNotMatch(
+      xml,
+      /team-member transfer isn't configured/
+    );
+    assert.equal(h.bookings.length, 0);
+  }
+
+  xml = await h.run({
+    speech: 'unmatched service',
+    stateToken: callbackState(xml),
+    from: CALLER,
+  });
+
+  assert.match(
+    xml,
+    /I'm having trouble understanding/
+  );
+  assert.match(
+    xml,
+    /team-member transfer isn't configured/
+  );
+  assert.match(xml, /No appointment was booked/);
+  assert.match(xml, /<Hangup/);
+  assert.doesNotMatch(xml, /<Gather/);
+  assert.equal(h.bookings.length, 0);
+});
+
 test('silence remains bounded in menu and booking flows', async () => {
   const h = handlerHarness({ stateEnabled: true });
   const menu = await h.run({ mode: '' });
