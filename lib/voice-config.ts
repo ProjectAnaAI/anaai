@@ -50,16 +50,13 @@ export function gatherOptions(
           : "";
 
   /*
-   * Most booking stages benefit from conversational
-   * speech recognition because callers naturally use
-   * complete phrases.
+   * Booking turns use conversational recognition.
    *
-   * Confirmation remains a short, directed utterance
-   * and therefore keeps the utterance-oriented model.
+   * Confirmation is not a yes/no-only turn: callers
+   * may naturally provide a replacement service, date,
+   * or time. Keep enough end-of-speech tolerance for
+   * those complete correction phrases.
    */
-  const directed =
-    stage === "confirm";
-
   return {
     input: [
       "speech",
@@ -69,13 +66,10 @@ export function gatherOptions(
     method: "POST",
     timeout: 6,
 
-    speechModel: directed
-      ? "experimental_utterances"
-      : "experimental_conversations",
+    speechModel:
+      "experimental_conversations",
 
-    speechTimeout: directed
-      ? "1"
-      : "2",
+    speechTimeout: "2",
 
     language: "en-US",
     actionOnEmptyResult: true,

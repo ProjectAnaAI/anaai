@@ -1319,6 +1319,86 @@ test('bare PM without pending ambiguity cannot change or book confirmed appointm
   assert.doesNotMatch(xml,/I have Haircut.*3:30 PM/);
 });
 
+test('semantic yes with replacement time cannot authorize the old confirmed appointment', async () => {
+  const h=handlerHarness({
+    stateEnabled:true,
+    understandingResult:{
+      kind:'unclear',
+      meaningful:true,
+      serviceName:null,
+      dateExpression:null,
+      timeExpression:'4 in the afternoon',
+      confirmation:'yes',
+      correction:false,
+    },
+  });
+  const flow=await advanceBooking(h,{time:'2:30 PM'});
+
+  const xml=await h.run({
+    speech:'Book for me for 4 in the afternoon.',
+    stateToken:flow.confirmToken,
+    from:CALLER,
+  });
+
+  assert.equal(h.bookings.length,0);
+  assert.doesNotMatch(xml,/booked successfully/);
+  assert.match(xml,/haven't booked it yet|couldn't understand that clearly enough/);
+});
+
+test('semantic yes with replacement date cannot authorize the old confirmed appointment', async () => {
+  const h=handlerHarness({
+    stateEnabled:true,
+    understandingResult:{
+      kind:'unclear',
+      meaningful:true,
+      serviceName:null,
+      dateExpression:'October 5th 2099',
+      timeExpression:null,
+      confirmation:'yes',
+      correction:false,
+    },
+  });
+  const flow=await advanceBooking(h,{time:'2:30 PM'});
+
+  const xml=await h.run({
+    speech:'Yes, book it for October 5th.',
+    stateToken:flow.confirmToken,
+    from:CALLER,
+  });
+
+  assert.equal(h.bookings.length,0);
+  assert.doesNotMatch(xml,/booked successfully/);
+});
+
+test('semantic yes with replacement service cannot authorize the old confirmed appointment', async () => {
+  const h=handlerHarness({
+    stateEnabled:true,
+    services:[
+      {id:SERVICE_ID,name:'Haircut'},
+      {id:CUSTOMER_ID,name:'Facial'},
+    ],
+    understandingResult:{
+      kind:'unclear',
+      meaningful:true,
+      serviceName:'Facial',
+      dateExpression:null,
+      timeExpression:null,
+      confirmation:'yes',
+      correction:false,
+    },
+  });
+  const flow=await advanceBooking(h,{time:'2:30 PM'});
+
+  const xml=await h.run({
+    speech:'Yes, make it a facial.',
+    stateToken:flow.confirmToken,
+    from:CALLER,
+  });
+
+  assert.equal(h.bookings.length,0);
+  assert.doesNotMatch(xml,/booked successfully/);
+});
+
 test('pending time state accepts canonical pair and rejects malformed values', () => {
   const h=handlerHarness({stateEnabled:true});
   const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};

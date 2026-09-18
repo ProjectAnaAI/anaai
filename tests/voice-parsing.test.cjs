@@ -59,9 +59,10 @@ for (const input of ['no','nope','cancel',"don't book it", "that's wrong", 'star
 for (const input of ['', 'maybe', 'okay', 'yes but change the time', 'yes no', 'not correct']) test(`unclear confirmation: ${input}`, () => assert.equal(p.confirmation(input),'ambiguous'));
 test('Gather settings are bounded, stage-specific and contain only supplied hints', () => {
   const c = load('lib/voice-config.ts');
-  assert.equal(c.gatherOptions('confirm').speechTimeout,'1');
+  assert.equal(c.gatherOptions('confirm').speechTimeout,'2');
   assert.equal(c.gatherOptions('time').speechTimeout,'2');
   assert.equal(c.gatherOptions().speechModel,'experimental_conversations');
+  assert.equal(c.gatherOptions('confirm').speechModel,'experimental_conversations');
   assert.equal(c.gatherOptions('service').speechModel,'experimental_conversations');
   assert.equal(c.gatherOptions('service',['Haircut','bad,entry','<invalid>']).hints,'Haircut');
   assert.equal(c.gatherOptions('service',Array(40).fill('Haircut')).hints.split(',').length,30);

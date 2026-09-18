@@ -1745,7 +1745,15 @@ async function bookingTurn({
     if (
       understanding
         .confirmation ===
-        "yes"
+        "yes" &&
+      !understanding
+        .correction &&
+      !understanding
+        .serviceName &&
+      !understanding
+        .dateExpression &&
+      !understanding
+        .timeExpression
     ) {
       confirmation =
         "yes";
