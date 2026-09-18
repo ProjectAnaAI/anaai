@@ -71,6 +71,7 @@ function handlerHarness({
   availabilityResult = { available: true },
   availabilityExecutor,
   services = [{ id: SERVICE_ID, name: 'Haircut' }],
+  understandingResult = { kind: 'unclear' },
 } = {}) {
   const queries = [], requests = [], logs = [], bookings = [], availabilityChecks = [], serviceLoads = [], serviceResolutions = [];
 
@@ -178,7 +179,7 @@ function handlerHarness({
       '@/lib/voice-parsing': parsing,
       '@/lib/voice-config': voiceConfig,
       '@/lib/voice-understanding': {
-        understandVoiceTurn: async () => ({ kind: 'unclear' }),
+        understandVoiceTurn: async () => understandingResult,
       },
     },
     logs,
@@ -1204,6 +1205,171 @@ test('ambiguous time clarification preserves stage and canonicalizes full answer
   assert.match(clarified,/Say yes to book/); assert.match(clarified,/2:30 PM/);
   assert.equal(h.bookings.length,0);
 });
+test('confirmation time correction preserves ambiguous time until bare PM resolves it', async () => {
+  const h=handlerHarness({
+    stateEnabled:true,
+    understandingResult:{
+      kind:'unclear',
+      meaningful:true,
+      serviceName:null,
+      dateExpression:null,
+      timeExpression:'3:30',
+      confirmation:null,
+      correction:true,
+    },
+  });
+  const flow=await advanceBooking(h,{time:'2:30 PM'});
+  const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
+
+  const ambiguous=await h.run({
+    speech:'Can you make it 3:30?',
+    stateToken:flow.confirmToken,
+    from:CALLER,
+  });
+
+  assert.match(ambiguous,/3:30 AM or 3:30 PM/);
+  assert.equal(h.bookings.length,0);
+
+  const pendingToken=callbackState(ambiguous);
+  const pending=h.state.openVoiceState(pendingToken,binding);
+
+  assert.equal(
+    JSON.stringify(
+      pending.booking.pendingTimeOptions
+    ),
+    JSON.stringify(
+      ['03:30','15:30']
+    )
+  );
+  assert.equal(pending.booking.stage,'confirm');
+
+  const clarified=await h.run({
+    speech:'p.m.',
+    stateToken:pendingToken,
+    from:CALLER,
+  });
+
+  assert.match(clarified,/3:30 PM/);
+  assert.match(clarified,/Say yes to book/);
+  assert.equal(h.bookings.length,0);
+
+  const clarifiedState=h.state.openVoiceState(
+    callbackState(clarified),
+    binding
+  );
+
+  assert.equal(
+    clarifiedState.booking.pendingTimeOptions,
+    undefined
+  );
+  assert.equal(clarifiedState.booking.time,'15:30');
+
+  await h.run({
+    speech:'yes',
+    stateToken:callbackState(clarified),
+    from:CALLER,
+  });
+
+  assert.equal(h.bookings.length,1);
+  assert.equal(h.bookings[0].time,'15:30');
+});
+
+test('affirmative cannot book old appointment while AM PM correction is unresolved', async () => {
+  const h=handlerHarness({
+    stateEnabled:true,
+    understandingResult:{
+      kind:'unclear',
+      meaningful:true,
+      serviceName:null,
+      dateExpression:null,
+      timeExpression:'3:30',
+      confirmation:null,
+      correction:true,
+    },
+  });
+  const flow=await advanceBooking(h,{time:'2:30 PM'});
+
+  const ambiguous=await h.run({
+    speech:'Can you make it 3:30?',
+    stateToken:flow.confirmToken,
+    from:CALLER,
+  });
+
+  const xml=await h.run({
+    speech:'yes',
+    stateToken:callbackState(ambiguous),
+    from:CALLER,
+  });
+
+  assert.match(xml,/whether you mean AM or PM/);
+  assert.equal(h.bookings.length,0);
+});
+
+test('bare PM without pending ambiguity cannot change or book confirmed appointment', async () => {
+  const h=handlerHarness({stateEnabled:true});
+  const flow=await advanceBooking(h,{time:'2:30 PM'});
+
+  const xml=await h.run({
+    speech:'p.m.',
+    stateToken:flow.confirmToken,
+    from:CALLER,
+  });
+
+  assert.equal(h.bookings.length,0);
+  assert.doesNotMatch(xml,/I have Haircut.*3:30 PM/);
+});
+
+test('pending time state accepts canonical pair and rejects malformed values', () => {
+  const h=handlerHarness({stateEnabled:true});
+  const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
+
+  const valid=h.state.initialBookingState();
+  valid.booking.pendingTimeOptions=['03:30','15:30'];
+
+  const opened=h.state.openVoiceState(
+    h.state.sealVoiceState(valid,binding),
+    binding
+  );
+
+  assert.equal(
+    JSON.stringify(
+      opened.booking.pendingTimeOptions
+    ),
+    JSON.stringify(
+      ['03:30','15:30']
+    )
+  );
+
+  for (const pendingTimeOptions of [
+    ['99:99','15:30'],
+    ['03:60','15:30'],
+    ['03:30','03:30'],
+    ['3:30','15:30'],
+    ['03:30'],
+    '03:30',
+  ]) {
+    const state=h.state.initialBookingState();
+    state.booking.pendingTimeOptions=pendingTimeOptions;
+
+    assert.throws(() =>
+      h.state.openVoiceState(
+        h.state.sealVoiceState(state,binding),
+        binding
+      )
+    );
+  }
+
+  const legacy=h.state.initialBookingState();
+
+  assert.equal(
+    h.state.openVoiceState(
+      h.state.sealVoiceState(legacy,binding),
+      binding
+    ).booking.pendingTimeOptions,
+    undefined
+  );
+});
+
 test('ambiguous services prompt only the routed service list with no selection', async () => {
   const h=handlerHarness({stateEnabled:true,services:[{id:SERVICE_ID,name:'Haircut basic'},{id:CUSTOMER_ID,name:'Haircut premium'}]});
   const started=await h.run({digits:'1',from:CALLER});

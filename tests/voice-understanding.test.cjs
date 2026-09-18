@@ -441,6 +441,67 @@ test(
 );
 
 test(
+  'confirmation-stage booking language with replacement time remains a correction',
+  async () => {
+    const h =
+      loadUnderstanding({
+        response: {
+          meaningful: true,
+          service_name: null,
+          date_expression: null,
+          time_expression:
+            '3:30 in the afternoon',
+          confirmation: null,
+          correction: true,
+        },
+      });
+
+    const result =
+      await h.module
+        .understandVoiceTurn({
+          stage:
+            'confirm',
+
+          speech:
+            'Book for me for 3:30 in the afternoon.',
+
+          services:
+            SERVICES,
+        });
+
+    assert.equal(
+      result.kind,
+      'unclear'
+    );
+
+    assert.equal(
+      result.correction,
+      true
+    );
+
+    assert.equal(
+      result.timeExpression,
+      '3:30 in the afternoon'
+    );
+
+    assert.equal(
+      result.confirmation,
+      null
+    );
+
+    assert.match(
+      h.requests[0].instructions,
+      /supplying a replacement service, date, or time is a correction/
+    );
+
+    assert.match(
+      h.requests[0].instructions,
+      /book for me for three thirty in the afternoon/
+    );
+  }
+);
+
+test(
   'service correction never becomes booking authorization',
   async () => {
     const h =

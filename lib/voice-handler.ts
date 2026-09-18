@@ -743,6 +743,9 @@ function resetAfterServiceChange(
 
   state.booking.time =
     null;
+
+  state.booking.pendingTimeOptions =
+    undefined;
 }
 
 function resetAfterDateChange(
@@ -750,6 +753,9 @@ function resetAfterDateChange(
 ) {
   state.booking.time =
     null;
+
+  state.booking.pendingTimeOptions =
+    undefined;
 }
 
 async function bookingTurn({
@@ -992,6 +998,51 @@ async function bookingTurn({
 
     return true;
   };
+
+  if (
+    state.booking.stage ===
+      "confirm" &&
+    state.booking
+      .pendingTimeOptions
+  ) {
+    const period =
+      speech
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[.\s]/g, "");
+
+    if (
+      period === "am" ||
+      period === "pm"
+    ) {
+      const options =
+        state.booking
+          .pendingTimeOptions;
+
+      const selectedTime =
+        period === "am"
+          ? options[0]
+          : options[1];
+
+      state.booking.pendingTimeOptions =
+        undefined;
+
+      state.booking.time =
+        null;
+
+      await handleAvailability(
+        selectedTime
+      );
+
+      return;
+    }
+
+    retry(
+      "I still need to know whether you mean AM or PM. Please say AM or PM."
+    );
+
+    return;
+  }
 
   if (
     state.booking.stage ===
@@ -1626,19 +1677,36 @@ async function bookingTurn({
           parsedTime.kind !==
           "valid"
         ) {
-          retry(
+          if (
             parsedTime.kind ===
-              "ambiguous"
-              ? `I understand you want to change the time. Did you mean ${spokenTime(
-                  parsedTime.options[0]
-                )} or ${spokenTime(
-                  parsedTime.options[1]
-                )}? Please say AM or PM.`
-              : "I understand you want to change the time, but I couldn't verify the new time."
+            "ambiguous"
+          ) {
+            state.booking.pendingTimeOptions =
+              parsedTime.options;
+
+            state.booking.failures =
+              0;
+
+            retry(
+              `I understand you want to change the time. Did you mean ${spokenTime(
+                parsedTime.options[0]
+              )} or ${spokenTime(
+                parsedTime.options[1]
+              )}? Please say AM or PM.`
+            );
+
+            return;
+          }
+
+          retry(
+            "I understand you want to change the time, but I couldn't verify the new time."
           );
 
           return;
         }
+
+        state.booking.pendingTimeOptions =
+          undefined;
 
         state.booking.time =
           null;

@@ -44,6 +44,7 @@ export type VoiceBookingState = {
     serviceName: string | null;
     date: string | null;
     time: string | null;
+    pendingTimeOptions?: [string, string];
   };
 };
 
@@ -163,9 +164,44 @@ function validBookingState(
   ];
 
   if (
-    Object.keys(booking).some(key => ![...expectedKeys, "failures"].includes(key)) ||
-    (booking.failures !== undefined && (typeof booking.failures !== "number" || !Number.isInteger(booking.failures) || booking.failures < 0 || booking.failures > 2)) ||
-    expectedKeys.some((field) => !(field in booking))
+    Object.keys(booking).some(
+      (key) =>
+        ![
+          ...expectedKeys,
+          "failures",
+          "pendingTimeOptions",
+        ].includes(key)
+    ) ||
+    (booking.failures !== undefined &&
+      (typeof booking.failures !== "number" ||
+        !Number.isInteger(booking.failures) ||
+        booking.failures < 0 ||
+        booking.failures > 2)) ||
+    expectedKeys.some(
+      (field) =>
+        !(field in booking)
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    booking.pendingTimeOptions !== undefined &&
+    (
+      !Array.isArray(
+        booking.pendingTimeOptions
+      ) ||
+      booking.pendingTimeOptions.length !== 2 ||
+      booking.pendingTimeOptions.some(
+        (option) =>
+          typeof option !== "string" ||
+          !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(
+            option
+          )
+      ) ||
+      booking.pendingTimeOptions[0] ===
+        booking.pendingTimeOptions[1]
+    )
   ) {
     return false;
   }
