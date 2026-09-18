@@ -1098,28 +1098,23 @@ async function bookingTurn({
         speech
       );
 
-    let service =
-      deterministic.match;
+    const understanding =
+      await understand({
+        stage: "service",
+        speech,
+        services,
+      });
 
-    let understanding:
-      | VoiceTurnUnderstanding
-      | null = null;
+    const semanticService =
+      resolveService(
+        services,
+        understanding
+          .serviceName
+      );
 
-    if (!service) {
-      understanding =
-        await understand({
-          stage: "service",
-          speech,
-          services,
-        });
-
-      service =
-        resolveService(
-          services,
-          understanding
-            .serviceName
-        );
-    }
+    const service =
+      deterministic.match ||
+      semanticService;
 
     if (!service) {
       const choices =
