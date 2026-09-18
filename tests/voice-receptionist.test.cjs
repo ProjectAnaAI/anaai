@@ -1476,7 +1476,7 @@ test('bare PM without pending ambiguity cannot change or book confirmed appointm
   assert.doesNotMatch(xml,/I have Haircut.*3:30 PM/);
 });
 
-test('semantic yes with replacement time cannot authorize the old confirmed appointment', async () => {
+test('semantic replacement time is revalidated as a correction even when correction flag is false', async () => {
   const h=handlerHarness({
     stateEnabled:true,
     understandingResult:{
@@ -1490,6 +1490,7 @@ test('semantic yes with replacement time cannot authorize the old confirmed appo
     },
   });
   const flow=await advanceBooking(h,{time:'2:30 PM'});
+  const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
 
   const xml=await h.run({
     speech:'Book for me for 4 in the afternoon.',
@@ -1499,10 +1500,27 @@ test('semantic yes with replacement time cannot authorize the old confirmed appo
 
   assert.equal(h.bookings.length,0);
   assert.doesNotMatch(xml,/booked successfully/);
-  assert.match(xml,/haven't booked it yet|couldn't understand that clearly enough/);
+  assert.match(xml,/4 PM/);
+  assert.match(xml,/Say yes to book/);
+
+  const corrected=h.state.openVoiceState(
+    callbackState(xml),
+    binding
+  );
+
+  assert.equal(corrected.booking.time,'16:00');
+
+  await h.run({
+    speech:'yes',
+    stateToken:callbackState(xml),
+    from:CALLER,
+  });
+
+  assert.equal(h.bookings.length,1);
+  assert.equal(h.bookings[0].time,'16:00');
 });
 
-test('semantic yes with replacement date cannot authorize the old confirmed appointment', async () => {
+test('semantic replacement date is revalidated as a correction even when correction flag is false', async () => {
   const h=handlerHarness({
     stateEnabled:true,
     understandingResult:{
@@ -1516,6 +1534,7 @@ test('semantic yes with replacement date cannot authorize the old confirmed appo
     },
   });
   const flow=await advanceBooking(h,{time:'2:30 PM'});
+  const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
 
   const xml=await h.run({
     speech:'Yes, book it for October 5th.',
@@ -1525,9 +1544,19 @@ test('semantic yes with replacement date cannot authorize the old confirmed appo
 
   assert.equal(h.bookings.length,0);
   assert.doesNotMatch(xml,/booked successfully/);
+  assert.match(xml,/What time would you like/);
+
+  const corrected=h.state.openVoiceState(
+    callbackState(xml),
+    binding
+  );
+
+  assert.equal(corrected.booking.date,'2099-10-05');
+  assert.equal(corrected.booking.time,null);
+  assert.equal(corrected.booking.stage,'time');
 });
 
-test('semantic yes with replacement service cannot authorize the old confirmed appointment', async () => {
+test('semantic replacement service is revalidated as a correction even when correction flag is false', async () => {
   const h=handlerHarness({
     stateEnabled:true,
     services:[
@@ -1545,6 +1574,7 @@ test('semantic yes with replacement service cannot authorize the old confirmed a
     },
   });
   const flow=await advanceBooking(h,{time:'2:30 PM'});
+  const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
 
   const xml=await h.run({
     speech:'Yes, make it a facial.',
@@ -1554,6 +1584,18 @@ test('semantic yes with replacement service cannot authorize the old confirmed a
 
   assert.equal(h.bookings.length,0);
   assert.doesNotMatch(xml,/booked successfully/);
+  assert.match(xml,/What date would you like for Facial/);
+
+  const corrected=h.state.openVoiceState(
+    callbackState(xml),
+    binding
+  );
+
+  assert.equal(corrected.booking.serviceId,CUSTOMER_ID);
+  assert.equal(corrected.booking.serviceName,'Facial');
+  assert.equal(corrected.booking.date,null);
+  assert.equal(corrected.booking.time,null);
+  assert.equal(corrected.booking.stage,'date');
 });
 
 test('pending time state accepts canonical pair and rejects malformed values', () => {

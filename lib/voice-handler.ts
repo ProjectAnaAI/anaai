@@ -1520,8 +1520,27 @@ async function bookingTurn({
         services,
       });
 
+    const hasReplacementDetails =
+      Boolean(
+        understanding
+          .serviceName ||
+        understanding
+          .dateExpression ||
+        understanding
+          .timeExpression
+      );
+
+    /*
+     * At confirmation, validated replacement details are correction
+     * intent even if the semantic model mislabels correction=false.
+     *
+     * The model still has no authority to mutate booking data:
+     * service/date/time values continue through the existing
+     * deterministic validation and fresh availability paths below.
+     */
     if (
-      understanding.correction
+      understanding.correction ||
+      hasReplacementDetails
     ) {
       if (
         understanding
