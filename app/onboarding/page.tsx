@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+
 import {
+  isOnboardingDraft,
   newOnboardingDraft,
   onboardingDays,
-  isOnboardingDraft,
   validateOnboarding,
 } from '@/lib/onboarding';
+import { supabase } from '@/lib/supabase';
 
 const steps = ['Business', 'Hours', 'Services', 'Receptionist', 'Review'];
 const inputStyle = 'w-full rounded-lg border px-3 py-2';
@@ -41,9 +42,14 @@ export default function OnboardingPage() {
           if (saved) {
             const parsed = JSON.parse(saved);
 
-            // Incomplete drafts are expected; validate shape before rendering.
-            if (isOnboardingDraft(parsed)) {
-              setDraft({ ...newOnboardingDraft(), ...parsed });
+            const restored = {
+              ...newOnboardingDraft(),
+              ...parsed,
+            };
+
+            // Older saved drafts may predate newer fields such as timezone.
+            if (isOnboardingDraft(restored)) {
+              setDraft(restored);
             }
           }
         } catch {
@@ -131,6 +137,14 @@ export default function OnboardingPage() {
 
       if (!draft.address.trim()) {
         throw Error('Enter your business address.');
+      }
+
+      try {
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: draft.timezone,
+        }).format();
+      } catch {
+        throw Error('Choose a valid business timezone.');
       }
 
       setStep(1);
@@ -256,9 +270,41 @@ export default function OnboardingPage() {
               {field('email', 'Email *', 'email')}
               {field('address', 'Address *')}
 
-              <p className="text-sm text-slate-500">
-                Timezone: America/Los_Angeles
-              </p>
+              <label className="block space-y-1">
+                Business timezone *
+                <select
+                  className={inputStyle}
+                  value={draft.timezone}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      timezone: e.target.value,
+                    })
+                  }
+                >
+                  <option value="America/Los_Angeles">
+                    Pacific Time — America/Los_Angeles
+                  </option>
+                  <option value="America/Denver">
+                    Mountain Time — America/Denver
+                  </option>
+                  <option value="America/Chicago">
+                    Central Time — America/Chicago
+                  </option>
+                  <option value="America/New_York">
+                    Eastern Time — America/New_York
+                  </option>
+                  <option value="America/Phoenix">
+                    Arizona — America/Phoenix
+                  </option>
+                  <option value="America/Anchorage">
+                    Alaska — America/Anchorage
+                  </option>
+                  <option value="Pacific/Honolulu">
+                    Hawaii — Pacific/Honolulu
+                  </option>
+                </select>
+              </label>
             </>
           )}
 
@@ -422,7 +468,7 @@ export default function OnboardingPage() {
               <p>{draft.address || 'Address required'}</p>
 
               <p>
-                {draft.services.length} service(s) · America/Los_Angeles
+                {draft.services.length} service(s) · {draft.timezone}
               </p>
 
               <ul>
