@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import AppLayout from "@/components/layout/AppLayout";
+import { activeBusinessHeaders } from "@/lib/active-business";
 import { supabase } from "@/lib/supabase";
 
 export default function AnalyticsPage() {
@@ -20,52 +21,75 @@ export default function AnalyticsPage() {
   const [customers, setCustomers] = useState(0);
   const [services, setServices] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadAnalytics() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
 
-      if (!user) {
-        router.push("/login");
-        return;
+        if (sessionError || !session?.access_token) {
+          router.push("/login");
+          return;
+        }
+
+        const response = await fetch("/api/current-business", {
+          headers: { ...activeBusinessHeaders(), Authorization: `Bearer ${session.access_token}` },
+        });
+        const context = await response.json();
+
+        if (!response.ok || !context.success || !context.business?.id) {
+          throw new Error(context.error || "Unable to resolve your business.");
+        }
+
+        const businessId = context.business.id;
+
+        const [
+          appointmentsResult,
+          completedResult,
+          customersResult,
+          servicesResult,
+        ] = await Promise.all([
+          supabase
+            .from("appointments")
+            .select("*", { count: "exact", head: true })
+            .eq("business_id", businessId),
+
+          supabase
+            .from("appointments")
+            .select("*", { count: "exact", head: true })
+            .eq("business_id", businessId)
+            .eq("status", "Completed"),
+
+          supabase
+            .from("customers")
+            .select("*", { count: "exact", head: true })
+            .eq("business_id", businessId),
+
+          supabase
+            .from("services")
+            .select("*", { count: "exact", head: true })
+            .eq("business_id", businessId),
+        ]);
+
+        const queryError = appointmentsResult.error || completedResult.error ||
+          customersResult.error || servicesResult.error;
+        if (queryError) throw new Error(queryError.message);
+
+        setAppointments(appointmentsResult.count ?? 0);
+        setCompleted(completedResult.count ?? 0);
+        setCustomers(customersResult.count ?? 0);
+        setServices(servicesResult.count ?? 0);
+
+      } catch (error) {
+        console.error("Business data load error:", error);
+        setLoadError(error instanceof Error ? error.message : "Unable to load business data.");
+      } finally {
+        setLoading(false);
       }
-
-      const [
-        appointmentsResult,
-        completedResult,
-        customersResult,
-        servicesResult,
-      ] = await Promise.all([
-        supabase
-          .from("appointments")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id),
-
-        supabase
-          .from("appointments")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("status", "Completed"),
-
-        supabase
-          .from("customers")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id),
-
-        supabase
-          .from("services")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id),
-      ]);
-
-      setAppointments(appointmentsResult.count ?? 0);
-      setCompleted(completedResult.count ?? 0);
-      setCustomers(customersResult.count ?? 0);
-      setServices(servicesResult.count ?? 0);
-
-      setLoading(false);
     }
 
     loadAnalytics();
@@ -113,6 +137,8 @@ export default function AnalyticsPage() {
 
         {loading ? (
           <p className="mt-8 text-gray-500">Loading analytics...</p>
+        ) : loadError ? (
+          <p role="alert" className="mt-8 text-gray-500">{loadError}</p>
         ) : (
           <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
             {stats.map((stat) => {

@@ -12,6 +12,7 @@ import {
 import AppLayout from "@/components/layout/AppLayout";
 import StatsCard from "@/components/dashboard/StatsCard";
 import QuickActions from "@/components/dashboard/QuickActions";
+import { activeBusinessHeaders } from "@/lib/active-business";
 import { supabase } from "@/lib/supabase";
 
 import {
@@ -40,50 +41,73 @@ export default function DashboardPage() {
   const [customerCount, setCustomerCount] = useState(0);
   const [serviceCount, setServiceCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadDashboard() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
 
-      if (!user) {
-        router.push("/login");
-        return;
+        if (sessionError || !session?.access_token) {
+          router.push("/login");
+          return;
+        }
+
+        const response = await fetch("/api/current-business", {
+          headers: { ...activeBusinessHeaders(), Authorization: `Bearer ${session.access_token}` },
+        });
+        const context = await response.json();
+
+        if (!response.ok || !context.success || !context.business?.id) {
+          throw new Error(context.error || "Unable to resolve your business.");
+        }
+
+        const businessId = context.business.id;
+
+        setEmail(session.user.email || "");
+
+        const { data: businessData, error: businessError } = await supabase
+          .from("business_profiles")
+          .select("*")
+          .eq("business_id", businessId);
+
+        if (businessError) throw new Error(businessError.message);
+        setBusiness(businessData?.[0] || null);
+
+        const today = new Date().toISOString().split("T")[0];
+
+        const { count: todayAppointments, error: appointmentsError } = await supabase
+          .from("appointments")
+          .select("*", { count: "exact", head: true })
+          .eq("business_id", businessId)
+          .eq("appointment_date", today);
+
+        const { count: customers, error: customersError } = await supabase
+          .from("customers")
+          .select("*", { count: "exact", head: true })
+          .eq("business_id", businessId);
+
+        const { count: services, error: servicesError } = await supabase
+          .from("services")
+          .select("*", { count: "exact", head: true })
+          .eq("business_id", businessId);
+
+        const queryError = appointmentsError || customersError || servicesError;
+        if (queryError) throw new Error(queryError.message);
+
+        setAppointmentCount(todayAppointments || 0);
+        setCustomerCount(customers || 0);
+        setServiceCount(services || 0);
+
+      } catch (error) {
+        console.error("Business data load error:", error);
+        setLoadError(error instanceof Error ? error.message : "Unable to load business data.");
+      } finally {
+        setLoading(false);
       }
-
-      setEmail(user.email || "");
-
-      const { data: businessData } = await supabase
-        .from("business_profiles")
-        .select("*")
-        .eq("user_id", user.id);
-
-      setBusiness(businessData?.[0] || null);
-
-      const today = new Date().toISOString().split("T")[0];
-
-      const { count: todayAppointments } = await supabase
-        .from("appointments")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("appointment_date", today);
-
-      const { count: customers } = await supabase
-        .from("customers")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id);
-
-      const { count: services } = await supabase
-        .from("services")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id);
-
-      setAppointmentCount(todayAppointments || 0);
-      setCustomerCount(customers || 0);
-      setServiceCount(services || 0);
-
-      setLoading(false);
     }
 
     loadDashboard();
@@ -95,6 +119,10 @@ export default function DashboardPage() {
         Loading dashboard...
       </main>
     );
+  }
+
+  if (loadError) {
+    return <AppLayout><p role="alert" className="text-gray-500">{loadError}</p></AppLayout>;
   }
 
   return (
