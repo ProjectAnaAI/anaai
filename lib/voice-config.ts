@@ -64,7 +64,7 @@ export function gatherOptions(
     ],
     numDigits: 1,
     method: "POST",
-    timeout: 10,
+    timeout: 6,
 
     speechModel:
       "experimental_conversations",
