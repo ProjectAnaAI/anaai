@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# AnaAI local-only files
+/.anaai-voice-backup/
+/supabase/.temp/
