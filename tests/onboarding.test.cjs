@@ -1,329 +1,456 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const ts = require('typescript');
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+const ts = require("typescript");
 
 function load(file, imports = {}) {
   const exports = {};
 
   vm.runInNewContext(
-    ts.transpileModule(fs.readFileSync(file, 'utf8'), {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-      },
-    }).outputText,
+    ts.transpileModule(
+      fs.readFileSync(file, "utf8"),
+      {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+        },
+      }
+    ).outputText,
     {
       exports,
-      require: (name) => imports[name],
+
+      require: (name) => {
+        if (
+          Object.prototype.hasOwnProperty.call(
+            imports,
+            name
+          )
+        ) {
+          return imports[name];
+        }
+
+        throw new Error(
+          `Unexpected test import: ${name}`
+        );
+      },
+
       process: {
         env: {
-          NEXT_PUBLIC_SUPABASE_URL: 'test',
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: 'test',
+          NEXT_PUBLIC_SUPABASE_URL: "test",
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "test",
         },
       },
+
       console: {
         error() {},
       },
+
+      Intl,
+      Error,
     }
   );
 
   return exports;
 }
 
-const validation = load('lib/onboarding.ts');
+const businessHours = load(
+  "lib/business-hours.ts"
+);
+
+const validation = load(
+  "lib/onboarding.ts",
+  {
+    "@/lib/business-hours": businessHours,
+  }
+);
 
 function draft() {
-  const d = validation.newOnboardingDraft();
+  const value =
+    validation.newOnboardingDraft();
 
-  d.name = 'Test Business';
-  d.phone = '(555) 123-4567';
-  d.email = 'owner@example.com';
-  d.address = '123 Test Street';
-  d.services[0].name = 'Service';
+  value.name = "Test Business";
+  value.phone = "(555) 123-4567";
+  value.email = "owner@example.com";
+  value.address = "123 Test Street";
+  value.services[0].name = "Service";
 
-  return d;
+  return value;
 }
 
 test(
-  'required business details with optional service price accepted',
+  "required business details with optional service price accepted",
   () => {
-    const d = draft();
+    const value = draft();
 
-    d.services[0].price = '';
-    d.services[0].description = '';
+    value.services[0].price = "";
+    value.services[0].description = "";
 
     assert.doesNotThrow(() =>
-      validation.validateOnboarding(d)
+      validation.validateOnboarding(
+        value
+      )
     );
   }
 );
 
 for (const [name, mutate] of [
   [
-    'missing business name rejected',
-    (d) => {
-      d.name = '';
+    "missing business name rejected",
+    (value) => {
+      value.name = "";
     },
   ],
+
   [
-    'missing business phone rejected',
-    (d) => {
-      d.phone = '';
+    "missing business phone rejected",
+    (value) => {
+      value.phone = "";
     },
   ],
+
   [
-    'invalid business phone rejected',
-    (d) => {
-      d.phone = '123';
+    "invalid business phone rejected",
+    (value) => {
+      value.phone = "123";
     },
   ],
+
   [
-    'missing business email rejected',
-    (d) => {
-      d.email = '';
+    "missing business email rejected",
+    (value) => {
+      value.email = "";
     },
   ],
+
   [
-    'invalid business email rejected',
-    (d) => {
-      d.email = 'not-an-email';
+    "invalid business email rejected",
+    (value) => {
+      value.email = "not-an-email";
     },
   ],
+
   [
-    'missing business address rejected',
-    (d) => {
-      d.address = '';
+    "missing business address rejected",
+    (value) => {
+      value.address = "";
     },
   ],
+
   [
-    'invalid business hours rejected',
-    (d) => {
-      d.hours.monday.close = '08:00';
+    "invalid business hours rejected",
+    (value) => {
+      value.hours.monday.close =
+        "08:00";
     },
   ],
+
   [
-    'invalid closed flag rejected',
-    (d) => {
-      d.hours.monday.closed = 'false';
+    "invalid closed flag rejected",
+    (value) => {
+      value.hours.monday.closed =
+        "false";
     },
   ],
+
   [
-    'missing services rejected',
-    (d) => {
-      d.services = [];
+    "missing services rejected",
+    (value) => {
+      value.services = [];
     },
   ],
+
   [
-    'zero service duration rejected',
-    (d) => {
-      d.services[0].duration = '0';
+    "zero service duration rejected",
+    (value) => {
+      value.services[0].duration =
+        "0";
     },
   ],
+
   [
-    'decimal service duration rejected',
-    (d) => {
-      d.services[0].duration = '1.5';
+    "decimal service duration rejected",
+    (value) => {
+      value.services[0].duration =
+        "1.5";
     },
   ],
+
   [
-    'negative service price rejected',
-    (d) => {
-      d.services[0].price = '-1';
+    "negative service price rejected",
+    (value) => {
+      value.services[0].price =
+        "-1";
     },
   ],
+
   [
-    'missing greeting rejected',
-    (d) => {
-      d.greeting = '';
+    "missing greeting rejected",
+    (value) => {
+      value.greeting = "";
     },
   ],
 ]) {
   test(name, () => {
-    const d = draft();
+    const value = draft();
 
-    mutate(d);
+    mutate(value);
 
     assert.throws(() =>
-      validation.validateOnboarding(d)
+      validation.validateOnboarding(
+        value
+      )
     );
   });
 }
 
 function api({
   user = true,
-  result = { success: true },
+
+  result = {
+    success: true,
+  },
+
   error = null,
 } = {}) {
   const calls = [];
 
-  const route = load('app/api/onboarding/route.ts', {
-    '@/lib/onboarding': validation,
+  const route = load(
+    "app/api/onboarding/route.ts",
+    {
+      "@/lib/onboarding":
+        validation,
 
-    'next/server': {
-      NextResponse: {
-        json: (body, options) => ({
-          body,
-          status: options?.status || 200,
-        }),
+      "next/server": {
+        NextResponse: {
+          json: (
+            body,
+            options
+          ) => ({
+            body,
+            status:
+              options?.status ||
+              200,
+          }),
+        },
       },
-    },
 
-    '@supabase/supabase-js': {
-      createClient: (_url, _key, options) => {
-        calls.push(options);
+      "@supabase/supabase-js": {
+        createClient: (
+          _url,
+          _key,
+          options
+        ) => {
+          calls.push(options);
 
-        return {
-          auth: {
-            getUser: async () => ({
-              data: {
-                user: user ? {} : null,
-              },
-            }),
-          },
+          return {
+            auth: {
+              getUser:
+                async () => ({
+                  data: {
+                    user: user
+                      ? {}
+                      : null,
+                  },
+                }),
+            },
 
-          rpc: async (name, args) => {
-            calls.push({
+            rpc: async (
               name,
-              args,
-            });
+              args
+            ) => {
+              calls.push({
+                name,
+                args,
+              });
 
-            return {
-              data: result,
-              error,
-            };
-          },
-        };
+              return {
+                data: result,
+                error,
+              };
+            },
+          };
+        },
       },
-    },
-  });
+    }
+  );
 
   return {
     calls,
 
-    post: (body = draft(), token = true) =>
+    post: (
+      body = draft(),
+      token = true
+    ) =>
       route.POST({
         headers: {
           get: () =>
-            token ? 'Bearer test-token' : null,
+            token
+              ? "Bearer test-token"
+              : null,
         },
-        json: async () => body,
+
+        json: async () =>
+          body,
       }),
   };
 }
 
 test(
-  'missing/invalid auth blocks provisioning',
+  "missing/invalid auth blocks provisioning",
   async () => {
     for (const harness of [
-      api({ user: false }),
+      api({
+        user: false,
+      }),
       api(),
     ]) {
-      const response = await harness.post(
-        draft(),
-        false
+      const response =
+        await harness.post(
+          draft(),
+          false
+        );
+
+      assert.equal(
+        response.status,
+        401
       );
 
-      assert.equal(response.status, 401);
-      assert.equal(harness.calls.length, 0);
+      assert.equal(
+        harness.calls.length,
+        0
+      );
     }
 
     assert.equal(
-      (await api({ user: false }).post()).status,
+      (
+        await api({
+          user: false,
+        }).post()
+      ).status,
       401
     );
   }
 );
 
 test(
-  'caller JWT attached; browser identities never forwarded',
+  "caller JWT attached; browser identities never forwarded",
   async () => {
     const harness = api();
 
-    const response = await harness.post({
-      ...draft(),
-      user_id: 'untrusted',
-      business_id: 'untrusted',
-    });
+    const response =
+      await harness.post({
+        ...draft(),
 
-    assert.equal(response.body.success, true);
+        user_id: "untrusted",
+        business_id: "untrusted",
+      });
 
     assert.equal(
-      harness.calls[0].global.headers.Authorization,
-      'Bearer test-token'
+      response.body.success,
+      true
+    );
+
+    assert.equal(
+      harness.calls[0].global
+        .headers.Authorization,
+      "Bearer test-token"
     );
 
     assert.equal(
       harness.calls[1].name,
-      'create_business_for_current_user'
+      "create_business_for_current_user"
     );
 
     assert.equal(
-      harness.calls[1].args.p_setup.user_id,
+      harness.calls[1].args
+        .p_setup.user_id,
       undefined
     );
 
     assert.equal(
-      harness.calls[1].args.p_setup.business_id,
+      harness.calls[1].args
+        .p_setup.business_id,
       undefined
     );
   }
 );
 
 test(
-  'invalid draft never invokes RPC',
+  "invalid draft never invokes RPC",
   async () => {
     const harness = api();
 
-    const response = await harness.post({
-      ...draft(),
-      services: [],
-    });
+    const response =
+      await harness.post({
+        ...draft(),
+        services: [],
+      });
 
-    assert.equal(response.status, 400);
+    assert.equal(
+      response.status,
+      400
+    );
 
-    // Supabase client may be initialized, but the RPC
-    // itself must never be called.
-    assert.equal(harness.calls.length, 1);
+    // Supabase client may be initialized,
+    // but the RPC itself must not run.
+    assert.equal(
+      harness.calls.length,
+      1
+    );
   }
 );
 
 test(
-  'missing required business details never invoke RPC',
+  "missing required business details never invoke RPC",
   async () => {
     for (const key of [
-      'phone',
-      'email',
-      'address',
+      "phone",
+      "email",
+      "address",
     ]) {
       const harness = api();
       const body = draft();
 
-      body[key] = '';
+      body[key] = "";
 
-      const response = await harness.post(body);
+      const response =
+        await harness.post(
+          body
+        );
 
-      assert.equal(response.status, 400);
-      assert.equal(harness.calls.length, 1);
+      assert.equal(
+        response.status,
+        400
+      );
+
+      assert.equal(
+        harness.calls.length,
+        1
+      );
     }
   }
 );
 
 test(
-  'duplicate setup reconciles without reporting a new creation',
+  "duplicate setup reconciles without reporting a new creation",
   async () => {
-    const response = await api({
-      result: {
-        success: false,
-        code: 'ALREADY_PROVISIONED',
-      },
-    }).post();
+    const response =
+      await api({
+        result: {
+          success: false,
+          code:
+            "ALREADY_PROVISIONED",
+        },
+      }).post();
 
-    assert.equal(response.status, 409);
+    assert.equal(
+      response.status,
+      409
+    );
 
     assert.equal(
       response.body.code,
-      'ALREADY_PROVISIONED'
+      "ALREADY_PROVISIONED"
     );
 
     assert.equal(
@@ -334,30 +461,41 @@ test(
 );
 
 test(
-  'failed provisioning never reports success or leaks errors',
+  "failed provisioning never reports success or leaks errors",
   async () => {
     for (const options of [
       {
         error: {
-          message: 'private',
+          message:
+            "private",
         },
       },
+
       {
         result: {
           success: false,
-          code: 'INTERNAL_ERROR',
+          code:
+            "INTERNAL_ERROR",
         },
       },
+
       {
         result: {
           success: false,
-          code: 'INVALID_SETUP',
+          code:
+            "INVALID_SETUP",
         },
       },
     ]) {
-      const response = await api(options).post();
+      const response =
+        await api(
+          options
+        ).post();
 
-      assert.ok(response.status >= 400);
+      assert.ok(
+        response.status >=
+          400
+      );
 
       assert.notEqual(
         response.body.success,
@@ -365,8 +503,10 @@ test(
       );
 
       assert.ok(
-        !JSON.stringify(response).includes(
-          'private'
+        !JSON.stringify(
+          response
+        ).includes(
+          "private"
         )
       );
     }
@@ -374,19 +514,21 @@ test(
 );
 
 // Keep the original migration as deployment history.
-const originalSql = fs.readFileSync(
-  'supabase/migrations/202609150001_secure_business_onboarding.sql',
-  'utf8'
-);
+const originalSql =
+  fs.readFileSync(
+    "supabase/migrations/202609150001_secure_business_onboarding.sql",
+    "utf8"
+  );
 
 // This migration contains the stricter onboarding contract.
-const requiredDetailsSql = fs.readFileSync(
-  'supabase/migrations/202609150002_require_onboarding_business_details.sql',
-  'utf8'
-);
+const requiredDetailsSql =
+  fs.readFileSync(
+    "supabase/migrations/202609150002_require_onboarding_business_details.sql",
+    "utf8"
+  );
 
 test(
-  'SQL contract: auth-owned bootstrap, serialized duplicate guard, atomic exception boundary',
+  "SQL contract: auth-owned bootstrap, serialized duplicate guard, atomic exception boundary",
   () => {
     assert.match(
       requiredDetailsSql,
@@ -395,19 +537,19 @@ test(
 
     assert.ok(
       requiredDetailsSql.indexOf(
-        'pg_advisory_xact_lock'
+        "pg_advisory_xact_lock"
       ) <
         requiredDetailsSql.indexOf(
-          'if exists'
+          "if exists"
         )
     );
 
     assert.ok(
       requiredDetailsSql.indexOf(
-        'ALREADY_PROVISIONED'
+        "ALREADY_PROVISIONED"
       ) <
         requiredDetailsSql.indexOf(
-          'insert into public.businesses'
+          "insert into public.businesses"
         )
     );
 
@@ -449,7 +591,7 @@ test(
 );
 
 test(
-  'SQL requires phone, email and address before provisioning',
+  "SQL requires phone, email and address before provisioning",
   () => {
     assert.match(
       requiredDetailsSql,
@@ -468,7 +610,7 @@ test(
 
     const validationEnd =
       requiredDetailsSql.indexOf(
-        'insert into public.businesses'
+        "insert into public.businesses"
       );
 
     assert.ok(
@@ -492,12 +634,12 @@ test(
 );
 
 test(
-  'SQL contract: profile, services and AI settings use only generated business and auth user',
+  "SQL contract: profile, services and AI settings use only generated business and auth user",
   () => {
     for (const table of [
-      'business_profiles',
-      'services',
-      'ai_settings',
+      "business_profiles",
+      "services",
+      "ai_settings",
     ]) {
       assert.match(
         requiredDetailsSql,
@@ -510,7 +652,7 @@ test(
 );
 
 test(
-  'original onboarding migration remains preserved as deployment history',
+  "original onboarding migration remains preserved as deployment history",
   () => {
     assert.match(
       originalSql,
@@ -524,108 +666,123 @@ test(
   }
 );
 
-const page = fs.readFileSync(
-  'app/onboarding/page.tsx',
-  'utf8'
-);
+const page =
+  fs.readFileSync(
+    "app/onboarding/page.tsx",
+    "utf8"
+  );
 
-const provider = fs.readFileSync(
-  'components/layout/ActiveBusinessProvider.tsx',
-  'utf8'
-);
+const provider =
+  fs.readFileSync(
+    "components/layout/ActiveBusinessProvider.tsx",
+    "utf8"
+  );
 
 test(
-  'routing contract: anonymous login, zero memberships onboarding, existing onboarding visitor dashboard',
+  "routing contract: anonymous login, zero memberships onboarding, existing onboarding visitor dashboard",
   () => {
     assert.match(
       provider,
-      /if \(!userId\) \{\s*router.replace\("\/login"\)/
+      /if \(!userId\) \{\s*router\.replace\(["']\/login["']\)/
     );
 
     assert.match(
       provider,
-      /if \(!memberships\?\.length\)[\s\S]*?router.replace\("\/onboarding"\)/
+      /if \(!memberships\?\.length\)[\s\S]*?router\.replace\(["']\/onboarding["']\)/
     );
 
     assert.match(
       provider,
-      /if \(isOnboarding\) router.replace\("\/dashboard"\)/
+      /if \(isOnboarding\) router\.replace\(["']\/dashboard["']\)/
     );
   }
 );
 
 test(
-  'wizard contract: duplicate latch, explicit success, draft persistence, fresh membership discovery',
+  "wizard contract: duplicate latch, explicit success, draft persistence, fresh membership discovery",
   () => {
+    // Formatting-independent check for the
+    // duplicate submission guard.
     assert.match(
       page,
-      /if \(submitting.current\) return/
+      /if\s*\(\s*submitting\.current\s*\)\s*\{\s*return;\s*\}/
     );
 
     assert.match(
       page,
-      /response.ok && result.success === true/
+      /response\.ok\s*&&\s*result\.success\s*===\s*true/
     );
 
     assert.match(
       page,
-      /sessionStorage.setItem/
+      /sessionStorage\.setItem\s*\(/
     );
 
+    // Current onboarding redirects with replace()
+    // rather than adding /dashboard to browser history.
     assert.match(
       page,
-      /window.location.assign\('\/dashboard'\)/
+      /window\.location\.replace\s*\(\s*["']\/dashboard["']\s*\)/
     );
 
     assert.match(
       page,
       /ALREADY_PROVISIONED/
     );
+
+    // Provisioning readiness is verified by
+    // rediscovering the current business.
+    assert.match(
+      page,
+      /["']\/api\/current-business["']/
+    );
   }
 );
 
 test(
-  'wizard marks phone, email and address as required',
+  "wizard marks phone, email and address as required",
   () => {
     assert.match(
       page,
-      /field\('phone', 'Phone \*', 'tel'\)/
+      /field\(\s*["']phone["']\s*,\s*["']Phone \*["']\s*,\s*["']tel["']\s*\)/
     );
 
     assert.match(
       page,
-      /field\('email', 'Email \*', 'email'\)/
+      /field\(\s*["']email["']\s*,\s*["']Email \*["']\s*,\s*["']email["']\s*\)/
     );
 
     assert.match(
       page,
-      /field\('address', 'Address \*'\)/
+      /field\(\s*["']address["']\s*,\s*["']Address \*["']\s*\)/
     );
 
     assert.match(
       page,
-      /if \(!draft\.phone\.trim\(\)\)/
+      /if\s*\(\s*!draft\.phone\.trim\(\)\s*\)/
     );
 
     assert.match(
       page,
-      /if \(!draft\.email\.trim\(\)\)/
+      /if\s*\(\s*!draft\.email\.trim\(\)\s*\)/
     );
 
     assert.match(
       page,
-      /if \(!draft\.address\.trim\(\)\)/
+      /if\s*\(\s*!draft\.address\.trim\(\)\s*\)/
     );
   }
 );
 
 test(
-  'corrupt saved drafts are rejected before render',
+  "corrupt saved drafts are rejected before render",
   () => {
     assert.equal(
       validation.isOnboardingDraft({
         ...draft(),
-        services: [null],
+        services: [
+          null,
+        ],
       }),
       false
     );
@@ -639,21 +796,23 @@ test(
     );
 
     assert.equal(
-      validation.isOnboardingDraft(draft()),
+      validation.isOnboardingDraft(
+        draft()
+      ),
       true
     );
   }
 );
 
 test(
-  'SQL rejects stale-snapshot isolation before provisioning lock',
+  "SQL rejects stale-snapshot isolation before provisioning lock",
   () => {
     assert.ok(
       requiredDetailsSql.indexOf(
         "current_setting('transaction_isolation')"
       ) <
         requiredDetailsSql.indexOf(
-          'pg_advisory_xact_lock'
+          "pg_advisory_xact_lock"
         )
     );
 
