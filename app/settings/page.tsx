@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bot,
@@ -8,18 +9,27 @@ import {
   LogOut,
   UserRound,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import AppLayout from "@/components/layout/AppLayout";
 import { supabase } from "@/lib/supabase";
 
 export default function SettingsPage() {
   const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
 
   async function handleLogout() {
+    if (loggingOut) {
+      return;
+    }
+
+    setLoggingOut(true);
+
     const { error } = await supabase.auth.signOut();
 
     if (error) {
-      alert(error.message);
+      toast.error("Unable to log out. Please try again.");
+      setLoggingOut(false);
       return;
     }
 
@@ -30,19 +40,22 @@ export default function SettingsPage() {
   const settings = [
     {
       title: "Business Profile",
-      description: "Manage your business name, contact details, and hours.",
+      description:
+        "Manage your business name, contact details, and hours.",
       href: "/business",
       icon: Building2,
     },
     {
       title: "AI Receptionist",
-      description: "Manage AnaAI's greeting, tone, and call instructions.",
+      description:
+        "Manage AnaAI's greeting, tone, and call instructions.",
       href: "/ai",
       icon: Bot,
     },
     {
       title: "Account",
-      description: "Your AnaAI account and authentication settings.",
+      description:
+        "Your AnaAI account and authentication settings.",
       href: "/dashboard",
       icon: UserRound,
     },
@@ -73,7 +86,9 @@ export default function SettingsPage() {
               <button
                 key={item.title}
                 type="button"
-                onClick={() => router.push(item.href)}
+                onClick={() =>
+                  router.push(item.href)
+                }
                 className="flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white p-6 text-left shadow-sm transition hover:border-green-200 hover:bg-green-50/30"
               >
                 <div className="flex items-center gap-4">
@@ -110,10 +125,14 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={handleLogout}
-            className="mt-5 flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+            disabled={loggingOut}
+            className="mt-5 flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <LogOut className="h-4 w-4" />
-            Logout
+
+            {loggingOut
+              ? "Logging out..."
+              : "Logout"}
           </button>
         </div>
       </div>
