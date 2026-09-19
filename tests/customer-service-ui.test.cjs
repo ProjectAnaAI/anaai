@@ -42,6 +42,17 @@ function fn(file, name, context) {
   return context[name];
 }
 
+function activeCustomer(overrides = {}) {
+  return {
+    id: "customer",
+    full_name: "Example",
+    phone: null,
+    email: null,
+    is_active: true,
+    ...overrides,
+  };
+}
+
 function bookingHarness({
   customers = [],
   selected = "",
@@ -99,6 +110,7 @@ function bookingHarness({
         full_name: "Example",
         phone: null,
         email: null,
+        is_active: true,
       };
     },
 
@@ -189,6 +201,11 @@ test(
       harness.notices,
       ["success"]
     );
+
+    assert.equal(
+      harness.ctx.customers[0].is_active,
+      true
+    );
   }
 );
 
@@ -210,6 +227,11 @@ test(
     assert.equal(
       harness.ctx.createForm.customerId,
       "new"
+    );
+
+    assert.equal(
+      harness.ctx.customers[0].is_active,
+      true
     );
 
     harness.allowBooking();
@@ -237,14 +259,12 @@ test(
     const harness =
       bookingHarness({
         customers: [
-          {
+          activeCustomer({
             id: "first",
-            full_name: "Example",
-          },
-          {
+          }),
+          activeCustomer({
             id: "second",
-            full_name: "Example",
-          },
+          }),
         ],
       });
 
@@ -258,16 +278,14 @@ test(
 );
 
 test(
-  "explicit selection uses existing customer",
+  "explicit selection uses existing active customer",
   async () => {
     const harness =
       bookingHarness({
         customers: [
-          {
+          activeCustomer({
             id: "first",
-            full_name: "Example",
-            phone: null,
-          },
+          }),
         ],
         selected: "first",
       });
@@ -280,6 +298,37 @@ test(
         creates: 0,
         books: 1,
       }
+    );
+  }
+);
+
+test(
+  "archived customer cannot be explicitly selected for a new booking",
+  async () => {
+    const harness =
+      bookingHarness({
+        customers: [
+          activeCustomer({
+            id: "archived",
+            is_active: false,
+          }),
+        ],
+        selected: "archived",
+      });
+
+    await harness.save();
+
+    assert.deepEqual(
+      harness.counts(),
+      {
+        creates: 0,
+        books: 0,
+      }
+    );
+
+    assert.deepEqual(
+      harness.notices,
+      ["warning"]
     );
   }
 );
@@ -326,7 +375,7 @@ test(
 );
 
 test(
-  "name suggestions preserve duplicates and phone exact match takes priority",
+  "name suggestions preserve active duplicates and phone exact match takes priority",
   () => {
     const ctx = {
       normalizeCustomerName: (value) =>
@@ -346,16 +395,13 @@ test(
     );
 
     const rows = [
-      {
+      activeCustomer({
         id: "first",
-        full_name: "Example",
         phone: "123-456-7890",
-      },
-      {
+      }),
+      activeCustomer({
         id: "second",
-        full_name: "Example",
-        phone: null,
-      },
+      }),
     ];
 
     assert.equal(
@@ -374,6 +420,102 @@ test(
         "1234567890"
       )[0].id,
       "first"
+    );
+  }
+);
+
+test(
+  "archived customers are excluded from new-booking matches",
+  () => {
+    const ctx = {
+      normalizeCustomerName: (value) =>
+        value.trim().toLowerCase(),
+
+      normalizeCustomerPhone: (value) =>
+        value.replace(
+          /[^0-9]/g,
+          ""
+        ),
+    };
+
+    const matches = fn(
+      "app/appointments/page.tsx",
+      "findCustomerMatches",
+      ctx
+    );
+
+    const rows = [
+      activeCustomer({
+        id: "active",
+        full_name: "Example",
+        phone: "123-456-7890",
+      }),
+      activeCustomer({
+        id: "archived",
+        full_name: "Example",
+        phone: "123-456-7890",
+        is_active: false,
+      }),
+    ];
+
+    const nameMatches =
+      matches(
+        rows,
+        "Example",
+        ""
+      );
+
+    assert.equal(
+      nameMatches.length,
+      1
+    );
+
+    assert.equal(
+      nameMatches[0].id,
+      "active"
+    );
+
+    const phoneMatches =
+      matches(
+        rows,
+        "",
+        "1234567890"
+      );
+
+    assert.equal(
+      phoneMatches.length,
+      1
+    );
+
+    assert.equal(
+      phoneMatches[0].id,
+      "active"
+    );
+  }
+);
+
+test(
+  "appointments query keeps historical customer linkage while customer booking query requires active customers",
+  () => {
+    const source =
+      fs.readFileSync(
+        "app/appointments/page.tsx",
+        "utf8"
+      );
+
+    assert.match(
+      source,
+      /\.from\("customers"\)[\s\S]*?\.eq\(\s*"business_id",[\s\S]*?\.eq\(\s*"is_active",\s*true\s*\)/
+    );
+
+    assert.match(
+      source,
+      /"id, customer_id, service_id, customer_name, customer_phone, customer_email, service, appointment_date, appointment_time, status, notes"/
+    );
+
+    assert.match(
+      source,
+      /appointment\.customer_id/
     );
   }
 );

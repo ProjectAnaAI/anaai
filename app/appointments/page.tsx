@@ -60,6 +60,7 @@ type Customer = {
   full_name: string;
   phone: string | null;
   email: string | null;
+  is_active: boolean;
 };
 
 type Service = {
@@ -130,6 +131,12 @@ function findCustomerMatches(
   name: string,
   phone: string
 ) {
+  const activeCustomers =
+    customers.filter(
+      (customer) =>
+        customer.is_active
+    );
+
   const normalizedName =
     normalizeCustomerName(name);
 
@@ -137,6 +144,9 @@ function findCustomerMatches(
     normalizeCustomerPhone(phone);
 
   /*
+   * Only active customers are eligible for a new
+   * appointment selection.
+   *
    * Phone takes precedence over names.
    * Never infer identity from a name alone.
    */
@@ -146,7 +156,7 @@ function findCustomerMatches(
     }
 
     const exactMatches =
-      customers.filter(
+      activeCustomers.filter(
         (customer) =>
           normalizeCustomerPhone(
             customer.phone || ""
@@ -159,7 +169,7 @@ function findCustomerMatches(
       return exactMatches;
     }
 
-    return customers.filter(
+    return activeCustomers.filter(
       (customer) =>
         normalizeCustomerPhone(
           customer.phone || ""
@@ -173,7 +183,7 @@ function findCustomerMatches(
     return [];
   }
 
-  return customers.filter(
+  return activeCustomers.filter(
     (customer) =>
       normalizeCustomerName(
         customer.full_name
@@ -394,7 +404,8 @@ export default function AppointmentsPage() {
     customers.find(
       (customer) =>
         customer.id ===
-        createForm.customerId
+          createForm.customerId &&
+        customer.is_active
     );
 
   useEffect(() => {
@@ -564,14 +575,26 @@ export default function AppointmentsPage() {
       appointmentResult,
     ] =
       await Promise.all([
+        /*
+         * Load both active and archived customers.
+         * Archived records are needed to preserve the
+         * customer relationship on existing appointments.
+         * New-booking selection is filtered separately.
+         */
         supabase
           .from("customers")
           .select(
-            "id, full_name, phone, email"
+            "id, full_name, phone, email, is_active"
           )
           .eq(
             "business_id",
             activeBusinessId
+          )
+          .order(
+            "is_active",
+            {
+              ascending: false,
+            }
           )
           .order(
             "full_name"
@@ -698,6 +721,17 @@ export default function AppointmentsPage() {
   function selectCreateCustomer(
     customer: Customer
   ) {
+    if (
+      !customer.is_active
+    ) {
+      showNotice(
+        "warning",
+        "Archived customers must be reactivated before they can be used for a new appointment."
+      );
+
+      return;
+    }
+
     setCustomerEmail(
       customer.email || ""
     );
@@ -859,7 +893,8 @@ export default function AppointmentsPage() {
       customers.find(
         (customer) =>
           customer.id ===
-          createForm.customerId
+            createForm.customerId &&
+          customer.is_active
       );
 
     const selectedService =
@@ -890,7 +925,7 @@ export default function AppointmentsPage() {
     ) {
       showNotice(
         "warning",
-        "Please select an existing customer from the matches."
+        "Please select an active existing customer from the matches."
       );
 
       return;
@@ -968,6 +1003,14 @@ export default function AppointmentsPage() {
 
         selectCreateCustomer(
           savedCustomer
+        );
+      }
+
+      if (
+        !selectedCustomer.is_active
+      ) {
+        throw new Error(
+          "Archived customers must be reactivated before they can be used for a new appointment."
         );
       }
 
@@ -1101,6 +1144,24 @@ export default function AppointmentsPage() {
       showNotice(
         "warning",
         "Please select a customer."
+      );
+
+      return;
+    }
+
+    /*
+     * An existing appointment may keep the archived
+     * customer it already references. An archived customer
+     * cannot be newly assigned to another appointment.
+     */
+    if (
+      !selectedCustomer.is_active &&
+      selectedCustomer.id !==
+        appointment.customer_id
+    ) {
+      showNotice(
+        "warning",
+        "Archived customers must be reactivated before they can be assigned to an appointment."
       );
 
       return;
@@ -1508,7 +1569,7 @@ export default function AppointmentsPage() {
                       role="status"
                     >
                       {matchingCustomers.length
-                        ? "Matching customers — select one, or save as a new customer if this is someone else."
+                        ? "Matching active customers — select one, or save as a new customer if this is someone else."
                         : customerName.trim() ||
                             customerPhone.trim()
                           ? "New customer — created when you save the appointment."
@@ -1793,6 +1854,21 @@ export default function AppointmentsPage() {
                     actionAppointmentId ===
                     appointment.id;
 
+                  const appointmentCustomer =
+                    customers.find(
+                      (customer) =>
+                        customer.id ===
+                        appointment.customer_id
+                    );
+
+                  const editableCustomers =
+                    customers.filter(
+                      (customer) =>
+                        customer.is_active ||
+                        customer.id ===
+                          appointment.customer_id
+                    );
+
                   return (
                     <Card
                       key={
@@ -1813,6 +1889,24 @@ export default function AppointmentsPage() {
                                 appointment.customer_name
                               }
                             </h3>
+
+                            {appointmentCustomer &&
+                              !appointmentCustomer.is_active && (
+                                <p className="mt-2 text-sm text-amber-700">
+                                  This
+                                  appointment
+                                  belongs to an
+                                  archived
+                                  customer. The
+                                  existing
+                                  customer can
+                                  remain attached,
+                                  but archived
+                                  customers cannot
+                                  be newly assigned
+                                  to appointments.
+                                </p>
+                              )}
 
                             <div className="mt-5 grid gap-4 md:grid-cols-2">
                               <select
@@ -1840,7 +1934,7 @@ export default function AppointmentsPage() {
                                   )
                                 }
                               >
-                                {customers.map(
+                                {editableCustomers.map(
                                   (
                                     customer
                                   ) => (
@@ -1855,6 +1949,9 @@ export default function AppointmentsPage() {
                                       {
                                         customer.full_name
                                       }
+                                      {!customer.is_active
+                                        ? " (Archived)"
+                                        : ""}
                                     </option>
                                   )
                                 )}
@@ -2034,6 +2131,14 @@ export default function AppointmentsPage() {
                                   {appointment.status ||
                                     "Booked"}
                                 </span>
+
+                                {appointmentCustomer &&
+                                  !appointmentCustomer.is_active && (
+                                    <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
+                                      Customer
+                                      archived
+                                    </span>
+                                  )}
                               </div>
 
                               <div className="mt-4 grid gap-x-8 gap-y-2 text-sm text-gray-600 md:grid-cols-2">
