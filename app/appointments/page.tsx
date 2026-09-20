@@ -29,12 +29,6 @@ import {
   Button,
 } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Input,
 } from "@/components/ui/input";
 import {
@@ -1448,32 +1442,50 @@ export default function AppointmentsPage() {
 
   return (
     <AppLayout>
-      <div className="mx-auto max-w-6xl">
-        <header className="border-b border-gray-200 pb-6">
-          <p className="text-sm font-medium uppercase tracking-wide text-green-600">
-            Scheduling
-          </p>
+      <div className="space-y-6 lg:space-y-7">
+        <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-green-700">
+              Scheduling
+            </p>
 
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight text-gray-900">
-            Appointments
-          </h1>
+            <h1 className="anaai-page-title mt-2">
+              Appointments
+            </h1>
 
-          <p className="mt-2 text-gray-500">
-            Manage bookings
-            created by your team
-            and AnaAI.
-          </p>
+            <p className="anaai-page-description">
+              Manage bookings created by
+              your team and AnaAI.
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            onClick={() => {
+              document
+                .getElementById(
+                  "new-appointment"
+                )
+                ?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                });
+            }}
+            className="w-full sm:w-auto"
+          >
+            New appointment
+          </Button>
         </header>
 
         {notice && (
           <div
-            className={`mt-6 rounded-xl border px-4 py-3 text-sm font-medium ${
-              notice.type ===
-              "success"
-                ? "border-green-200 bg-green-50 text-green-700"
+            role="status"
+            className={`rounded-xl border px-4 py-3 text-sm font-medium ${
+              notice.type === "success"
+                ? "border-green-200 bg-green-50 text-green-800"
                 : notice.type ===
                     "warning"
-                  ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
                   : "border-red-200 bg-red-50 text-red-700"
             }`}
           >
@@ -1481,18 +1493,45 @@ export default function AppointmentsPage() {
           </div>
         )}
 
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle>
-              New appointment
-            </CardTitle>
-          </CardHeader>
+        <section
+          id="new-appointment"
+          className="anaai-surface scroll-mt-24 overflow-hidden"
+        >
+          <div className="border-b border-gray-100 px-5 py-5 sm:px-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="anaai-section-title">
+                  New appointment
+                </h2>
 
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-4 md:col-span-2">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2 text-sm font-medium">
+                <p className="mt-1 text-sm text-gray-500">
+                  Add a booking to the
+                  business schedule.
+                </p>
+              </div>
+
+              <span className="inline-flex w-fit rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                Manual booking
+              </span>
+            </div>
+          </div>
+
+          <div className="p-5 sm:p-6">
+            <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
+              <div className="min-w-0 space-y-5">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-950">
+                    Customer
+                  </h3>
+
+                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                    Search active customers
+                    or enter a new customer.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-2 text-sm font-medium text-gray-700">
                     <span>
                       Customer name
                     </span>
@@ -1518,10 +1557,12 @@ export default function AppointmentsPage() {
                     />
                   </label>
 
-                  <label className="space-y-2 text-sm font-medium">
+                  <label className="space-y-2 text-sm font-medium text-gray-700">
                     <span>
                       Phone number
-                      (optional)
+                      <span className="ml-1 font-normal text-gray-400">
+                        Optional
+                      </span>
                     </span>
 
                     <Input
@@ -1542,92 +1583,116 @@ export default function AppointmentsPage() {
                             .value
                         )
                       }
-                      placeholder="Search by phone number"
+                      placeholder="Search by phone"
                     />
                   </label>
                 </div>
 
                 {selectedCreateCustomer ? (
-                  <p
+                  <div
                     role="status"
-                    className="text-sm text-green-700"
+                    className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4"
                   >
-                    Existing
-                    customer
-                    selected:{" "}
-                    {
-                      selectedCreateCustomer.full_name
-                    }
-                    {" — "}
-                    {selectedCreateCustomer.phone ||
-                      "No phone number"}
-                  </p>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 text-sm font-bold text-green-700">
+                      {selectedCreateCustomer.full_name
+                        .charAt(0)
+                        .toUpperCase()}
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-green-900">
+                        {
+                          selectedCreateCustomer.full_name
+                        }
+                      </p>
+
+                      <p className="mt-0.5 text-xs leading-5 text-green-700">
+                        Existing customer
+                        selected
+                        {selectedCreateCustomer.phone
+                          ? ` · ${selectedCreateCustomer.phone}`
+                          : ""}
+                      </p>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="space-y-2 text-sm">
+                  <div className="space-y-3">
                     <p
-                      className="text-gray-600"
                       role="status"
+                      className="text-sm leading-6 text-gray-500"
                     >
                       {matchingCustomers.length
-                        ? "Matching active customers — select one, or save as a new customer if this is someone else."
+                        ? "Matching active customers — select one below, or continue with a new customer."
                         : customerName.trim() ||
                             customerPhone.trim()
-                          ? "New customer — created when you save the appointment."
+                          ? "No active customer selected. A new customer will be created when this appointment is saved."
                           : "Enter a customer name. Phone and email are optional."}
                     </p>
 
                     {customerPhone.trim() && (
-                      <p className="text-gray-500">
-                        Phone
-                        matches take
-                        priority.
-                        Clear the
-                        phone field
-                        to search by
-                        name.
+                      <p className="text-xs leading-5 text-gray-400">
+                        Phone matches take
+                        priority. Clear the
+                        phone field to search
+                        by name.
                       </p>
                     )}
 
-                    <div className="max-h-48 space-y-2 overflow-y-auto">
-                      {matchingCustomers.map(
-                        (
-                          customer
-                        ) => (
-                          <button
-                            key={
-                              customer.id
-                            }
-                            type="button"
-                            disabled={
-                              submitting
-                            }
-                            onClick={() =>
-                              selectCreateCustomer(
-                                customer
-                              )
-                            }
-                            className="block w-full rounded-lg border border-input px-3 py-2 text-left hover:bg-gray-50"
-                          >
-                            {
-                              customer.full_name
-                            }
-                            {" — "}
-                            {customer.phone ||
-                              "No phone number"}
-                            {customer.email
-                              ? ` · ${customer.email}`
-                              : ""}
-                          </button>
-                        )
-                      )}
-                    </div>
+                    {matchingCustomers.length >
+                      0 && (
+                      <div className="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-2">
+                        {matchingCustomers.map(
+                          (
+                            customer
+                          ) => (
+                            <button
+                              key={
+                                customer.id
+                              }
+                              type="button"
+                              disabled={
+                                submitting
+                              }
+                              onClick={() =>
+                                selectCreateCustomer(
+                                  customer
+                                )
+                              }
+                              className="flex min-h-14 w-full items-center justify-between gap-3 rounded-lg bg-white px-3 py-2.5 text-left transition hover:bg-green-50 disabled:opacity-50"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-gray-900">
+                                  {
+                                    customer.full_name
+                                  }
+                                </p>
+
+                                <p className="mt-0.5 truncate text-xs text-gray-500">
+                                  {customer.phone ||
+                                    "No phone number"}
+                                  {customer.email
+                                    ? ` · ${customer.email}`
+                                    : ""}
+                                </p>
+                              </div>
+
+                              <span className="shrink-0 text-xs font-semibold text-green-700">
+                                Select
+                              </span>
+                            </button>
+                          )
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                <label className="block space-y-2 text-sm">
+                <label className="block space-y-2 text-sm font-medium text-gray-700">
                   <span>
                     Email
-                    (optional)
+                    <span className="ml-1 font-normal text-gray-400">
+                      Optional
+                    </span>
                   </span>
 
                   <Input
@@ -1650,198 +1715,248 @@ export default function AppointmentsPage() {
                           .value
                       )
                     }
+                    placeholder="customer@example.com"
                   />
                 </label>
               </div>
 
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
-                value={
-                  createForm.serviceId
-                }
-                disabled={
-                  submitting
-                }
-                onChange={(
-                  event
-                ) =>
-                  setCreateForm(
-                    (
-                      current
-                    ) => ({
-                      ...current,
+              <div className="min-w-0 rounded-2xl bg-gray-50 p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-gray-950">
+                  Appointment details
+                </h3>
 
-                      serviceId:
-                        event
-                          .target
-                          .value,
-                    })
-                  )
-                }
-              >
-                <option value="">
-                  Select
-                  service
-                </option>
+                <div className="mt-4 space-y-4">
+                  <label className="block space-y-2 text-sm font-medium text-gray-700">
+                    <span>
+                      Service
+                    </span>
 
-                {services.map(
-                  (service) => (
-                    <option
-                      key={
-                        service.id
-                      }
+                    <select
+                      className="min-h-11 w-full rounded-xl border border-input bg-white px-3 text-sm outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100"
                       value={
-                        service.id
+                        createForm.serviceId
+                      }
+                      disabled={
+                        submitting
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        setCreateForm(
+                          (
+                            current
+                          ) => ({
+                            ...current,
+
+                            serviceId:
+                              event
+                                .target
+                                .value,
+                          })
+                        )
                       }
                     >
-                      {
-                        service.name
+                      <option value="">
+                        Select service
+                      </option>
+
+                      {services.map(
+                        (service) => (
+                          <option
+                            key={
+                              service.id
+                            }
+                            value={
+                              service.id
+                            }
+                          >
+                            {
+                              service.name
+                            }
+                            {service.duration_minutes
+                              ? ` · ${service.duration_minutes} min`
+                              : ""}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                    <label className="block space-y-2 text-sm font-medium text-gray-700">
+                      <span>
+                        Date
+                      </span>
+
+                      <Input
+                        type="date"
+                        disabled={
+                          submitting
+                        }
+                        value={
+                          createForm.appointmentDate
+                        }
+                        onChange={(
+                          event
+                        ) =>
+                          setCreateForm(
+                            (
+                              current
+                            ) => ({
+                              ...current,
+
+                              appointmentDate:
+                                event
+                                  .target
+                                  .value,
+                            })
+                          )
+                        }
+                      />
+                    </label>
+
+                    <label className="block space-y-2 text-sm font-medium text-gray-700">
+                      <span>
+                        Time
+                      </span>
+
+                      <Input
+                        type="time"
+                        disabled={
+                          submitting
+                        }
+                        value={
+                          createForm.appointmentTime
+                        }
+                        onChange={(
+                          event
+                        ) =>
+                          setCreateForm(
+                            (
+                              current
+                            ) => ({
+                              ...current,
+
+                              appointmentTime:
+                                event
+                                  .target
+                                  .value,
+                            })
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  <label className="block space-y-2 text-sm font-medium text-gray-700">
+                    <span>
+                      Internal notes
+                    </span>
+
+                    <Textarea
+                      disabled={
+                        submitting
                       }
-                      {service.duration_minutes
-                        ? ` · ${service.duration_minutes} min`
-                        : ""}
-                    </option>
-                  )
-                )}
-              </select>
-
-              <Input
-                type="date"
-                disabled={
-                  submitting
-                }
-                value={
-                  createForm.appointmentDate
-                }
-                onChange={(
-                  event
-                ) =>
-                  setCreateForm(
-                    (
-                      current
-                    ) => ({
-                      ...current,
-
-                      appointmentDate:
+                      placeholder="Add notes for your team"
+                      value={
+                        createForm.notes
+                      }
+                      onChange={(
                         event
-                          .target
-                          .value,
-                    })
-                  )
-                }
-              />
+                      ) =>
+                        setCreateForm(
+                          (
+                            current
+                          ) => ({
+                            ...current,
 
-              <Input
-                type="time"
-                disabled={
-                  submitting
-                }
-                value={
-                  createForm.appointmentTime
-                }
-                onChange={(
-                  event
-                ) =>
-                  setCreateForm(
-                    (
-                      current
-                    ) => ({
-                      ...current,
+                            notes:
+                              event
+                                .target
+                                .value,
+                          })
+                        )
+                      }
+                    />
+                  </label>
 
-                      appointmentTime:
-                        event
-                          .target
-                          .value,
-                    })
-                  )
-                }
-              />
+                  <Button
+                    type="button"
+                    onClick={
+                      handleCreateAppointment
+                    }
+                    disabled={
+                      submitting ||
+                      !businessId ||
+                      !userId
+                    }
+                    className="w-full"
+                  >
+                    {submitting
+                      ? "Saving appointment..."
+                      : "Save appointment"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="anaai-surface overflow-hidden">
+          <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <h2 className="anaai-section-title">
+                Schedule
+              </h2>
+
+              <p className="mt-1 text-sm text-gray-500">
+                Confirm, reschedule,
+                complete, or cancel
+                customer appointments.
+              </p>
             </div>
 
-            <Textarea
-              className="mt-4"
-              disabled={
-                submitting
-              }
-              placeholder="Internal notes"
-              value={
-                createForm.notes
-              }
-              onChange={(
-                event
-              ) =>
-                setCreateForm(
-                  (
-                    current
-                  ) => ({
-                    ...current,
-
-                    notes:
-                      event
-                        .target
-                        .value,
-                  })
-                )
-              }
-            />
-
-            <button
-              type="button"
-              onClick={
-                handleCreateAppointment
-              }
-              disabled={
-                submitting ||
-                !businessId ||
-                !userId
-              }
-              className="mt-5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {submitting
-                ? "Saving appointment..."
-                : "Save appointment"}
-            </button>
-          </CardContent>
-        </Card>
-
-        <section className="mt-10">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-gray-900">
-              Appointments
-            </h2>
-
-            <p className="mt-1 text-sm text-gray-500">
-              Confirm,
-              reschedule,
-              complete, or
-              cancel customer
-              appointments.
-            </p>
+            {!loading && (
+              <div className="inline-flex w-fit rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-600">
+                {appointments.length}{" "}
+                {appointments.length ===
+                1
+                  ? "appointment"
+                  : "appointments"}
+              </div>
+            )}
           </div>
 
           {loading ? (
-            <p className="mt-4 text-gray-500">
-              Loading
-              appointments...
-            </p>
+            <div className="flex min-h-48 items-center justify-center px-5 py-10">
+              <div className="text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-green-600" />
+
+                <p className="mt-3 text-sm font-medium text-gray-500">
+                  Loading
+                  appointments...
+                </p>
+              </div>
+            </div>
           ) : appointments.length ===
             0 ? (
-            <div className="mt-4 rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
-              <p className="font-medium text-gray-900">
-                No
-                appointments
-                yet
-              </p>
+            <div className="px-5 py-12 text-center sm:px-6">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-green-50 text-xl">
+                📅
+              </div>
 
-              <p className="mt-2 text-sm text-gray-500">
-                New bookings
-                will appear
-                here once they
+              <h3 className="mt-4 font-semibold text-gray-950">
+                No appointments yet
+              </h3>
+
+              <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-gray-500">
+                New bookings will
+                appear here once they
                 are created.
               </p>
             </div>
           ) : (
-            <div className="mt-5 space-y-4">
+            <div className="divide-y divide-gray-100">
               {appointments.map(
                 (
                   appointment
@@ -1870,47 +1985,63 @@ export default function AppointmentsPage() {
                     );
 
                   return (
-                    <Card
+                    <article
                       key={
                         appointment.id
                       }
-                      className="overflow-hidden"
+                      className="px-5 py-5 sm:px-6"
                     >
-                      <CardContent className="p-5">
-                        {isEditing ? (
-                          <div>
-                            <p className="text-sm font-medium text-green-600">
-                              Edit
-                              appointment
-                            </p>
+                      {isEditing ? (
+                        <div className="rounded-2xl border border-green-200 bg-green-50/40 p-4 sm:p-5">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-green-700">
+                                Reschedule
+                                appointment
+                              </p>
 
-                            <h3 className="mt-1 text-lg font-semibold text-gray-900">
-                              {
-                                appointment.customer_name
-                              }
-                            </h3>
+                              <h3 className="mt-1 text-lg font-semibold text-gray-950">
+                                {
+                                  appointment.customer_name
+                                }
+                              </h3>
+                            </div>
 
-                            {appointmentCustomer &&
-                              !appointmentCustomer.is_active && (
-                                <p className="mt-2 text-sm text-amber-700">
-                                  This
-                                  appointment
-                                  belongs to an
-                                  archived
-                                  customer. The
-                                  existing
-                                  customer can
-                                  remain attached,
-                                  but archived
-                                  customers cannot
-                                  be newly assigned
-                                  to appointments.
-                                </p>
-                              )}
+                            <span
+                              className={`w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadgeClasses(
+                                appointment.status
+                              )}`}
+                            >
+                              {appointment.status ||
+                                "Booked"}
+                            </span>
+                          </div>
 
-                            <div className="mt-5 grid gap-4 md:grid-cols-2">
+                          {appointmentCustomer &&
+                            !appointmentCustomer.is_active && (
+                              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                                This
+                                appointment
+                                belongs to an
+                                archived
+                                customer. The
+                                existing
+                                customer can
+                                remain attached,
+                                but archived
+                                customers cannot
+                                be newly assigned.
+                              </div>
+                            )}
+
+                          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                            <label className="space-y-2 text-sm font-medium text-gray-700">
+                              <span>
+                                Customer
+                              </span>
+
                               <select
-                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
+                                className="min-h-11 w-full rounded-xl border border-input bg-white px-3 text-sm outline-none"
                                 value={
                                   editForm.customerId
                                 }
@@ -1956,9 +2087,15 @@ export default function AppointmentsPage() {
                                   )
                                 )}
                               </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm font-medium text-gray-700">
+                              <span>
+                                Service
+                              </span>
 
                               <select
-                                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
+                                className="min-h-11 w-full rounded-xl border border-input bg-white px-3 text-sm outline-none"
                                 value={
                                   editForm.serviceId
                                 }
@@ -2001,6 +2138,12 @@ export default function AppointmentsPage() {
                                   )
                                 )}
                               </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm font-medium text-gray-700">
+                              <span>
+                                Date
+                              </span>
 
                               <Input
                                 type="date"
@@ -2027,6 +2170,12 @@ export default function AppointmentsPage() {
                                   )
                                 }
                               />
+                            </label>
+
+                            <label className="space-y-2 text-sm font-medium text-gray-700">
+                              <span>
+                                Time
+                              </span>
 
                               <Input
                                 type="time"
@@ -2053,10 +2202,15 @@ export default function AppointmentsPage() {
                                   )
                                 }
                               />
-                            </div>
+                            </label>
+                          </div>
+
+                          <label className="mt-4 block space-y-2 text-sm font-medium text-gray-700">
+                            <span>
+                              Internal notes
+                            </span>
 
                             <Textarea
-                              className="mt-4"
                               disabled={
                                 actionInProgress
                               }
@@ -2081,211 +2235,218 @@ export default function AppointmentsPage() {
                               }
                               placeholder="Internal notes"
                             />
+                          </label>
 
-                            <div className="mt-5 flex flex-wrap gap-2">
-                              <Button
-                                onClick={() =>
-                                  saveAppointmentChanges(
-                                    appointment
-                                  )
-                                }
-                                disabled={
-                                  actionInProgress
-                                }
-                                className="bg-green-600 text-white hover:bg-green-700"
-                              >
-                                {actionInProgress
-                                  ? "Saving..."
-                                  : "Save changes"}
-                              </Button>
+                          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+                            <Button
+                              onClick={() =>
+                                saveAppointmentChanges(
+                                  appointment
+                                )
+                              }
+                              disabled={
+                                actionInProgress
+                              }
+                            >
+                              {actionInProgress
+                                ? "Saving..."
+                                : "Save changes"}
+                            </Button>
 
-                              <Button
-                                variant="outline"
-                                onClick={
-                                  cancelEditing
-                                }
-                                disabled={
-                                  actionInProgress
-                                }
-                              >
-                                Cancel
-                                editing
-                              </Button>
-                            </div>
+                            <Button
+                              variant="outline"
+                              onClick={
+                                cancelEditing
+                              }
+                              disabled={
+                                actionInProgress
+                              }
+                            >
+                              Cancel editing
+                            </Button>
                           </div>
-                        ) : (
-                          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-3">
-                                <h3 className="text-lg font-semibold text-gray-900">
-                                  {
-                                    appointment.customer_name
-                                  }
-                                </h3>
+                        </div>
+                      ) : (
+                        <div className="flex min-w-0 flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-base font-semibold text-gray-950 sm:text-lg">
+                                {
+                                  appointment.customer_name
+                                }
+                              </h3>
 
-                                <span
-                                  className={`rounded-full border px-3 py-1 text-xs font-medium ${statusBadgeClasses(
-                                    appointment.status
-                                  )}`}
-                                >
-                                  {appointment.status ||
-                                    "Booked"}
-                                </span>
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadgeClasses(
+                                  appointment.status
+                                )}`}
+                              >
+                                {appointment.status ||
+                                  "Booked"}
+                              </span>
 
-                                {appointmentCustomer &&
-                                  !appointmentCustomer.is_active && (
-                                    <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
-                                      Customer
-                                      archived
-                                    </span>
-                                  )}
-                              </div>
+                              {appointmentCustomer &&
+                                !appointmentCustomer.is_active && (
+                                  <span className="rounded-full border border-gray-200 bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
+                                    Customer
+                                    archived
+                                  </span>
+                                )}
+                            </div>
 
-                              <div className="mt-4 grid gap-x-8 gap-y-2 text-sm text-gray-600 md:grid-cols-2">
-                                <p>
-                                  <span className="font-medium text-gray-900">
-                                    Phone:
-                                  </span>{" "}
-                                  {appointment.customer_phone ||
-                                    "Not provided"}
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              <div className="rounded-xl bg-gray-50 px-3.5 py-3">
+                                <p className="text-xs font-medium text-gray-400">
+                                  Date
                                 </p>
 
-                                <p>
-                                  <span className="font-medium text-gray-900">
-                                    Email:
-                                  </span>{" "}
-                                  {appointment.customer_email ||
-                                    "Not provided"}
-                                </p>
-
-                                <p>
-                                  <span className="font-medium text-gray-900">
-                                    Service:
-                                  </span>{" "}
-                                  {appointment.service ||
-                                    "Not specified"}
-                                </p>
-
-                                <p>
-                                  <span className="font-medium text-gray-900">
-                                    Date:
-                                  </span>{" "}
+                                <p className="mt-1 text-sm font-semibold text-gray-800">
                                   {appointment.appointment_date ||
                                     "Not specified"}
                                 </p>
+                              </div>
 
-                                <p>
-                                  <span className="font-medium text-gray-900">
-                                    Time:
-                                  </span>{" "}
+                              <div className="rounded-xl bg-gray-50 px-3.5 py-3">
+                                <p className="text-xs font-medium text-gray-400">
+                                  Time
+                                </p>
+
+                                <p className="mt-1 text-sm font-semibold text-gray-800">
                                   {formatTimeForDisplay(
                                     appointment.appointment_time
                                   )}
                                 </p>
                               </div>
 
-                              {appointment.notes && (
-                                <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
-                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                    Internal
-                                    notes
-                                  </p>
+                              <div className="rounded-xl bg-gray-50 px-3.5 py-3 sm:col-span-2 lg:col-span-1">
+                                <p className="text-xs font-medium text-gray-400">
+                                  Service
+                                </p>
 
-                                  <p className="mt-1 text-sm text-gray-700">
-                                    {
-                                      appointment.notes
-                                    }
-                                  </p>
-                                </div>
-                              )}
+                                <p className="mt-1 truncate text-sm font-semibold text-gray-800">
+                                  {appointment.service ||
+                                    "Not specified"}
+                                </p>
+                              </div>
                             </div>
 
-                            <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-sm lg:justify-end">
+                            <div className="mt-4 grid gap-x-6 gap-y-2 text-sm text-gray-500 sm:grid-cols-2">
+                              <p className="min-w-0 break-words">
+                                <span className="font-medium text-gray-700">
+                                  Phone:
+                                </span>{" "}
+                                {appointment.customer_phone ||
+                                  "Not provided"}
+                              </p>
+
+                              <p className="min-w-0 break-words">
+                                <span className="font-medium text-gray-700">
+                                  Email:
+                                </span>{" "}
+                                {appointment.customer_email ||
+                                  "Not provided"}
+                              </p>
+                            </div>
+
+                            {appointment.notes && (
+                              <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                                  Internal notes
+                                </p>
+
+                                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-gray-600">
+                                  {
+                                    appointment.notes
+                                  }
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex shrink-0 flex-wrap gap-2 xl:max-w-[300px] xl:justify-end">
+                            <Button
+                              variant="outline"
+                              onClick={() =>
+                                startEditingAppointment(
+                                  appointment
+                                )
+                              }
+                              disabled={
+                                actionInProgress ||
+                                ![
+                                  "Booked",
+                                  "Confirmed",
+                                ].includes(
+                                  appointment.status ||
+                                    ""
+                                )
+                              }
+                            >
+                              Reschedule
+                            </Button>
+
+                            {appointment.status ===
+                              "Booked" && (
                               <Button
-                                variant="outline"
                                 onClick={() =>
-                                  startEditingAppointment(
+                                  confirmAppointment(
                                     appointment
                                   )
                                 }
                                 disabled={
-                                  actionInProgress ||
-                                  ![
-                                    "Booked",
-                                    "Confirmed",
-                                  ].includes(
-                                    appointment.status ||
-                                      ""
-                                  )
+                                  actionInProgress
                                 }
                               >
-                                Reschedule
+                                {actionInProgress
+                                  ? "Working..."
+                                  : "Confirm"}
                               </Button>
+                            )}
 
-                              {appointment.status ===
-                                "Booked" && (
-                                <Button
-                                  onClick={() =>
-                                    confirmAppointment(
-                                      appointment
-                                    )
-                                  }
-                                  disabled={
-                                    actionInProgress
-                                  }
-                                  className="bg-green-600 text-white hover:bg-green-700"
-                                >
-                                  {actionInProgress
-                                    ? "Working..."
-                                    : "Confirm"}
-                                </Button>
-                              )}
+                            {appointment.status ===
+                              "Confirmed" && (
+                              <Button
+                                onClick={() =>
+                                  completeAppointment(
+                                    appointment
+                                  )
+                                }
+                                disabled={
+                                  actionInProgress
+                                }
+                              >
+                                {actionInProgress
+                                  ? "Working..."
+                                  : "Mark completed"}
+                              </Button>
+                            )}
 
-                              {appointment.status ===
-                                "Confirmed" && (
-                                <Button
-                                  onClick={() =>
-                                    completeAppointment(
-                                      appointment
-                                    )
-                                  }
-                                  disabled={
-                                    actionInProgress
-                                  }
-                                  className="bg-blue-600 text-white hover:bg-blue-700"
-                                >
-                                  {actionInProgress
-                                    ? "Working..."
-                                    : "Mark completed"}
-                                </Button>
-                              )}
-
-                              {[
-                                "Booked",
-                                "Confirmed",
-                              ].includes(
-                                appointment.status ||
-                                  ""
-                              ) && (
-                                <Button
-                                  variant="outline"
-                                  onClick={() =>
-                                    cancelAppointment(
-                                      appointment
-                                    )
-                                  }
-                                  disabled={
-                                    actionInProgress
-                                  }
-                                >
-                                  Cancel
-                                </Button>
-                              )}
-                            </div>
+                            {[
+                              "Booked",
+                              "Confirmed",
+                            ].includes(
+                              appointment.status ||
+                                ""
+                            ) && (
+                              <Button
+                                variant="outline"
+                                onClick={() =>
+                                  cancelAppointment(
+                                    appointment
+                                  )
+                                }
+                                disabled={
+                                  actionInProgress
+                                }
+                                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                              >
+                                Cancel
+                              </Button>
+                            )}
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                        </div>
+                      )}
+                    </article>
                   );
                 }
               )}
