@@ -7,6 +7,22 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Archive,
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  CircleUserRound,
+  Mail,
+  Pencil,
+  Phone,
+  Plus,
+  RotateCcw,
+  Search,
+  UserCheck,
+  Users,
+  X,
+} from "lucide-react";
 
 import AppLayout from "@/components/layout/AppLayout";
 import {
@@ -22,8 +38,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -82,13 +96,13 @@ function compareAppointmentsNewestFirst(
   first: CustomerAppointment,
   second: CustomerAppointment
 ) {
-  const firstKey = `${first.appointment_date || ""}T${
-    first.appointment_time || ""
-  }`;
+  const firstKey = `${
+    first.appointment_date || ""
+  }T${first.appointment_time || ""}`;
 
-  const secondKey = `${second.appointment_date || ""}T${
-    second.appointment_time || ""
-  }`;
+  const secondKey = `${
+    second.appointment_date || ""
+  }T${second.appointment_time || ""}`;
 
   return secondKey.localeCompare(
     firstKey
@@ -187,20 +201,34 @@ function statusClasses(
 ) {
   switch (status) {
     case "Confirmed":
-      return "bg-green-50 text-green-700";
+      return "border-green-200 bg-green-50 text-green-700";
 
     case "Booked":
-      return "bg-blue-50 text-blue-700";
+      return "border-blue-200 bg-blue-50 text-blue-700";
 
     case "Completed":
-      return "bg-gray-100 text-gray-700";
+      return "border-gray-200 bg-gray-100 text-gray-700";
 
     case "Cancelled":
-      return "bg-red-50 text-red-700";
+      return "border-red-200 bg-red-50 text-red-700";
 
     default:
-      return "bg-gray-100 text-gray-600";
+      return "border-gray-200 bg-gray-100 text-gray-600";
   }
+}
+
+function initials(
+  name: string
+) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(
+      (part) =>
+        part.charAt(0).toUpperCase()
+    )
+    .join("");
 }
 
 export default function CustomersPage() {
@@ -293,6 +321,11 @@ export default function CustomersPage() {
     null
   );
 
+  const [
+    editorOpen,
+    setEditorOpen,
+  ] = useState(false);
+
   const saveInFlight =
     useRef(false);
 
@@ -325,7 +358,10 @@ export default function CustomersPage() {
         CustomerAppointment[]
       >();
 
-      for (const appointment of appointments) {
+      for (
+        const appointment
+        of appointments
+      ) {
         if (
           !appointment.customer_id
         ) {
@@ -599,6 +635,29 @@ export default function CustomersPage() {
     setNotes("");
   }
 
+  function openNewCustomer() {
+    if (
+      saveInFlight.current ||
+      customerActionId
+    ) {
+      return;
+    }
+
+    resetEditor();
+    setFeedback("");
+    setEditorOpen(true);
+  }
+
+  function closeEditor() {
+    if (saveInFlight.current) {
+      return;
+    }
+
+    resetEditor();
+    setFeedback("");
+    setEditorOpen(false);
+  }
+
   async function handleSubmit(
     event:
       React.FormEvent<HTMLFormElement>
@@ -657,6 +716,7 @@ export default function CustomersPage() {
       );
 
       resetEditor();
+      setEditorOpen(false);
     } catch (error) {
       setFeedback(
         error instanceof Error
@@ -695,23 +755,11 @@ export default function CustomersPage() {
       customer.notes || ""
     );
     setFeedback("");
-
-    document
-      .getElementById(
-        "customer-editor"
-      )
-      ?.scrollIntoView({
-        behavior: "smooth",
-      });
+    setEditorOpen(true);
   }
 
   function cancelEdit() {
-    if (saveInFlight.current) {
-      return;
-    }
-
-    resetEditor();
-    setFeedback("");
+    closeEditor();
   }
 
   function toggleHistory(
@@ -814,6 +862,7 @@ export default function CustomersPage() {
         !nextActive
       ) {
         resetEditor();
+        setEditorOpen(false);
       }
 
       setFeedback(
@@ -836,71 +885,652 @@ export default function CustomersPage() {
 
   return (
     <AppLayout>
-      <div className="mx-auto max-w-6xl">
-        <header className="border-b border-gray-200 pb-6">
-          <p className="text-sm font-medium uppercase tracking-wide text-green-600">
-            CRM
-          </p>
+      <div className="space-y-6">
+        <header className="flex flex-col gap-5 border-b border-gray-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
+              CRM
+            </p>
 
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight text-gray-900">
-            Customers
-          </h1>
+            <h1 className="anaai-page-title mt-2">
+              Customers
+            </h1>
 
-          <p className="mt-2 text-gray-500">
-            Manage customer
-            information and review
-            appointment history.
-          </p>
+            <p className="anaai-page-description mt-2 max-w-2xl">
+              Manage customer
+              information and review
+              appointment history.
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            onClick={
+              openNewCustomer
+            }
+            disabled={
+              saving ||
+              Boolean(
+                customerActionId
+              )
+            }
+            className="shrink-0 gap-2"
+          >
+            <Plus className="size-4" />
+            Add customer
+          </Button>
         </header>
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-sm font-medium text-gray-500">
-                Total customers
-              </p>
+        {feedback &&
+          !editorOpen && (
+            <div
+              role="status"
+              className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm"
+            >
+              {feedback}
+            </div>
+          )}
 
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {customers.length}
-              </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card className="border-gray-200 shadow-none">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-xs font-medium text-gray-500">
+                  Total customers
+                </p>
+
+                <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-950">
+                  {customers.length}
+                </p>
+              </div>
+
+              <div className="flex size-10 items-center justify-center rounded-xl bg-gray-100 text-gray-600">
+                <Users className="size-5" />
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-sm font-medium text-gray-500">
-                Active
-              </p>
+          <Card className="border-gray-200 shadow-none">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-xs font-medium text-gray-500">
+                  Active customers
+                </p>
 
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {activeCount}
-              </p>
+                <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-950">
+                  {activeCount}
+                </p>
+              </div>
+
+              <div className="flex size-10 items-center justify-center rounded-xl bg-green-50 text-green-700">
+                <UserCheck className="size-5" />
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-sm font-medium text-gray-500">
-                Archived
-              </p>
+          <Card className="border-gray-200 shadow-none">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-xs font-medium text-gray-500">
+                  Archived
+                </p>
 
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {archivedCount}
-              </p>
+                <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-950">
+                  {archivedCount}
+                </p>
+              </div>
+
+              <div className="flex size-10 items-center justify-center rounded-xl bg-gray-100 text-gray-500">
+                <Archive className="size-5" />
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle>
-              {editingId
-                ? "Edit customer"
-                : "New customer"}
-            </CardTitle>
-          </CardHeader>
+        <Card className="overflow-hidden border-gray-200 shadow-none">
+          <CardContent className="p-0">
+            <div className="border-b border-gray-200 p-4 sm:p-5">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="relative w-full xl:max-w-md">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
 
-          <CardContent>
+                  <Input
+                    type="search"
+                    aria-label="Search customers"
+                    placeholder="Search name, phone, or email"
+                    value={
+                      searchQuery
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setSearchQuery(
+                        event.target
+                          .value
+                      )
+                    }
+                    className="pl-10"
+                  />
+                </div>
+
+                <div
+                  className="grid grid-cols-3 rounded-xl border border-gray-200 bg-gray-50 p-1 sm:flex"
+                  aria-label="Customer status filter"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={
+                      customerFilter ===
+                      "active"
+                    }
+                    onClick={() =>
+                      setCustomerFilter(
+                        "active"
+                      )
+                    }
+                    className={`min-h-11 rounded-lg px-3 text-sm font-medium transition ${
+                      customerFilter ===
+                      "active"
+                        ? "bg-white text-gray-950 shadow-sm"
+                        : "text-gray-500 hover:text-gray-900"
+                    }`}
+                  >
+                    Active{" "}
+                    <span className="text-gray-400">
+                      {activeCount}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    aria-pressed={
+                      customerFilter ===
+                      "archived"
+                    }
+                    onClick={() =>
+                      setCustomerFilter(
+                        "archived"
+                      )
+                    }
+                    className={`min-h-11 rounded-lg px-3 text-sm font-medium transition ${
+                      customerFilter ===
+                      "archived"
+                        ? "bg-white text-gray-950 shadow-sm"
+                        : "text-gray-500 hover:text-gray-900"
+                    }`}
+                  >
+                    Archived{" "}
+                    <span className="text-gray-400">
+                      {archivedCount}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    aria-pressed={
+                      customerFilter ===
+                      "all"
+                    }
+                    onClick={() =>
+                      setCustomerFilter(
+                        "all"
+                      )
+                    }
+                    className={`min-h-11 rounded-lg px-3 text-sm font-medium transition ${
+                      customerFilter ===
+                      "all"
+                        ? "bg-white text-gray-950 shadow-sm"
+                        : "text-gray-500 hover:text-gray-900"
+                    }`}
+                  >
+                    All{" "}
+                    <span className="text-gray-400">
+                      {
+                        customers.length
+                      }
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="p-8 text-center">
+                <p className="text-sm text-gray-500">
+                  Loading customers...
+                </p>
+              </div>
+            ) : customers.length ===
+              0 ? (
+              <div className="px-6 py-14 text-center">
+                <div className="mx-auto flex size-11 items-center justify-center rounded-xl bg-green-50 text-green-700">
+                  <Users className="size-5" />
+                </div>
+
+                <p className="mt-4 font-semibold text-gray-950">
+                  No customers yet
+                </p>
+
+                <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-gray-500">
+                  Customer records will
+                  appear here when they
+                  are created.
+                </p>
+
+                <Button
+                  type="button"
+                  onClick={
+                    openNewCustomer
+                  }
+                  className="mt-5 gap-2"
+                >
+                  <Plus className="size-4" />
+                  Add customer
+                </Button>
+              </div>
+            ) : visibleCustomers.length ===
+              0 ? (
+              <div className="px-6 py-14 text-center">
+                <Search className="mx-auto size-6 text-gray-400" />
+
+                <p className="mt-4 font-semibold text-gray-950">
+                  No matching customers
+                </p>
+
+                <p className="mt-1 text-sm text-gray-500">
+                  Try another search or
+                  status filter.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="hidden min-w-0 md:block">
+                  <div className="grid grid-cols-[minmax(190px,1.5fr)_minmax(150px,1fr)_minmax(190px,1.25fr)_110px_minmax(155px,1fr)_52px] gap-4 border-b border-gray-200 bg-gray-50/70 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <span>
+                      Customer
+                    </span>
+                    <span>
+                      Phone
+                    </span>
+                    <span>
+                      Email
+                    </span>
+                    <span>
+                      Visits
+                    </span>
+                    <span>
+                      Last appointment
+                    </span>
+                    <span className="sr-only">
+                      Actions
+                    </span>
+                  </div>
+
+                  {visibleCustomers.map(
+                    (customer) => {
+                      const actionInProgress =
+                        customerActionId ===
+                        customer.id;
+
+                      const history =
+                        appointmentMap.get(
+                          customer.id
+                        ) || [];
+
+                      const historyOpen =
+                        historyCustomerId ===
+                        customer.id;
+
+                      const mostRecent =
+                        history[0];
+
+                      return (
+                        <div
+                          key={
+                            customer.id
+                          }
+                          className="border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="grid min-h-[76px] grid-cols-[minmax(190px,1.5fr)_minmax(150px,1fr)_minmax(190px,1.25fr)_110px_minmax(155px,1fr)_52px] items-center gap-4 px-5 py-3">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-green-50 text-xs font-semibold text-green-700">
+                                {initials(
+                                  customer.full_name
+                                ) ||
+                                  "C"}
+                              </div>
+
+                              <div className="min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleHistory(
+                                      customer.id
+                                    )
+                                  }
+                                  className="block max-w-full truncate text-left text-sm font-semibold text-gray-950 hover:text-green-700"
+                                >
+                                  {
+                                    customer.full_name
+                                  }
+                                </button>
+
+                                <div className="mt-1 flex items-center gap-2">
+                                  <span
+                                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                      customer.is_active
+                                        ? "bg-green-50 text-green-700"
+                                        : "bg-gray-100 text-gray-600"
+                                    }`}
+                                  >
+                                    {customer.is_active
+                                      ? "Active"
+                                      : "Archived"}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <p className="truncate text-sm text-gray-600">
+                              {customer.phone ||
+                                "Not provided"}
+                            </p>
+
+                            <p className="truncate text-sm text-gray-600">
+                              {customer.email ||
+                                "Not provided"}
+                            </p>
+
+                            <p className="text-sm font-medium text-gray-700">
+                              {
+                                history.length
+                              }
+                            </p>
+
+                            <div className="min-w-0">
+                              {mostRecent ? (
+                                <>
+                                  <p className="truncate text-sm font-medium text-gray-700">
+                                    {formatAppointmentDate(
+                                      mostRecent.appointment_date
+                                    )}
+                                  </p>
+
+                                  <p className="mt-0.5 text-xs text-gray-500">
+                                    {formatAppointmentTime(
+                                      mostRecent.appointment_time
+                                    )}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-sm text-gray-400">
+                                  No appointments
+                                </p>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              aria-label={`${
+                                historyOpen
+                                  ? "Hide"
+                                  : "View"
+                              } ${customer.full_name} details`}
+                              aria-expanded={
+                                historyOpen
+                              }
+                              onClick={() =>
+                                toggleHistory(
+                                  customer.id
+                                )
+                              }
+                              className="flex size-11 items-center justify-center rounded-xl text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                            >
+                              {historyOpen ? (
+                                <ChevronDown className="size-4" />
+                              ) : (
+                                <ChevronRight className="size-4" />
+                              )}
+                            </button>
+                          </div>
+
+                          {historyOpen && (
+                            <CustomerDetails
+                              customer={
+                                customer
+                              }
+                              history={
+                                history
+                              }
+                              actionInProgress={
+                                actionInProgress
+                              }
+                              saving={
+                                saving
+                              }
+                              customerActionId={
+                                customerActionId
+                              }
+                              onEdit={() =>
+                                editCustomer(
+                                  customer
+                                )
+                              }
+                              onToggleActive={() =>
+                                void toggleCustomerActive(
+                                  customer
+                                )
+                              }
+                            />
+                          )}
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+
+                <div className="divide-y divide-gray-100 md:hidden">
+                  {visibleCustomers.map(
+                    (customer) => {
+                      const actionInProgress =
+                        customerActionId ===
+                        customer.id;
+
+                      const history =
+                        appointmentMap.get(
+                          customer.id
+                        ) || [];
+
+                      const historyOpen =
+                        historyCustomerId ===
+                        customer.id;
+
+                      const mostRecent =
+                        history[0];
+
+                      return (
+                        <div
+                          key={
+                            customer.id
+                          }
+                          className="p-4"
+                        >
+                          <button
+                            type="button"
+                            aria-expanded={
+                              historyOpen
+                            }
+                            onClick={() =>
+                              toggleHistory(
+                                customer.id
+                              )
+                            }
+                            className="flex min-h-11 w-full items-start gap-3 text-left"
+                          >
+                            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-green-50 text-xs font-semibold text-green-700">
+                              {initials(
+                                customer.full_name
+                              ) ||
+                                "C"}
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-gray-950">
+                                    {
+                                      customer.full_name
+                                    }
+                                  </p>
+
+                                  <p className="mt-1 truncate text-sm text-gray-500">
+                                    {customer.phone ||
+                                      customer.email ||
+                                      "No contact details"}
+                                  </p>
+                                </div>
+
+                                {historyOpen ? (
+                                  <ChevronDown className="mt-1 size-4 shrink-0 text-gray-400" />
+                                ) : (
+                                  <ChevronRight className="mt-1 size-4 shrink-0 text-gray-400" />
+                                )}
+                              </div>
+
+                              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                <span
+                                  className={`rounded-full px-2 py-1 font-medium ${
+                                    customer.is_active
+                                      ? "bg-green-50 text-green-700"
+                                      : "bg-gray-100 text-gray-600"
+                                  }`}
+                                >
+                                  {customer.is_active
+                                    ? "Active"
+                                    : "Archived"}
+                                </span>
+
+                                <span>
+                                  {
+                                    history.length
+                                  }{" "}
+                                  {history.length ===
+                                  1
+                                    ? "appointment"
+                                    : "appointments"}
+                                </span>
+
+                                {mostRecent && (
+                                  <span>
+                                    Last{" "}
+                                    {formatAppointmentDate(
+                                      mostRecent.appointment_date
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+
+                          {historyOpen && (
+                            <div className="-mx-4 mt-4">
+                              <CustomerDetails
+                                customer={
+                                  customer
+                                }
+                                history={
+                                  history
+                                }
+                                actionInProgress={
+                                  actionInProgress
+                                }
+                                saving={
+                                  saving
+                                }
+                                customerActionId={
+                                  customerActionId
+                                }
+                                onEdit={() =>
+                                  editCustomer(
+                                    customer
+                                  )
+                                }
+                                onToggleActive={() =>
+                                  void toggleCustomerActive(
+                                    customer
+                                  )
+                                }
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {editorOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/25 p-0 backdrop-blur-[1px] sm:items-center sm:p-6"
+          role="presentation"
+          onMouseDown={(
+            event
+          ) => {
+            if (
+              event.target ===
+              event.currentTarget &&
+              !saving
+            ) {
+              closeEditor();
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="customer-editor-title"
+            className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-gray-200 bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl"
+          >
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-5 sm:px-6">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
+                  Customer record
+                </p>
+
+                <h2
+                  id="customer-editor-title"
+                  className="mt-1 text-xl font-semibold tracking-tight text-gray-950"
+                >
+                  {editingId
+                    ? "Edit customer"
+                    : "Add customer"}
+                </h2>
+
+                <p className="mt-1 text-sm text-gray-500">
+                  {editingId
+                    ? "Update customer contact information and notes."
+                    : "Create a customer record for future appointments."}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Close customer editor"
+                disabled={saving}
+                onClick={
+                  closeEditor
+                }
+                className="flex size-11 shrink-0 items-center justify-center rounded-xl text-gray-500 transition hover:bg-gray-100 disabled:opacity-50"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
             <form
               id="customer-editor"
               onSubmit={
@@ -909,10 +1539,15 @@ export default function CustomersPage() {
             >
               <fieldset
                 disabled={saving}
+                className="space-y-5 p-5 sm:p-6"
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-gray-800">
+                    Full name
+                  </span>
+
                   <Input
-                    placeholder="Full name"
+                    placeholder="Customer name"
                     value={
                       fullName
                     }
@@ -925,466 +1560,353 @@ export default function CustomersPage() {
                       )
                     }
                     required
+                    autoFocus
                   />
+                </label>
 
-                  <Input
-                    type="tel"
-                    placeholder="Phone number"
-                    value={phone}
-                    onChange={(
-                      event
-                    ) =>
-                      setPhone(
-                        event.target
-                          .value
-                      )
-                    }
-                  />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block space-y-2">
+                    <span className="text-sm font-medium text-gray-800">
+                      Phone
+                    </span>
 
-                  <Input
-                    type="email"
-                    placeholder="Email address"
-                    value={email}
-                    onChange={(
-                      event
-                    ) =>
-                      setEmail(
-                        event.target
-                          .value
-                      )
-                    }
-                  />
-                </div>
-
-                <Textarea
-                  className="mt-4"
-                  placeholder="Customer notes"
-                  value={notes}
-                  onChange={(
-                    event
-                  ) =>
-                    setNotes(
-                      event.target
-                        .value
-                    )
-                  }
-                />
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <Button
-                    type="submit"
-                    disabled={
-                      saving ||
-                      Boolean(
-                        customerActionId
-                      ) ||
-                      !businessId ||
-                      !userId
-                    }
-                  >
-                    {saving
-                      ? "Saving..."
-                      : editingId
-                        ? "Save changes"
-                        : "Save customer"}
-                  </Button>
-
-                  {editingId && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={
-                        saving ||
-                        Boolean(
-                          customerActionId
+                    <Input
+                      type="tel"
+                      placeholder="Phone number"
+                      value={phone}
+                      onChange={(
+                        event
+                      ) =>
+                        setPhone(
+                          event.target
+                            .value
                         )
                       }
-                      onClick={
-                        cancelEdit
+                    />
+                  </label>
+
+                  <label className="block space-y-2">
+                    <span className="text-sm font-medium text-gray-800">
+                      Email
+                    </span>
+
+                    <Input
+                      type="email"
+                      placeholder="Email address"
+                      value={email}
+                      onChange={(
+                        event
+                      ) =>
+                        setEmail(
+                          event.target
+                            .value
+                        )
                       }
-                    >
-                      Cancel
-                    </Button>
-                  )}
+                    />
+                  </label>
                 </div>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-gray-800">
+                    Notes
+                  </span>
+
+                  <Textarea
+                    placeholder="Customer notes"
+                    value={notes}
+                    onChange={(
+                      event
+                    ) =>
+                      setNotes(
+                        event.target
+                          .value
+                      )
+                    }
+                    className="min-h-28"
+                  />
+                </label>
+
+                {feedback && (
+                  <p
+                    role="status"
+                    className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-700"
+                  >
+                    {feedback}
+                  </p>
+                )}
               </fieldset>
 
-              {feedback && (
-                <p
-                  role="status"
-                  className="mt-3 text-sm text-gray-600"
+              <div className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-gray-200 bg-white px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    saving ||
+                    Boolean(
+                      customerActionId
+                    )
+                  }
+                  onClick={
+                    editingId
+                      ? cancelEdit
+                      : closeEditor
+                  }
                 >
-                  {feedback}
-                </p>
-              )}
+                  Cancel
+                </Button>
+
+                <Button
+                  type="submit"
+                  disabled={
+                    saving ||
+                    Boolean(
+                      customerActionId
+                    ) ||
+                    !businessId ||
+                    !userId
+                  }
+                >
+                  {saving
+                    ? "Saving..."
+                    : editingId
+                      ? "Save changes"
+                      : "Add customer"}
+                </Button>
+              </div>
             </form>
-          </CardContent>
-        </Card>
-
-        <section className="mt-10">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-gray-900">
-              Customer list
-            </h2>
-
-            <p className="mt-1 text-sm text-gray-500">
-              Search customers,
-              review appointment
-              history, or manage
-              archived records.
-            </p>
           </div>
+        </div>
+      )}
+    </AppLayout>
+  );
+}
 
-          <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="w-full md:max-w-md">
-              <Input
-                type="search"
-                aria-label="Search customers"
-                placeholder="Search name, phone, or email"
-                value={searchQuery}
-                onChange={(event) =>
-                  setSearchQuery(
-                    event.target.value
-                  )
-                }
-              />
+function CustomerDetails({
+  customer,
+  history,
+  actionInProgress,
+  saving,
+  customerActionId,
+  onEdit,
+  onToggleActive,
+}: {
+  customer: CustomerRecord;
+  history: CustomerAppointment[];
+  actionInProgress: boolean;
+  saving: boolean;
+  customerActionId: string | null;
+  onEdit: () => void;
+  onToggleActive: () => void;
+}) {
+  return (
+    <div className="border-t border-gray-100 bg-gray-50/60 px-5 py-5">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Customer details
+              </p>
+
+              <h3 className="mt-1 font-semibold text-gray-950">
+                {customer.full_name}
+              </h3>
             </div>
 
-            <div
-              className="flex flex-wrap gap-2"
-              aria-label="Customer status filter"
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                customer.is_active
+                  ? "bg-green-100 text-green-700"
+                  : "bg-gray-200 text-gray-600"
+              }`}
             >
-              <Button
-                type="button"
-                variant={
-                  customerFilter ===
-                  "active"
-                    ? "default"
-                    : "outline"
-                }
-                onClick={() =>
-                  setCustomerFilter(
-                    "active"
-                  )
-                }
-              >
-                Active ({activeCount})
-              </Button>
+              {customer.is_active
+                ? "Active"
+                : "Archived"}
+            </span>
+          </div>
 
-              <Button
-                type="button"
-                variant={
-                  customerFilter ===
-                  "archived"
-                    ? "default"
-                    : "outline"
-                }
-                onClick={() =>
-                  setCustomerFilter(
-                    "archived"
-                  )
-                }
-              >
-                Archived (
-                {archivedCount})
-              </Button>
+          <div className="mt-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <Phone className="mt-0.5 size-4 shrink-0 text-gray-400" />
 
-              <Button
-                type="button"
-                variant={
-                  customerFilter ===
-                  "all"
-                    ? "default"
-                    : "outline"
-                }
-                onClick={() =>
-                  setCustomerFilter(
-                    "all"
-                  )
-                }
-              >
-                All (
-                {customers.length})
-              </Button>
+              <div className="min-w-0">
+                <p className="text-xs text-gray-500">
+                  Phone
+                </p>
+
+                <p className="mt-0.5 break-words text-sm font-medium text-gray-800">
+                  {customer.phone ||
+                    "Not provided"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <Mail className="mt-0.5 size-4 shrink-0 text-gray-400" />
+
+              <div className="min-w-0">
+                <p className="text-xs text-gray-500">
+                  Email
+                </p>
+
+                <p className="mt-0.5 break-words text-sm font-medium text-gray-800">
+                  {customer.email ||
+                    "Not provided"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <CalendarDays className="mt-0.5 size-4 shrink-0 text-gray-400" />
+
+              <div>
+                <p className="text-xs text-gray-500">
+                  Appointment history
+                </p>
+
+                <p className="mt-0.5 text-sm font-medium text-gray-800">
+                  {history.length}{" "}
+                  {history.length === 1
+                    ? "appointment"
+                    : "appointments"}
+                </p>
+              </div>
             </div>
           </div>
 
-          {loading ? (
-            <p className="mt-4 text-gray-500">
-              Loading customers...
-            </p>
-          ) : customers.length ===
-            0 ? (
-            <div className="mt-4 rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
-              <p className="font-medium text-gray-900">
-                No customers yet
+          {customer.notes && (
+            <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-xs font-medium text-gray-500">
+                Notes
               </p>
 
-              <p className="mt-2 text-sm text-gray-500">
-                New customers will
-                appear here once they
-                are created.
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-gray-700">
+                {customer.notes}
               </p>
             </div>
-          ) : visibleCustomers.length ===
-            0 ? (
-            <div className="mt-4 rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
-              <p className="font-medium text-gray-900">
-                No matching customers
-              </p>
+          )}
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                saving ||
+                Boolean(
+                  customerActionId
+                )
+              }
+              onClick={onEdit}
+              className="gap-2"
+            >
+              <Pencil className="size-4" />
+              Edit customer
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                saving ||
+                Boolean(
+                  customerActionId
+                )
+              }
+              onClick={
+                onToggleActive
+              }
+              className="gap-2"
+            >
+              {customer.is_active ? (
+                <Archive className="size-4" />
+              ) : (
+                <RotateCcw className="size-4" />
+              )}
+
+              {actionInProgress
+                ? "Updating..."
+                : customer.is_active
+                  ? "Archive"
+                  : "Reactivate"}
+            </Button>
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Appointment history
+            </p>
+
+            <p className="text-xs text-gray-500">
+              {history.length} total
+            </p>
+          </div>
+
+          {history.length === 0 ? (
+            <div className="mt-3 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 text-center">
+              <CircleUserRound className="mx-auto size-5 text-gray-400" />
 
               <p className="mt-2 text-sm text-gray-500">
-                Try another search or
-                customer status
-                filter.
+                No linked appointments
+                for this customer.
               </p>
             </div>
           ) : (
-            <Card className="mt-5 overflow-hidden p-0">
-              {visibleCustomers.map(
-                (customer) => {
-                  const actionInProgress =
-                    customerActionId ===
-                    customer.id;
+            <div className="mt-3 space-y-2">
+              {history.map(
+                (
+                  appointment
+                ) => (
+                  <div
+                    key={
+                      appointment.id
+                    }
+                    className="rounded-xl border border-gray-200 bg-white p-4"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-900">
+                          {appointment.service ||
+                            "Service unavailable"}
+                        </p>
 
-                  const history =
-                    appointmentMap.get(
-                      customer.id
-                    ) || [];
-
-                  const historyOpen =
-                    historyCustomerId ===
-                    customer.id;
-
-                  const mostRecent =
-                    history[0];
-
-                  return (
-                    <div
-                      key={
-                        customer.id
-                      }
-                      className="border-b border-gray-100 p-5 last:border-b-0"
-                    >
-                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-3">
-                            <h3 className="text-lg font-semibold text-gray-900">
-                              {
-                                customer.full_name
-                              }
-                            </h3>
-
-                            <span
-                              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                                customer.is_active
-                                  ? "bg-green-50 text-green-700"
-                                  : "bg-gray-100 text-gray-600"
-                              }`}
-                            >
-                              {customer.is_active
-                                ? "Active"
-                                : "Archived"}
-                            </span>
-                          </div>
-
-                          <div className="mt-3 grid gap-2 text-sm text-gray-600 md:grid-cols-2">
-                            <p>
-                              <span className="font-medium text-gray-900">
-                                Phone:
-                              </span>{" "}
-                              {customer.phone ||
-                                "Not provided"}
-                            </p>
-
-                            <p>
-                              <span className="font-medium text-gray-900">
-                                Email:
-                              </span>{" "}
-                              {customer.email ||
-                                "Not provided"}
-                            </p>
-
-                            <p>
-                              <span className="font-medium text-gray-900">
-                                Appointments:
-                              </span>{" "}
-                              {
-                                history.length
-                              }
-                            </p>
-
-                            <p>
-                              <span className="font-medium text-gray-900">
-                                Most recent:
-                              </span>{" "}
-                              {mostRecent
-                                ? `${formatAppointmentDate(
-                                    mostRecent.appointment_date
-                                  )} at ${formatAppointmentTime(
-                                    mostRecent.appointment_time
-                                  )}`
-                                : "No appointments"}
-                            </p>
-                          </div>
-
-                          {customer.notes && (
-                            <p className="mt-3 whitespace-pre-wrap text-sm text-gray-500">
-                              {
-                                customer.notes
-                              }
-                            </p>
+                        <p className="mt-1 text-sm text-gray-500">
+                          {formatAppointmentDate(
+                            appointment.appointment_date
+                          )}{" "}
+                          at{" "}
+                          {formatAppointmentTime(
+                            appointment.appointment_time
                           )}
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() =>
-                              toggleHistory(
-                                customer.id
-                              )
-                            }
-                          >
-                            {historyOpen
-                              ? "Hide history"
-                              : "View history"}
-                          </Button>
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={
-                              saving ||
-                              Boolean(
-                                customerActionId
-                              )
-                            }
-                            onClick={() =>
-                              editCustomer(
-                                customer
-                              )
-                            }
-                          >
-                            Edit
-                          </Button>
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={
-                              saving ||
-                              Boolean(
-                                customerActionId
-                              )
-                            }
-                            onClick={() =>
-                              void toggleCustomerActive(
-                                customer
-                              )
-                            }
-                          >
-                            {actionInProgress
-                              ? "Updating..."
-                              : customer.is_active
-                                ? "Archive"
-                                : "Reactivate"}
-                          </Button>
-                        </div>
+                        </p>
                       </div>
 
-                      {historyOpen && (
-                        <div className="mt-5 border-t border-gray-100 pt-5">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <h4 className="font-semibold text-gray-900">
-                              Appointment
-                              history
-                            </h4>
-
-                            <p className="text-sm text-gray-500">
-                              {
-                                history.length
-                              }{" "}
-                              {history.length ===
-                              1
-                                ? "appointment"
-                                : "appointments"}
-                            </p>
-                          </div>
-
-                          {history.length ===
-                          0 ? (
-                            <div className="mt-3 rounded-xl bg-gray-50 p-4">
-                              <p className="text-sm text-gray-500">
-                                No linked
-                                appointments
-                                for this
-                                customer.
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="mt-3 space-y-3">
-                              {history.map(
-                                (
-                                  appointment
-                                ) => (
-                                  <div
-                                    key={
-                                      appointment.id
-                                    }
-                                    className="rounded-xl border border-gray-200 bg-gray-50 p-4"
-                                  >
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                      <div>
-                                        <p className="font-medium text-gray-900">
-                                          {appointment.service ||
-                                            "Service unavailable"}
-                                        </p>
-
-                                        <p className="mt-1 text-sm text-gray-600">
-                                          {formatAppointmentDate(
-                                            appointment.appointment_date
-                                          )}{" "}
-                                          at{" "}
-                                          {formatAppointmentTime(
-                                            appointment.appointment_time
-                                          )}
-                                        </p>
-                                      </div>
-
-                                      <span
-                                        className={`w-fit rounded-full px-2.5 py-1 text-xs font-medium ${statusClasses(
-                                          appointment.status
-                                        )}`}
-                                      >
-                                        {appointment.status ||
-                                          "Unknown"}
-                                      </span>
-                                    </div>
-
-                                    {appointment.notes && (
-                                      <p className="mt-3 whitespace-pre-wrap text-sm text-gray-500">
-                                        {
-                                          appointment.notes
-                                        }
-                                      </p>
-                                    )}
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      <span
+                        className={`w-fit shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${statusClasses(
+                          appointment.status
+                        )}`}
+                      >
+                        {appointment.status ||
+                          "Unknown"}
+                      </span>
                     </div>
-                  );
-                }
+
+                    {appointment.notes && (
+                      <p className="mt-3 whitespace-pre-wrap border-t border-gray-100 pt-3 text-sm leading-6 text-gray-500">
+                        {
+                          appointment.notes
+                        }
+                      </p>
+                    )}
+                  </div>
+                )
               )}
-            </Card>
+            </div>
           )}
-        </section>
+        </div>
       </div>
-    </AppLayout>
+    </div>
   );
 }
