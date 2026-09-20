@@ -6,6 +6,7 @@ import {
   LogOut,
   Menu,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
 import {
@@ -38,7 +39,9 @@ export default function Topbar({
       await supabase.auth.signOut();
 
     if (error) {
-      alert(error.message);
+      toast.error(
+        "Unable to log out. Please try again."
+      );
       setLoggingOut(false);
       return;
     }
@@ -93,7 +96,11 @@ export default function Topbar({
               ? "Logging out"
               : "Logout"
           }
-          title="Logout"
+          title={
+            loggingOut
+              ? "Logging out"
+              : "Logout"
+          }
         >
           <LogOut className="h-[18px] w-[18px]" />
         </Button>
