@@ -11,11 +11,16 @@ import {
 import { toast } from "sonner";
 
 import {
-  createRequestKeyStore,
-} from "@/lib/appointment-request-key";
-import {
   activeBusinessHeaders,
 } from "@/lib/active-business";
+import {
+  navigateCalendar,
+  todayInTimezone,
+  type CalendarView,
+} from "@/lib/appointment-calendar";
+import {
+  createRequestKeyStore,
+} from "@/lib/appointment-request-key";
 import {
   normalizeCustomerPhone,
   saveCustomer,
@@ -24,6 +29,7 @@ import {
   supabase,
 } from "@/lib/supabase";
 
+import AppointmentCalendar from "@/components/appointments/AppointmentCalendar";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   Button,
@@ -47,6 +53,11 @@ type Appointment = {
   appointment_time: string | null;
   status: string | null;
   notes: string | null;
+};
+
+type CalendarSelectedAppointment = {
+  id: string;
+  appointment_date: string | null;
 };
 
 type Customer = {
@@ -308,6 +319,25 @@ export default function AppointmentsPage() {
   >(null);
 
   const [
+    businessTimezone,
+    setBusinessTimezone,
+  ] = useState<
+    string | null
+  >(null);
+
+  const [
+    calendarView,
+    setCalendarView,
+  ] = useState<CalendarView>(
+    "month"
+  );
+
+  const [
+    selectedCalendarDate,
+    setSelectedCalendarDate,
+  ] = useState("");
+
+  const [
     userId,
     setUserId,
   ] = useState<
@@ -518,6 +548,9 @@ export default function AppointmentsPage() {
 
       businessId:
         data.business.id,
+
+      timezone:
+        data.business.timezone,
     };
   }
 
@@ -543,6 +576,21 @@ export default function AppointmentsPage() {
       setBusinessId(
         context.businessId
       );
+
+      setBusinessTimezone(
+        context.timezone
+      );
+
+      const businessToday =
+  todayInTimezone(
+    context.timezone
+  );
+
+if (businessToday) {
+  setSelectedCalendarDate(
+    businessToday
+  );
+}
 
       await loadAppointments(
         context.businessId
@@ -1440,6 +1488,120 @@ export default function AppointmentsPage() {
     }
   }
 
+  function openNewAppointment(
+  date?: string
+) {
+  let appointmentDate =
+    date ||
+    selectedCalendarDate;
+
+  if (
+    !appointmentDate &&
+    businessTimezone
+  ) {
+    appointmentDate =
+      todayInTimezone(
+        businessTimezone
+      ) || "";
+  }
+
+  if (appointmentDate) {
+    setSelectedCalendarDate(
+      appointmentDate
+    );
+
+    setCreateForm(
+      (current) => ({
+        ...current,
+        appointmentDate,
+      })
+    );
+  }
+
+  requestAnimationFrame(
+    () => {
+      document
+        .getElementById(
+          "new-appointment"
+        )
+        ?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+    }
+  );
+}
+
+  function selectCalendarDate(
+    date: string
+  ) {
+    setSelectedCalendarDate(
+      date
+    );
+  }
+
+  function goToCalendarToday() {
+  if (!businessTimezone) {
+    return;
+  }
+
+  const businessToday =
+    todayInTimezone(
+      businessTimezone
+    );
+
+  if (!businessToday) {
+    return;
+  }
+
+  setSelectedCalendarDate(
+    businessToday
+  );
+}
+
+  function navigateCalendarDate(
+    direction: -1 | 1
+  ) {
+    if (
+      !selectedCalendarDate
+    ) {
+      return;
+    }
+
+    setSelectedCalendarDate(
+      navigateCalendar(
+        selectedCalendarDate,
+        calendarView,
+        direction
+      )
+    );
+  }
+
+  function openCalendarAppointment(
+    appointment: CalendarSelectedAppointment
+  ) {
+    if (
+      appointment.appointment_date
+    ) {
+      setSelectedCalendarDate(
+        appointment.appointment_date
+      );
+    }
+
+    requestAnimationFrame(
+      () => {
+        document
+          .getElementById(
+            `appointment-${appointment.id}`
+          )
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+      }
+    );
+  }
+
   return (
     <AppLayout>
       <div className="space-y-6 lg:space-y-7">
@@ -1461,16 +1623,12 @@ export default function AppointmentsPage() {
 
           <Button
             type="button"
-            onClick={() => {
-              document
-                .getElementById(
-                  "new-appointment"
-                )
-                ?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "start",
-                });
-            }}
+            onClick={() =>
+              openNewAppointment(
+                selectedCalendarDate ||
+                  undefined
+              )
+            }
             className="w-full sm:w-auto"
           >
             New appointment
@@ -1492,6 +1650,50 @@ export default function AppointmentsPage() {
             {notice.message}
           </div>
         )}
+
+        {!loading &&
+          businessTimezone &&
+          selectedCalendarDate && (
+            <AppointmentCalendar
+              appointments={
+                appointments
+              }
+              timezone={
+                businessTimezone
+              }
+              selectedDate={
+                selectedCalendarDate
+              }
+              view={
+                calendarView
+              }
+              onSelectedDateChange={
+                selectCalendarDate
+              }
+              onViewChange={
+                setCalendarView
+              }
+              onToday={
+                goToCalendarToday
+              }
+              onPrevious={() =>
+                navigateCalendarDate(
+                  -1
+                )
+              }
+              onNext={() =>
+                navigateCalendarDate(
+                  1
+                )
+              }
+              onNewAppointment={
+                openNewAppointment
+              }
+              onAppointmentSelect={
+                openCalendarAppointment
+              }
+            />
+          )}
 
         <section
           id="new-appointment"
@@ -1798,7 +2000,12 @@ export default function AppointmentsPage() {
                         }
                         onChange={(
                           event
-                        ) =>
+                        ) => {
+                          const date =
+                            event
+                              .target
+                              .value;
+
                           setCreateForm(
                             (
                               current
@@ -1806,12 +2013,16 @@ export default function AppointmentsPage() {
                               ...current,
 
                               appointmentDate:
-                                event
-                                  .target
-                                  .value,
+                                date,
                             })
-                          )
-                        }
+                          );
+
+                          if (date) {
+                            setSelectedCalendarDate(
+                              date
+                            );
+                          }
+                        }}
                       />
                     </label>
 
@@ -1902,7 +2113,10 @@ export default function AppointmentsPage() {
           </div>
         </section>
 
-        <section className="anaai-surface overflow-hidden">
+        <section
+          id="appointment-schedule"
+          className="anaai-surface scroll-mt-24 overflow-hidden"
+        >
           <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <div>
               <h2 className="anaai-section-title">
@@ -1986,10 +2200,11 @@ export default function AppointmentsPage() {
 
                   return (
                     <article
+                      id={`appointment-${appointment.id}`}
                       key={
                         appointment.id
                       }
-                      className="px-5 py-5 sm:px-6"
+                      className="scroll-mt-24 px-5 py-5 sm:px-6"
                     >
                       {isEditing ? (
                         <div className="rounded-2xl border border-green-200 bg-green-50/40 p-4 sm:p-5">
