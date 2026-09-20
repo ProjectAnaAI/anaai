@@ -83,12 +83,12 @@ test("dashboard counts only active customers and services", () => {
 
   assert.match(
     compact,
-    /title="Active customers"/
+    /label="Active customers"/
   );
 
   assert.match(
     compact,
-    /title="Active services"/
+    /label="Active services"/
   );
 });
 
@@ -117,17 +117,32 @@ test("dashboard AI configuration is business scoped and does not claim runtime o
     compact,
     /AI status/
   );
+
+  assert.doesNotMatch(
+    compact,
+    /calls answered/i
+  );
+
+  assert.doesNotMatch(
+    compact,
+    /conversion rate/i
+  );
+
+  assert.doesNotMatch(
+    compact,
+    /revenue/i
+  );
 });
 
 test("dashboard provides schedule and status breakdown from today's appointments", () => {
   assert.match(
     compact,
-    /Today&apos;s schedule/
+    /Today&apos;s appointments/
   );
 
   assert.match(
     compact,
-    /Today&apos;s breakdown/
+    /Today&apos;s status/
   );
 
   assert.match(
