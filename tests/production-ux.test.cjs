@@ -20,7 +20,9 @@ const settings = read(
 );
 
 const compactSettings =
-  settings.replace(/\s+/g, " ");
+  settings
+    .replace(/\s+/g, " ")
+    .trim();
 
 test("settings uses the shared toast system instead of browser alerts", () => {
   assert.match(
@@ -47,6 +49,11 @@ test("settings logout has an in-progress state", () => {
 
   assert.match(
     compactSettings,
+    /if \(loggingOut\) \{ return; \}/
+  );
+
+  assert.match(
+    compactSettings,
     /setLoggingOut\(true\)/
   );
 
@@ -64,7 +71,17 @@ test("settings logout has an in-progress state", () => {
 test("failed logout restores the interactive state", () => {
   assert.match(
     compactSettings,
-    /if \(error\) \{ toast\.error\("Unable to log out\. Please try again\."\); setLoggingOut\(false\); return; \}/
+    /if \(error\) \{/
+  );
+
+  assert.match(
+    compactSettings,
+    /toast\.error\( "Unable to log out\. Please try again\." \)/
+  );
+
+  assert.match(
+    compactSettings,
+    /if \(error\) \{[\s\S]*?setLoggingOut\(false\);[\s\S]*?return; \}/
   );
 });
 

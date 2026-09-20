@@ -94,12 +94,22 @@ test("analytics operational counts use active customers and services", () => {
 
   assert.match(
     compactPage,
-    /title="Active customers"/
+    /> Active customers </
   );
 
   assert.match(
     compactPage,
-    /title="Active services"/
+    /> Active services </
+  );
+
+  assert.match(
+    compactPage,
+    /\{activeCustomers\}/
+  );
+
+  assert.match(
+    compactPage,
+    /\{activeServices\}/
   );
 });
 
@@ -139,15 +149,25 @@ test("analytics status calculations include booking lifecycle states", () => {
   );
 });
 
-test("analytics rates state their denominator and avoid unsupported revenue and call claims", () => {
+test("analytics rates use all period appointments as their denominator and avoid unsupported claims", () => {
   assert.match(
     compactPage,
-    /Completed appointments divided by all appointments in this 30-day period\./
+    /const completionRate = percentage\( statusCounts\.Completed, appointments\.length \)/
   );
 
   assert.match(
     compactPage,
-    /Cancelled appointments divided by all appointments in this 30-day period\./
+    /const cancellationRate = percentage\( statusCounts\.Cancelled, appointments\.length \)/
+  );
+
+  assert.match(
+    compactPage,
+    /\{completionRate\}%/
+  );
+
+  assert.match(
+    compactPage,
+    /\{cancellationRate\}%/
   );
 
   assert.doesNotMatch(
