@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  useState,
-} from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   LogOut,
@@ -30,6 +28,10 @@ export default function Topbar({
   ] = useState(false);
 
   async function handleLogout() {
+    if (loggingOut) {
+      return;
+    }
+
     setLoggingOut(true);
 
     const { error } =
@@ -46,35 +48,44 @@ export default function Topbar({
   }
 
   return (
-    <header className="border-b border-gray-200 bg-white">
-      <div className="flex min-h-16 items-center gap-3 px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-30 border-b border-gray-200/90 bg-white/95 backdrop-blur">
+      <div className="flex min-h-[68px] items-center gap-3 px-4 sm:px-6 lg:px-7 xl:px-8">
         <button
           type="button"
           aria-label="Open navigation"
           onClick={
             onOpenNavigation
           }
-          className="shrink-0 rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 lg:hidden"
+          className="anaai-touch-target flex shrink-0 items-center justify-center rounded-xl text-gray-600 transition hover:bg-gray-100 hover:text-gray-950 lg:hidden"
         >
           <Menu className="h-5 w-5" />
         </button>
 
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-400 sm:text-sm sm:normal-case sm:tracking-normal sm:text-gray-500">
-            Workspace
-          </p>
+        <div className="flex min-w-0 flex-1 items-center">
+          <div className="lg:hidden">
+            <p className="truncate text-lg font-bold tracking-tight text-gray-950">
+              AnaAI
+            </p>
+          </div>
 
-          <h2 className="truncate text-base font-semibold text-gray-900 sm:text-lg">
-            AnaAI
-          </h2>
+          <div className="hidden lg:block">
+            <p className="text-sm font-semibold text-gray-900">
+              Business workspace
+            </p>
+
+            <p className="text-xs text-gray-400">
+              Manage your receptionist and operations
+            </p>
+          </div>
         </div>
 
-        <div className="hidden min-w-0 md:block">
+        <div className="hidden min-w-0 sm:block">
           <BusinessSelector />
         </div>
 
         <Button
-          variant="outline"
+          variant="ghost"
+          size="icon"
           onClick={handleLogout}
           disabled={loggingOut}
           aria-label={
@@ -82,19 +93,13 @@ export default function Topbar({
               ? "Logging out"
               : "Logout"
           }
-          className="shrink-0 gap-2"
+          title="Logout"
         >
-          <LogOut className="h-4 w-4" />
-
-          <span className="hidden sm:inline">
-            {loggingOut
-              ? "Logging out..."
-              : "Logout"}
-          </span>
+          <LogOut className="h-[18px] w-[18px]" />
         </Button>
       </div>
 
-      <div className="border-t border-gray-100 px-4 py-3 md:hidden">
+      <div className="border-t border-gray-100 px-4 py-2.5 sm:hidden">
         <BusinessSelector />
       </div>
     </header>

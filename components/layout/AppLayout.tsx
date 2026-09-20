@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  useState,
-} from "react";
+import { useState } from "react";
 
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
@@ -20,7 +18,7 @@ export default function AppLayout({
   ] = useState(false);
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-[#f7f9f8]">
       <div className="flex min-h-screen">
         <Sidebar
           mobileOpen={
@@ -42,8 +40,10 @@ export default function AppLayout({
             }
           />
 
-          <section className="flex-1 px-4 py-6 sm:px-6 lg:p-8">
-            {children}
+          <section className="flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-7 xl:px-8 xl:py-7">
+            <div className="anaai-page">
+              {children}
+            </div>
           </section>
         </div>
       </div>
