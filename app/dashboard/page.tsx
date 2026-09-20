@@ -7,17 +7,21 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowRight,
   Bot,
   CalendarDays,
   CheckCircle2,
+  ChevronRight,
+  CircleAlert,
   Clock3,
+  MapPin,
   Scissors,
+  Sparkles,
   Users,
   XCircle,
 } from "lucide-react";
 
 import AppLayout from "@/components/layout/AppLayout";
-import StatsCard from "@/components/dashboard/StatsCard";
 import QuickActions from "@/components/dashboard/QuickActions";
 import {
   activeBusinessHeaders,
@@ -25,12 +29,7 @@ import {
 import { supabase } from "@/lib/supabase";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 type CurrentBusinessResponse = {
   success: boolean;
@@ -109,6 +108,33 @@ function businessDate(
   return `${year}-${month}-${day}`;
 }
 
+function formatBusinessDate(
+  value: string
+) {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})$/
+  );
+
+  if (!match) {
+    return value;
+  }
+
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3])
+  );
+
+  return new Intl.DateTimeFormat(
+    "en-US",
+    {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    }
+  ).format(date);
+}
+
 function formatAppointmentTime(
   value: string | null
 ) {
@@ -154,20 +180,91 @@ function appointmentStatusClasses(
 ) {
   switch (status) {
     case "Confirmed":
-      return "bg-green-100 text-green-700 hover:bg-green-100";
+      return "border-green-200 bg-green-50 text-green-700";
 
     case "Booked":
-      return "bg-blue-100 text-blue-700 hover:bg-blue-100";
+      return "border-blue-200 bg-blue-50 text-blue-700";
 
     case "Completed":
-      return "bg-gray-100 text-gray-700 hover:bg-gray-100";
+      return "border-gray-200 bg-gray-100 text-gray-700";
 
     case "Cancelled":
-      return "bg-red-100 text-red-700 hover:bg-red-100";
+      return "border-red-200 bg-red-50 text-red-700";
 
     default:
-      return "bg-gray-100 text-gray-600 hover:bg-gray-100";
+      return "border-gray-200 bg-gray-50 text-gray-600";
   }
+}
+
+function firstNameFromEmail(
+  email: string
+) {
+  const local =
+    email.split("@")[0]?.trim();
+
+  if (!local) {
+    return "";
+  }
+
+  const firstPart =
+    local.split(/[._+-]/)[0];
+
+  if (!firstPart) {
+    return "";
+  }
+
+  return (
+    firstPart.charAt(0).toUpperCase() +
+    firstPart.slice(1)
+  );
+}
+
+type MetricCardProps = {
+  label: string;
+  value: string | number;
+  description: string;
+  icon: React.ComponentType<{
+    className?: string;
+  }>;
+  iconClassName: string;
+  iconContainerClassName: string;
+};
+
+function MetricCard({
+  label,
+  value,
+  description,
+  icon: Icon,
+  iconClassName,
+  iconContainerClassName,
+}: MetricCardProps) {
+  return (
+    <div className="anaai-surface p-5 sm:p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-500">
+            {label}
+          </p>
+
+          <p className="mt-3 text-3xl font-semibold tracking-tight text-gray-950">
+            {value}
+          </p>
+        </div>
+
+        <div
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconContainerClassName}`}
+        >
+          <Icon
+            className={`h-5 w-5 ${iconClassName}`}
+          />
+        </div>
+      </div>
+
+      <p className="mt-3 text-xs leading-5 text-gray-400">
+        {description}
+      </p>
+    </div>
+  );
 }
 
 export default function DashboardPage() {
@@ -474,70 +571,132 @@ export default function DashboardPage() {
         aiSettings?.greeting?.trim()
     );
 
+  const displayName =
+    business?.owner_name?.trim() ||
+    firstNameFromEmail(email);
+
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-white text-gray-900">
-        Loading dashboard...
-      </main>
+      <AppLayout>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="text-center">
+            <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-gray-200 border-t-green-600" />
+
+            <p className="mt-4 text-sm font-medium text-gray-500">
+              Loading your dashboard...
+            </p>
+          </div>
+        </div>
+      </AppLayout>
     );
   }
 
   if (loadError) {
     return (
       <AppLayout>
-        <p
+        <div
           role="alert"
-          className="text-gray-500"
+          className="anaai-surface mx-auto max-w-2xl p-6"
         >
-          {loadError}
-        </p>
+          <div className="flex gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-50">
+              <CircleAlert className="h-5 w-5 text-red-600" />
+            </div>
+
+            <div>
+              <h1 className="font-semibold text-gray-950">
+                Unable to load dashboard
+              </h1>
+
+              <p className="mt-1 text-sm leading-6 text-gray-500">
+                {loadError}
+              </p>
+            </div>
+          </div>
+        </div>
       </AppLayout>
     );
   }
 
   return (
     <AppLayout>
-      <div className="mx-auto max-w-7xl">
-        <header className="border-b border-gray-200 pb-6">
-          <p className="text-sm font-medium uppercase tracking-wide text-green-600">
-            AnaAI
-          </p>
+      <div className="space-y-6 lg:space-y-7">
+        <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-medium text-green-700">
+              <Sparkles className="h-4 w-4" />
+              <span>
+                AnaAI workspace
+              </span>
+            </div>
 
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight text-gray-900">
-            Dashboard
-          </h1>
+            <h1 className="anaai-page-title mt-2">
+              {displayName
+                ? `Good to see you, ${displayName}`
+                : "Dashboard"}
+            </h1>
 
-          <p className="mt-2 text-gray-500">
-            Welcome back, {email}
-          </p>
+            <p className="anaai-page-description">
+              Here&apos;s what&apos;s
+              happening with{" "}
+              {business?.business_name ||
+                "your business"}
+              {today
+                ? ` on ${formatBusinessDate(
+                    today
+                  )}.`
+                : "."}
+            </p>
+          </div>
+
+          <Button
+            onClick={() =>
+              router.push(
+                "/appointments"
+              )
+            }
+            className="w-full sm:w-auto"
+          >
+            <CalendarDays className="h-4 w-4" />
+            View appointments
+          </Button>
         </header>
 
-        <section className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-          <StatsCard
-            title="Today's appointments"
+        <section
+          aria-label="Business summary"
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        >
+          <MetricCard
+            label="Today's appointments"
             value={
               todayAppointments.length
             }
-            description="Bookings scheduled for today"
+            description="Appointments scheduled for the business today"
             icon={CalendarDays}
+            iconContainerClassName="bg-green-50"
+            iconClassName="text-green-600"
           />
 
-          <StatsCard
-            title="Active customers"
+          <MetricCard
+            label="Active customers"
             value={customerCount}
-            description="Customers available for booking"
+            description="Customers currently available for booking"
             icon={Users}
+            iconContainerClassName="bg-blue-50"
+            iconClassName="text-blue-600"
           />
 
-          <StatsCard
-            title="Active services"
+          <MetricCard
+            label="Active services"
             value={serviceCount}
-            description="Services available for booking"
+            description="Services currently available for booking"
             icon={Scissors}
+            iconContainerClassName="bg-violet-50"
+            iconClassName="text-violet-600"
           />
 
-          <StatsCard
-            title="AI receptionist"
+          <MetricCard
+            label="AI receptionist"
             value={
               aiConfigured
                 ? "Configured"
@@ -545,326 +704,453 @@ export default function DashboardPage() {
             }
             description={
               aiConfigured
-                ? "Receptionist settings are ready"
-                : "Complete receptionist settings"
+                ? "Receptionist configuration is ready"
+                : "Finish the receptionist configuration"
             }
             icon={Bot}
+            iconContainerClassName={
+              aiConfigured
+                ? "bg-emerald-50"
+                : "bg-amber-50"
+            }
+            iconClassName={
+              aiConfigured
+                ? "text-emerald-600"
+                : "text-amber-600"
+            }
           />
         </section>
 
-        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
-          <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle>
-                  Today&apos;s schedule
-                </CardTitle>
+        <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]">
+          <div className="anaai-surface min-w-0 overflow-hidden">
+            <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <div>
+                <h2 className="anaai-section-title">
+                  Today&apos;s appointments
+                </h2>
 
-                {today && (
-                  <p className="text-sm text-gray-500">
-                    {today}
-                  </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Your schedule at a
+                  glance
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  router.push(
+                    "/appointments"
+                  )
+                }
+                className="flex min-h-11 items-center gap-1 self-start rounded-lg px-2 text-sm font-semibold text-green-700 transition hover:bg-green-50 sm:self-auto"
+              >
+                View all
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+
+            {todayAppointments.length ===
+            0 ? (
+              <div className="px-5 py-12 text-center sm:px-6">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-50">
+                  <CalendarDays className="h-5 w-5 text-gray-400" />
+                </div>
+
+                <h3 className="mt-4 font-semibold text-gray-950">
+                  No appointments
+                  today
+                </h3>
+
+                <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-gray-500">
+                  New bookings scheduled
+                  for today will appear
+                  here.
+                </p>
+
+                <Button
+                  variant="outline"
+                  className="mt-5"
+                  onClick={() =>
+                    router.push(
+                      "/appointments"
+                    )
+                  }
+                >
+                  Open appointments
+                </Button>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {todayAppointments.map(
+                  (appointment) => (
+                    <button
+                      key={
+                        appointment.id
+                      }
+                      type="button"
+                      onClick={() =>
+                        router.push(
+                          "/appointments"
+                        )
+                      }
+                      className="group flex min-h-[76px] w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-gray-50/80 sm:px-6"
+                    >
+                      <div className="w-[72px] shrink-0">
+                        <p className="text-sm font-semibold text-gray-950">
+                          {formatAppointmentTime(
+                            appointment.appointment_time
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-gray-950">
+                          {appointment.customer_name ||
+                            "Customer"}
+                        </p>
+
+                        <p className="mt-1 truncate text-sm text-gray-500">
+                          {appointment.service ||
+                            "Service"}
+                        </p>
+                      </div>
+
+                      <Badge
+                        variant="outline"
+                        className={`hidden shrink-0 sm:inline-flex ${appointmentStatusClasses(
+                          appointment.status
+                        )}`}
+                      >
+                        {appointment.status ||
+                          "Unknown"}
+                      </Badge>
+
+                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-gray-500" />
+                    </button>
+                  )
                 )}
               </div>
-            </CardHeader>
+            )}
+          </div>
 
-            <CardContent>
-              {todayAppointments.length ===
-              0 ? (
-                <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
-                  <CalendarDays className="mx-auto h-8 w-8 text-gray-400" />
+          <div className="anaai-surface overflow-hidden">
+            <div className="border-b border-gray-100 px-5 py-5 sm:px-6">
+              <h2 className="anaai-section-title">
+                Today&apos;s status
+              </h2>
 
-                  <p className="mt-3 font-medium text-gray-900">
-                    No appointments
-                    today
-                  </p>
+              <p className="mt-1 text-sm text-gray-500">
+                Appointment lifecycle
+                breakdown
+              </p>
+            </div>
 
-                  <p className="mt-1 text-sm text-gray-500">
-                    New bookings for
-                    today will appear
-                    here.
-                  </p>
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-100">
-                  {todayAppointments.map(
-                    (appointment) => (
-                      <div
-                        key={
-                          appointment.id
-                        }
-                        className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium text-gray-900">
-                            {appointment.customer_name ||
-                              "Customer"}
-                          </p>
-
-                          <p className="mt-1 text-sm text-gray-500">
-                            {appointment.service ||
-                              "Service"}{" "}
-                            ·{" "}
-                            {formatAppointmentTime(
-                              appointment.appointment_time
-                            )}
-                          </p>
-                        </div>
-
-                        <Badge
-                          className={appointmentStatusClasses(
-                            appointment.status
-                          )}
-                        >
-                          {appointment.status ||
-                            "Unknown"}
-                        </Badge>
-                      </div>
-                    )
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                Today&apos;s breakdown
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between rounded-xl bg-blue-50 p-4">
-                  <div className="flex items-center gap-3">
-                    <Clock3 className="h-5 w-5 text-blue-600" />
-
-                    <span className="text-sm font-medium text-gray-900">
-                      Booked
-                    </span>
+            <div className="space-y-2 p-4 sm:p-5">
+              <div className="flex min-h-14 items-center justify-between rounded-xl px-3.5 transition hover:bg-blue-50/60">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50">
+                    <Clock3 className="h-4 w-4 text-blue-600" />
                   </div>
 
-                  <span className="text-lg font-semibold text-gray-900">
-                    {
-                      statusCounts.Booked
-                    }
+                  <span className="text-sm font-medium text-gray-700">
+                    Booked
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between rounded-xl bg-green-50 p-4">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-
-                    <span className="text-sm font-medium text-gray-900">
-                      Confirmed
-                    </span>
-                  </div>
-
-                  <span className="text-lg font-semibold text-gray-900">
-                    {
-                      statusCounts.Confirmed
-                    }
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between rounded-xl bg-gray-50 p-4">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-gray-600" />
-
-                    <span className="text-sm font-medium text-gray-900">
-                      Completed
-                    </span>
-                  </div>
-
-                  <span className="text-lg font-semibold text-gray-900">
-                    {
-                      statusCounts.Completed
-                    }
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between rounded-xl bg-red-50 p-4">
-                  <div className="flex items-center gap-3">
-                    <XCircle className="h-5 w-5 text-red-600" />
-
-                    <span className="text-sm font-medium text-gray-900">
-                      Cancelled
-                    </span>
-                  </div>
-
-                  <span className="text-lg font-semibold text-gray-900">
-                    {
-                      statusCounts.Cancelled
-                    }
-                  </span>
-                </div>
+                <span className="text-lg font-semibold tabular-nums text-gray-950">
+                  {
+                    statusCounts.Booked
+                  }
+                </span>
               </div>
-            </CardContent>
-          </Card>
+
+              <div className="flex min-h-14 items-center justify-between rounded-xl px-3.5 transition hover:bg-green-50/60">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-50">
+                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  </div>
+
+                  <span className="text-sm font-medium text-gray-700">
+                    Confirmed
+                  </span>
+                </div>
+
+                <span className="text-lg font-semibold tabular-nums text-gray-950">
+                  {
+                    statusCounts.Confirmed
+                  }
+                </span>
+              </div>
+
+              <div className="flex min-h-14 items-center justify-between rounded-xl px-3.5 transition hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100">
+                    <CheckCircle2 className="h-4 w-4 text-gray-600" />
+                  </div>
+
+                  <span className="text-sm font-medium text-gray-700">
+                    Completed
+                  </span>
+                </div>
+
+                <span className="text-lg font-semibold tabular-nums text-gray-950">
+                  {
+                    statusCounts.Completed
+                  }
+                </span>
+              </div>
+
+              <div className="flex min-h-14 items-center justify-between rounded-xl px-3.5 transition hover:bg-red-50/60">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-50">
+                    <XCircle className="h-4 w-4 text-red-600" />
+                  </div>
+
+                  <span className="text-sm font-medium text-gray-700">
+                    Cancelled
+                  </span>
+                </div>
+
+                <span className="text-lg font-semibold tabular-nums text-gray-950">
+                  {
+                    statusCounts.Cancelled
+                  }
+                </span>
+              </div>
+            </div>
+          </div>
         </section>
 
-        <section className="mt-8 grid gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                Business overview
-              </CardTitle>
-            </CardHeader>
+        <section className="grid min-w-0 gap-5 lg:grid-cols-2">
+          <div className="anaai-surface overflow-hidden">
+            <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-6">
+              <div>
+                <h2 className="anaai-section-title">
+                  AI receptionist
+                </h2>
 
-            <CardContent>
-              {business ? (
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <div>
-                    <p className="text-sm text-gray-500">
-                      Business name
-                    </p>
-
-                    <p className="mt-1 font-medium text-gray-900">
-                      {
-                        business.business_name
-                      }
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">
-                      Owner
-                    </p>
-
-                    <p className="mt-1 font-medium text-gray-900">
-                      {
-                        business.owner_name
-                      }
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">
-                      Phone
-                    </p>
-
-                    <p className="mt-1 font-medium text-gray-900">
-                      {business.phone ||
-                        "Not provided"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">
-                      Email
-                    </p>
-
-                    <p className="mt-1 break-words font-medium text-gray-900">
-                      {business.email ||
-                        "Not provided"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">
-                      Address
-                    </p>
-
-                    <p className="mt-1 font-medium text-gray-900">
-                      {business.address ||
-                        "Not provided"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">
-                      Timezone
-                    </p>
-
-                    <p className="mt-1 font-medium text-gray-900">
-                      {timezone ||
-                        "Not provided"}
-                    </p>
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <p className="text-sm text-gray-500">
-                      Business hours
-                    </p>
-
-                    <p className="mt-1 whitespace-pre-wrap font-medium text-gray-900">
-                      {business.business_hours ||
-                        "Not provided"}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">
-                  No business profile
-                  found.
+                <p className="mt-1 text-sm text-gray-500">
+                  Current configuration
                 </p>
-              )}
-            </CardContent>
-          </Card>
+              </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                AI receptionist
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent>
               <Badge
+                variant="outline"
                 className={
                   aiConfigured
-                    ? "bg-green-100 text-green-700 hover:bg-green-100"
-                    : "bg-amber-100 text-amber-700 hover:bg-amber-100"
+                    ? "border-green-200 bg-green-50 text-green-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
                 }
               >
                 {aiConfigured
                   ? "Configured"
                   : "Needs setup"}
               </Badge>
+            </div>
 
-              <div className="mt-5 space-y-4 text-sm">
-                <div>
-                  <p className="text-gray-500">
-                    Receptionist name
-                  </p>
+            <div className="p-5 sm:p-6">
+              <div className="flex gap-4">
+                <div
+                  className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
+                    aiConfigured
+                      ? "bg-green-50"
+                      : "bg-amber-50"
+                  }`}
+                >
+                  <Bot
+                    className={`h-5 w-5 ${
+                      aiConfigured
+                        ? "text-green-600"
+                        : "text-amber-600"
+                    }`}
+                  />
+                </div>
 
-                  <p className="mt-1 font-medium text-gray-900">
+                <div className="min-w-0">
+                  <p className="text-base font-semibold text-gray-950">
                     {aiSettings
                       ?.receptionist_name ||
-                      "Not configured"}
+                      "Receptionist not named"}
+                  </p>
+
+                  <p className="mt-1 text-sm text-gray-500">
+                    {aiSettings?.tone
+                      ? `${aiSettings.tone} tone`
+                      : "Tone not configured"}
                   </p>
                 </div>
+              </div>
 
-                <div>
-                  <p className="text-gray-500">
-                    Tone
-                  </p>
-
-                  <p className="mt-1 font-medium capitalize text-gray-900">
-                    {aiSettings?.tone ||
-                      "Not configured"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-gray-500">
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-gray-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
                     Greeting
                   </p>
 
-                  <p className="mt-1 font-medium text-gray-900">
+                  <p className="mt-2 text-sm font-semibold text-gray-800">
                     {aiSettings?.greeting
                       ?.trim()
                       ? "Configured"
                       : "Not configured"}
                   </p>
                 </div>
+
+                <div className="rounded-xl bg-gray-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                    Setup
+                  </p>
+
+                  <p className="mt-2 text-sm font-semibold text-gray-800">
+                    {aiConfigured
+                      ? "Ready"
+                      : "Action needed"}
+                  </p>
+                </div>
               </div>
-            </CardContent>
-          </Card>
+
+              <Button
+                variant="outline"
+                className="mt-5 w-full justify-between"
+                onClick={() =>
+                  router.push("/ai")
+                }
+              >
+                Manage AI receptionist
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="anaai-surface overflow-hidden">
+            <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-6">
+              <div>
+                <h2 className="anaai-section-title">
+                  Business
+                </h2>
+
+                <p className="mt-1 text-sm text-gray-500">
+                  Workspace details
+                </p>
+              </div>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  router.push(
+                    "/business"
+                  )
+                }
+              >
+                Manage
+              </Button>
+            </div>
+
+            <div className="p-5 sm:p-6">
+              {business ? (
+                <>
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-green-50 text-lg font-bold text-green-700">
+                      {business.business_name
+                        ?.trim()
+                        ?.charAt(0)
+                        ?.toUpperCase() ||
+                        "B"}
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="truncate text-base font-semibold text-gray-950">
+                        {
+                          business.business_name
+                        }
+                      </p>
+
+                      <p className="mt-1 text-sm text-gray-500">
+                        {business.owner_name}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-3">
+                    {business.address && (
+                      <div className="flex items-start gap-3 text-sm">
+                        <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+
+                        <span className="leading-5 text-gray-600">
+                          {
+                            business.address
+                          }
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-start gap-3 text-sm">
+                      <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+
+                      <span className="leading-5 text-gray-600">
+                        {timezone ||
+                          "Timezone not provided"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        router.push(
+                          "/customers"
+                        )
+                      }
+                      className="min-h-[76px] rounded-xl bg-gray-50 p-3 text-left transition hover:bg-gray-100"
+                    >
+                      <p className="text-xl font-semibold text-gray-950">
+                        {customerCount}
+                      </p>
+
+                      <p className="mt-1 text-xs font-medium text-gray-500">
+                        Active customers
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        router.push(
+                          "/services"
+                        )
+                      }
+                      className="min-h-[76px] rounded-xl bg-gray-50 p-3 text-left transition hover:bg-gray-100"
+                    >
+                      <p className="text-xl font-semibold text-gray-950">
+                        {serviceCount}
+                      </p>
+
+                      <p className="mt-1 text-xs font-medium text-gray-500">
+                        Active services
+                      </p>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="py-6 text-center">
+                  <p className="text-sm font-medium text-gray-900">
+                    No business profile
+                    found
+                  </p>
+
+                  <p className="mt-1 text-sm text-gray-500">
+                    Business details will
+                    appear here once
+                    configured.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
         </section>
 
-        <section className="mt-8">
+        <section>
           <QuickActions />
         </section>
       </div>
