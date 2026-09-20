@@ -4,16 +4,19 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   List,
   Plus,
 } from "lucide-react";
 
 import {
+  appointmentEndTime,
   appointmentsForDate,
+  calendarTimeSlots,
+  minutesFromTime,
   monthDateKeys,
   normalizeCalendarTime,
   todayInTimezone,
+  weekDateKeys,
   type CalendarView,
 } from "@/lib/appointment-calendar";
 
@@ -24,14 +27,22 @@ import {
 export type AppointmentCalendarItem = {
   id: string;
   customer_name: string;
+  service_id: string | null;
   service: string | null;
   appointment_date: string | null;
   appointment_time: string | null;
   status: string | null;
 };
 
+type AppointmentCalendarService = {
+  id: string;
+  name: string;
+  duration_minutes: number | null;
+};
+
 type AppointmentCalendarProps = {
   appointments: AppointmentCalendarItem[];
+  services: AppointmentCalendarService[];
   timezone: string;
   selectedDate: string;
   view: CalendarView;
@@ -49,7 +60,8 @@ type AppointmentCalendarProps = {
   onNext: () => void;
 
   onNewAppointment: (
-    date?: string
+    date?: string,
+    time?: string
   ) => void;
 
   onAppointmentSelect: (
@@ -88,6 +100,13 @@ const views: Array<{
     label: "List",
   },
 ];
+
+const timeSlots =
+  calendarTimeSlots(
+    0,
+    24,
+    30
+  );
 
 function parseDateKey(
   value: string
@@ -169,6 +188,43 @@ function formatShortDate(
     "en-US",
     {
       weekday: "short",
+      month: "short",
+      day: "numeric",
+    }
+  ).format(date);
+}
+
+function formatWeekDay(
+  value: string
+) {
+  const date =
+    parseDateKey(value);
+
+  if (!date) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-US",
+    {
+      weekday: "short",
+    }
+  ).format(date);
+}
+
+function formatMonthDay(
+  value: string
+) {
+  const date =
+    parseDateKey(value);
+
+  if (!date) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-US",
+    {
       month: "short",
       day: "numeric",
     }
@@ -263,18 +319,79 @@ function dayNumber(
   );
 }
 
+function appointmentDurationLabel(
+  appointment: AppointmentCalendarItem,
+  services: AppointmentCalendarService[]
+) {
+  const end =
+    appointmentEndTime(
+      appointment,
+      services
+    );
+
+  if (!end) {
+    return null;
+  }
+
+  return `${formatTime(
+    appointment.appointment_time
+  )} – ${formatTime(end)}`;
+}
+
+function appointmentsForSlot(
+  appointments: AppointmentCalendarItem[],
+  date: string,
+  slot: string
+) {
+  const slotStart =
+    minutesFromTime(slot);
+
+  if (slotStart === null) {
+    return [];
+  }
+
+  const slotEnd =
+    slotStart + 30;
+
+  return appointmentsForDate(
+    appointments,
+    date
+  ).filter(
+    (appointment) => {
+      const start =
+        minutesFromTime(
+          appointment.appointment_time
+        );
+
+      return (
+        start !== null &&
+        start >= slotStart &&
+        start < slotEnd
+      );
+    }
+  );
+}
+
 function AppointmentButton({
   appointment,
+  services,
   compact = false,
   onSelect,
 }: {
   appointment: AppointmentCalendarItem;
+  services: AppointmentCalendarService[];
   compact?: boolean;
 
   onSelect: (
     appointment: AppointmentCalendarItem
   ) => void;
 }) {
+  const durationLabel =
+    appointmentDurationLabel(
+      appointment,
+      services
+    );
+
   return (
     <button
       type="button"
@@ -307,9 +424,10 @@ function AppointmentButton({
               : "text-xs"
           }`}
         >
-          {formatTime(
-            appointment.appointment_time
-          )}
+          {durationLabel ||
+            formatTime(
+              appointment.appointment_time
+            )}
         </span>
       </div>
 
@@ -339,6 +457,7 @@ function AppointmentButton({
 
 function MonthView({
   appointments,
+  services,
   selectedDate,
   today,
   onSelectedDateChange,
@@ -346,6 +465,7 @@ function MonthView({
   onAppointmentSelect,
 }: {
   appointments: AppointmentCalendarItem[];
+  services: AppointmentCalendarService[];
   selectedDate: string;
   today: string | null;
 
@@ -354,7 +474,8 @@ function MonthView({
   ) => void;
 
   onNewAppointment: (
-    date?: string
+    date?: string,
+    time?: string
   ) => void;
 
   onAppointmentSelect: (
@@ -420,7 +541,7 @@ function MonthView({
               return (
                 <div
                   key={date}
-                  className={`relative min-h-[156px] border-b border-r border-gray-100 p-2 align-top transition ${
+                  className={`relative min-h-[156px] border-b border-r border-gray-100 p-2 ${
                     inMonth
                       ? "bg-white"
                       : "bg-gray-50/70"
@@ -490,6 +611,9 @@ function MonthView({
                           appointment={
                             appointment
                           }
+                          services={
+                            services
+                          }
                           compact
                           onSelect={
                             onAppointmentSelect
@@ -508,9 +632,6 @@ function MonthView({
                           )
                         }
                         className="min-h-11 w-full rounded-lg px-2 text-left text-xs font-semibold text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-200"
-                        aria-label={`Show ${hiddenCount} more appointments on ${formatLongDate(
-                          date
-                        )}`}
                       >
                         +{hiddenCount}{" "}
                         more
@@ -527,17 +648,431 @@ function MonthView({
   );
 }
 
+function TimeSlotAppointment({
+  appointment,
+  services,
+  onAppointmentSelect,
+}: {
+  appointment: AppointmentCalendarItem;
+  services: AppointmentCalendarService[];
+
+  onAppointmentSelect: (
+    appointment: AppointmentCalendarItem
+  ) => void;
+}) {
+  const durationLabel =
+    appointmentDurationLabel(
+      appointment,
+      services
+    );
+
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        onAppointmentSelect(
+          appointment
+        )
+      }
+      className={`w-full rounded-lg border px-2 py-2 text-left transition focus:outline-none focus:ring-2 focus:ring-green-200 ${statusClasses(
+        appointment.status
+      )}`}
+      aria-label={`Open appointment for ${appointment.customer_name}`}
+    >
+      <p className="truncate text-xs font-semibold">
+        {
+          appointment.customer_name
+        }
+      </p>
+
+      <p className="mt-0.5 truncate text-[11px] opacity-80">
+        {durationLabel ||
+          formatTime(
+            appointment.appointment_time
+          )}
+      </p>
+
+      {appointment.service && (
+        <p className="mt-0.5 truncate text-[11px] opacity-70">
+          {
+            appointment.service
+          }
+        </p>
+      )}
+    </button>
+  );
+}
+
+function WeekView({
+  appointments,
+  services,
+  selectedDate,
+  today,
+  onSelectedDateChange,
+  onNewAppointment,
+  onAppointmentSelect,
+}: {
+  appointments: AppointmentCalendarItem[];
+  services: AppointmentCalendarService[];
+  selectedDate: string;
+  today: string | null;
+
+  onSelectedDateChange: (
+    date: string
+  ) => void;
+
+  onNewAppointment: (
+    date?: string,
+    time?: string
+  ) => void;
+
+  onAppointmentSelect: (
+    appointment: AppointmentCalendarItem
+  ) => void;
+}) {
+  const dates =
+    weekDateKeys(
+      selectedDate
+    );
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[980px]">
+        <div className="sticky top-0 z-20 grid grid-cols-[80px_repeat(7,minmax(120px,1fr))] border-b border-gray-200 bg-white">
+          <div className="border-r border-gray-100 bg-gray-50" />
+
+          {dates.map(
+            (date) => {
+              const isToday =
+                date === today;
+
+              const isSelected =
+                date ===
+                selectedDate;
+
+              return (
+                <button
+                  key={date}
+                  type="button"
+                  onClick={() =>
+                    onSelectedDateChange(
+                      date
+                    )
+                  }
+                  className={`min-h-16 border-r border-gray-100 px-2 py-2 text-center transition focus:outline-none focus:ring-2 focus:ring-inset focus:ring-green-200 ${
+                    isSelected
+                      ? "bg-green-50"
+                      : "bg-white"
+                  }`}
+                  aria-pressed={
+                    isSelected
+                  }
+                >
+                  <span className="block text-xs font-semibold uppercase text-gray-500">
+                    {formatWeekDay(
+                      date
+                    )}
+                  </span>
+
+                  <span
+                    className={`mx-auto mt-1 flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-bold ${
+                      isToday
+                        ? "bg-green-600 text-white"
+                        : "text-gray-900"
+                    }`}
+                  >
+                    {dayNumber(
+                      date
+                    )}
+                  </span>
+                </button>
+              );
+            }
+          )}
+        </div>
+
+        <div className="max-h-[680px] overflow-y-auto">
+          {timeSlots.map(
+            (slot) => (
+              <div
+                key={slot}
+                className="grid grid-cols-[80px_repeat(7,minmax(120px,1fr))]"
+              >
+                <div className="flex min-h-16 items-start justify-end border-r border-t border-gray-100 bg-gray-50 px-2 pt-2 text-[11px] font-medium text-gray-500">
+                  {formatTime(
+                    slot
+                  )}
+                </div>
+
+                {dates.map(
+                  (date) => {
+                    const slotAppointments =
+                      appointmentsForSlot(
+                        appointments,
+                        date,
+                        slot
+                      );
+
+                    return (
+                      <div
+                        key={`${date}-${slot}`}
+                        className={`min-h-16 border-r border-t border-gray-100 p-1 ${
+                          date ===
+                          selectedDate
+                            ? "bg-green-50/20"
+                            : "bg-white"
+                        }`}
+                      >
+                        {slotAppointments.length >
+                        0 ? (
+                          <div className="space-y-1">
+                            {slotAppointments.map(
+                              (
+                                appointment
+                              ) => (
+                                <TimeSlotAppointment
+                                  key={
+                                    appointment.id
+                                  }
+                                  appointment={
+                                    appointment
+                                  }
+                                  services={
+                                    services
+                                  }
+                                  onAppointmentSelect={
+                                    onAppointmentSelect
+                                  }
+                                />
+                              )
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectedDateChange(
+                                  date
+                                );
+
+                                onNewAppointment(
+                                  date,
+                                  slot
+                                );
+                              }}
+                              className="flex min-h-11 w-full items-center justify-center rounded-lg text-xs font-semibold text-gray-400 transition hover:bg-green-50 hover:text-green-700 focus:outline-none focus:ring-2 focus:ring-green-200"
+                              aria-label={`Add appointment on ${formatLongDate(
+                                date
+                              )} at ${formatTime(
+                                slot
+                              )}`}
+                            >
+                              <Plus
+                                className="mr-1 h-3.5 w-3.5"
+                                aria-hidden="true"
+                              />
+                              Add
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectedDateChange(
+                                date
+                              );
+
+                              onNewAppointment(
+                                date,
+                                slot
+                              );
+                            }}
+                            className="flex min-h-14 w-full items-center justify-center rounded-lg text-gray-300 transition hover:bg-green-50 hover:text-green-700 focus:bg-green-50 focus:text-green-700 focus:outline-none focus:ring-2 focus:ring-green-200"
+                            aria-label={`Add appointment on ${formatLongDate(
+                              date
+                            )} at ${formatTime(
+                              slot
+                            )}`}
+                          >
+                            <Plus
+                              className="h-4 w-4"
+                              aria-hidden="true"
+                            />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+                )}
+              </div>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DayView({
+  appointments,
+  services,
+  selectedDate,
+  today,
+  onNewAppointment,
+  onAppointmentSelect,
+}: {
+  appointments: AppointmentCalendarItem[];
+  services: AppointmentCalendarService[];
+  selectedDate: string;
+  today: string | null;
+
+  onNewAppointment: (
+    date?: string,
+    time?: string
+  ) => void;
+
+  onAppointmentSelect: (
+    appointment: AppointmentCalendarItem
+  ) => void;
+}) {
+  const isToday =
+    selectedDate === today;
+
+  return (
+    <div>
+      <div className="border-b border-gray-100 bg-gray-50/70 px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold text-gray-950">
+              {formatLongDate(
+                selectedDate
+              )}
+            </p>
+
+            <p className="mt-0.5 text-xs text-gray-500">
+              30-minute scheduling
+              grid
+            </p>
+          </div>
+
+          {isToday && (
+            <span className="mt-2 inline-flex w-fit rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800 sm:mt-0">
+              Today
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="max-h-[720px] overflow-y-auto">
+        {timeSlots.map(
+          (slot) => {
+            const slotAppointments =
+              appointmentsForSlot(
+                appointments,
+                selectedDate,
+                slot
+              );
+
+            return (
+              <div
+                key={slot}
+                className="grid grid-cols-[88px_minmax(0,1fr)] border-b border-gray-100"
+              >
+                <div className="border-r border-gray-100 bg-gray-50 px-3 py-3 text-right text-xs font-medium text-gray-500">
+                  {formatTime(
+                    slot
+                  )}
+                </div>
+
+                <div className="min-h-[72px] p-2">
+                  {slotAppointments.length >
+                  0 ? (
+                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {slotAppointments.map(
+                        (
+                          appointment
+                        ) => (
+                          <AppointmentButton
+                            key={
+                              appointment.id
+                            }
+                            appointment={
+                              appointment
+                            }
+                            services={
+                              services
+                            }
+                            onSelect={
+                              onAppointmentSelect
+                            }
+                          />
+                        )
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onNewAppointment(
+                            selectedDate,
+                            slot
+                          )
+                        }
+                        className="flex min-h-14 items-center justify-center rounded-lg border border-dashed border-gray-200 px-3 text-sm font-semibold text-gray-400 transition hover:border-green-300 hover:bg-green-50 hover:text-green-700 focus:outline-none focus:ring-2 focus:ring-green-200"
+                      >
+                        <Plus
+                          className="mr-2 h-4 w-4"
+                          aria-hidden="true"
+                        />
+                        Add
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onNewAppointment(
+                          selectedDate,
+                          slot
+                        )
+                      }
+                      className="flex min-h-14 w-full items-center rounded-lg border border-transparent px-3 text-left text-sm font-medium text-gray-400 transition hover:border-green-200 hover:bg-green-50 hover:text-green-700 focus:border-green-200 focus:bg-green-50 focus:text-green-700 focus:outline-none focus:ring-2 focus:ring-green-200"
+                      aria-label={`Add appointment at ${formatTime(
+                        slot
+                      )}`}
+                    >
+                      <Plus
+                        className="mr-2 h-4 w-4"
+                        aria-hidden="true"
+                      />
+                      Add appointment at{" "}
+                      {formatTime(
+                        slot
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          }
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SelectedDateAgenda({
   appointments,
+  services,
   selectedDate,
   onNewAppointment,
   onAppointmentSelect,
 }: {
   appointments: AppointmentCalendarItem[];
+  services: AppointmentCalendarService[];
   selectedDate: string;
 
   onNewAppointment: (
-    date?: string
+    date?: string,
+    time?: string
   ) => void;
 
   onAppointmentSelect: (
@@ -582,7 +1117,6 @@ function SelectedDateAgenda({
             className="mr-2 h-4 w-4"
             aria-hidden="true"
           />
-
           Add appointment
         </Button>
       </div>
@@ -600,6 +1134,9 @@ function SelectedDateAgenda({
                 }
                 appointment={
                   appointment
+                }
+                services={
+                  services
                 }
                 onSelect={
                   onAppointmentSelect
@@ -628,10 +1165,12 @@ function SelectedDateAgenda({
 
 function ListView({
   appointments,
+  services,
   selectedDate,
   onAppointmentSelect,
 }: {
   appointments: AppointmentCalendarItem[];
+  services: AppointmentCalendarService[];
   selectedDate: string;
 
   onAppointmentSelect: (
@@ -731,7 +1270,6 @@ function ListView({
               )
             }
             className="flex min-h-20 w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-gray-50 focus:bg-green-50/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-green-200"
-            aria-label={`Open appointment for ${appointment.customer_name}`}
           >
             <div className="w-24 shrink-0">
               <p className="text-xs font-semibold text-gray-500">
@@ -743,9 +1281,13 @@ function ListView({
               </p>
 
               <p className="mt-1 text-sm font-bold text-gray-950">
-                {formatTime(
-                  appointment.appointment_time
-                )}
+                {appointmentDurationLabel(
+                  appointment,
+                  services
+                ) ||
+                  formatTime(
+                    appointment.appointment_time
+                  )}
               </p>
             </div>
 
@@ -779,46 +1321,9 @@ function ListView({
   );
 }
 
-function PlaceholderView({
-  view,
-  selectedDate,
-}: {
-  view:
-    | "week"
-    | "day";
-
-  selectedDate: string;
-}) {
-  return (
-    <div className="px-5 py-12 text-center sm:px-6">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-green-50 text-green-700">
-        <Clock3
-          className="h-6 w-6"
-          aria-hidden="true"
-        />
-      </div>
-
-      <h3 className="mt-4 font-semibold capitalize text-gray-950">
-        {view} schedule
-      </h3>
-
-      <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-gray-500">
-        {view === "week"
-          ? "The time-grid week schedule will be connected in the next calendar checkpoint."
-          : "The detailed day schedule will be connected in the next calendar checkpoint."}
-      </p>
-
-      <p className="mt-3 text-xs font-medium text-gray-400">
-        {formatLongDate(
-          selectedDate
-        )}
-      </p>
-    </div>
-  );
-}
-
 export default function AppointmentCalendar({
   appointments,
+  services,
   timezone,
   selectedDate,
   view,
@@ -835,6 +1340,22 @@ export default function AppointmentCalendar({
       timezone
     );
 
+  const title =
+    view === "day"
+      ? formatLongDate(
+          selectedDate
+        )
+      : view === "week"
+        ? `Week of ${formatMonthDay(
+            weekDateKeys(
+              selectedDate
+            )[0] ||
+              selectedDate
+          )}`
+        : formatMonthTitle(
+            selectedDate
+          );
+
   return (
     <section className="anaai-surface overflow-hidden">
       <div className="border-b border-gray-100 px-4 py-4 sm:px-5 sm:py-5">
@@ -847,9 +1368,7 @@ export default function AppointmentCalendar({
               />
 
               <h2 className="anaai-section-title truncate">
-                {formatMonthTitle(
-                  selectedDate
-                )}
+                {title}
               </h2>
             </div>
 
@@ -958,7 +1477,6 @@ export default function AppointmentCalendar({
                 className="mr-2 h-4 w-4"
                 aria-hidden="true"
               />
-
               New appointment
             </Button>
           </div>
@@ -970,6 +1488,9 @@ export default function AppointmentCalendar({
           <MonthView
             appointments={
               appointments
+            }
+            services={
+              services
             }
             selectedDate={
               selectedDate
@@ -992,6 +1513,9 @@ export default function AppointmentCalendar({
             appointments={
               appointments
             }
+            services={
+              services
+            }
             selectedDate={
               selectedDate
             }
@@ -1005,10 +1529,62 @@ export default function AppointmentCalendar({
         </>
       )}
 
+      {view === "week" && (
+        <WeekView
+          appointments={
+            appointments
+          }
+          services={
+            services
+          }
+          selectedDate={
+            selectedDate
+          }
+          today={
+            today
+          }
+          onSelectedDateChange={
+            onSelectedDateChange
+          }
+          onNewAppointment={
+            onNewAppointment
+          }
+          onAppointmentSelect={
+            onAppointmentSelect
+          }
+        />
+      )}
+
+      {view === "day" && (
+        <DayView
+          appointments={
+            appointments
+          }
+          services={
+            services
+          }
+          selectedDate={
+            selectedDate
+          }
+          today={
+            today
+          }
+          onNewAppointment={
+            onNewAppointment
+          }
+          onAppointmentSelect={
+            onAppointmentSelect
+          }
+        />
+      )}
+
       {view === "list" && (
         <ListView
           appointments={
             appointments
+          }
+          services={
+            services
           }
           selectedDate={
             selectedDate
@@ -1019,54 +1595,24 @@ export default function AppointmentCalendar({
         />
       )}
 
-      {view === "week" && (
-        <PlaceholderView
-          view="week"
-          selectedDate={
-            selectedDate
-          }
-        />
-      )}
-
-      {view === "day" && (
-        <PlaceholderView
-          view="day"
-          selectedDate={
-            selectedDate
-          }
-        />
-      )}
-
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-100 bg-white px-4 py-3 text-[11px] font-medium text-gray-500 sm:px-5">
         <span className="inline-flex items-center gap-1.5">
-          <span
-            className="h-2 w-2 rounded-full bg-amber-500"
-            aria-hidden="true"
-          />
+          <span className="h-2 w-2 rounded-full bg-amber-500" />
           Booked
         </span>
 
         <span className="inline-flex items-center gap-1.5">
-          <span
-            className="h-2 w-2 rounded-full bg-green-500"
-            aria-hidden="true"
-          />
+          <span className="h-2 w-2 rounded-full bg-green-500" />
           Confirmed
         </span>
 
         <span className="inline-flex items-center gap-1.5">
-          <span
-            className="h-2 w-2 rounded-full bg-blue-500"
-            aria-hidden="true"
-          />
+          <span className="h-2 w-2 rounded-full bg-blue-500" />
           Completed
         </span>
 
         <span className="inline-flex items-center gap-1.5">
-          <span
-            className="h-2 w-2 rounded-full bg-gray-400"
-            aria-hidden="true"
-          />
+          <span className="h-2 w-2 rounded-full bg-gray-400" />
           Cancelled
         </span>
 

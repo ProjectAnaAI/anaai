@@ -1489,7 +1489,8 @@ if (businessToday) {
   }
 
   function openNewAppointment(
-  date?: string
+  date?: string,
+  time?: string
 ) {
   let appointmentDate =
     date ||
@@ -1514,6 +1515,9 @@ if (businessToday) {
       (current) => ({
         ...current,
         appointmentDate,
+        appointmentTime:
+          time ??
+          current.appointmentTime,
       })
     );
   }
@@ -1657,6 +1661,9 @@ if (businessToday) {
             <AppointmentCalendar
               appointments={
                 appointments
+              }
+              services={
+                services
               }
               timezone={
                 businessTimezone
