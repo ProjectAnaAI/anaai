@@ -95,17 +95,17 @@ test("customer appointment history is linked by customer id and newest first", (
 test("customer CRM exposes appointment count recent appointment and history", () => {
   assert.match(
     compact,
-    /Appointments:/
+    /history\.length/
   );
 
   assert.match(
     compact,
-    /Most recent:/
+    /const mostRecent = history\[0\]/
   );
 
   assert.match(
     compact,
-    /View history/
+    /toggleHistory/
   );
 
   assert.match(
