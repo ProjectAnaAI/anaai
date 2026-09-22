@@ -64,8 +64,19 @@ test('Gather settings are bounded, stage-specific and contain only supplied hint
   assert.equal(c.gatherOptions().speechModel,'experimental_conversations');
   assert.equal(c.gatherOptions('confirm').speechModel,'experimental_conversations');
   assert.equal(c.gatherOptions('service').speechModel,'experimental_conversations');
-  assert.equal(c.gatherOptions('service',['Haircut','bad,entry','<invalid>']).hints,'Haircut');
-  assert.equal(c.gatherOptions('service',Array(40).fill('Haircut')).hints.split(',').length,30);
+  // Unsafe entries are dropped; safe service names lead, then shared
+  // scheduling vocabulary so any detail can be spoken at any booking turn.
+  const hinted = c.gatherOptions('service',['Haircut','bad,entry','<invalid>']).hints.split(',');
+  assert.equal(hinted[0],'Haircut');
+  assert.ok(!hinted.some(h => /bad|entry|invalid/.test(h)));
+  assert.ok(hinted.includes('tomorrow') && hinted.includes('PM'));
+  assert.ok(!c.gatherOptions('confirm').hints.split(',').some(h => /[<>,]/.test(h)));
+  assert.ok(c.gatherOptions('confirm').hints.split(',').includes('yes'));
+  // Deduplicated and bounded.
+  assert.equal(c.gatherOptions('service',Array(400).fill('Haircut')).hints.split(',').filter(h => h === 'Haircut').length,1);
+  assert.ok(c.gatherOptions('service',Array.from({length:400},(_, i) => `Service ${i}`)).hints.split(',').length <= 100);
+  // Non-booking turns still send no hints.
+  assert.equal(c.gatherOptions().hints,undefined);
 });
 for (const [configured, expected] of [[undefined,'Polly.Joanna-Neural'],['Polly.Joanna-Neural','Polly.Joanna-Neural'],['alice','alice'],['unsupported','alice']]) test(`TTS configuration ${configured}`, () => {
   const c=load('lib/voice-config.ts',{}, {TWILIO_TTS_VOICE:configured});

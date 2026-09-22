@@ -1,6 +1,10 @@
 import "server-only";
 
 import twilio from "twilio";
+import { acceptVoiceProgress, classifyVoiceInput, recoverVoiceInput, statelessVoiceRecovery,
+  voiceConfidence, voiceDigitAllowed, voiceRecoveryMode, type VoiceRecovery } from "@/lib/voice-input";
+import { managementIntent, managementRecoveryPrompt, voiceManagementTurn } from "@/lib/voice-appointment-management";
+import { initialManagementState } from "@/lib/voice-state";
 
 import {
   checkVoiceAvailability,
@@ -23,7 +27,9 @@ import {
   openVoiceState,
   sealVoiceState,
   voiceStateConfigured,
+  voiceDiagnosticId,
   type VoiceBinding,
+  type VoiceBookingStage,
   type VoiceBookingState,
   type VoiceState,
 } from "@/lib/voice-state";
@@ -33,8 +39,14 @@ import {
   businessLocalDate,
   parseSpokenTime,
   confirmation as interpretConfirmation,
-  matchVoiceService,
+  type TimeInterpretation,
 } from "@/lib/voice-parsing";
+
+import {
+  applyBookingDetails,
+  extractBookingDetails,
+  missingBookingField,
+} from "@/lib/voice-slots";
 
 import {
   voiceOptions,
@@ -60,10 +72,6 @@ type VoiceService = Awaited<
   ReturnType<typeof loadVoiceServices>
 >[number];
 
-type AvailabilityResult = Awaited<
-  ReturnType<typeof checkVoiceAvailability>
->;
-
 const INFO_PROMPT =
   "What would you like to know about our services, hours, or location?";
 
@@ -81,14 +89,19 @@ function wantsHuman(
 ) {
   return HUMAN_REQUEST.test(
     speech
-  );
+  ) || /^person[.!?, ]*$/i.test(speech);
 }
 
 const BOOKING_STATE_UNAVAILABLE =
   "I'm sorry, phone booking is temporarily unavailable. I can still help with business information.";
 
+/*
+ * Bare "appointment" is deliberately NOT an intent: callers ask about
+ * appointments without wanting to make one. Only an explicit booking verb, or
+ * an unmistakable multi-word request, starts the booking flow.
+ */
 const BOOKING_INTENT =
-  /\b(?:book|booking|schedule|reserve)\b/i;
+  /\b(?:book|booking|schedule|reserve)\b|\b(?:make|set up|get|need|want)\s+(?:me\s+)?(?:an?\s+)?appointment\b|\bcome\s+in\b/i;
 
 const PHONE =
   /^\+[1-9]\d{7,14}$/;
@@ -452,6 +465,23 @@ function mainMenu(
   }. How can I help? Speak naturally, or press 1 to book an appointment, 2 for business information, 3 for a team member, or 0 to repeat these options.`;
 }
 
+function recoveryPrompt(state: VoiceState | null, empty: boolean, timezone: string | null): string {
+  const prefix = empty ? "I didn't catch that. " : "I didn't hear that clearly enough. ";
+  if (state?.mode === "management") return prefix + managementRecoveryPrompt(state);
+  if (state?.mode !== "booking") return (empty ? "I didn't hear anything. " : prefix) +
+    (state?.mode === "info" ? INFO_PROMPT : "Speak naturally, or press 0 to hear the options.");
+  const b = state.booking;
+  if (b.pendingTimeOptions) return prefix + `Did you mean ${spokenTime(b.pendingTimeOptions[0])} or ${spokenTime(b.pendingTimeOptions[1])}? Say AM or PM, or press 1 for the first and 2 for the second.`;
+  if (b.stage === "confirm" && b.time) {
+    const day = spokenDate(b.date || "", timezone);
+    return prefix + `I have ${b.serviceName} for ${b.customerName} ${day === "today" || day === "tomorrow" ? day : `on ${day}`} at ${spokenTime(b.time)}. Say yes or press 1 to book it, no to cancel, or tell me what to change.`;
+  }
+  if (!b.customerName) return prefix + "What name should I put on the appointment?";
+  if (!b.serviceId) return prefix + "Which service would you like?";
+  if (!b.date) return prefix + "What day would you like?";
+  return prefix + "What time would you like? Please include AM or PM.";
+}
+
 function gather(
   response:
     twilio.twiml.VoiceResponse,
@@ -491,7 +521,7 @@ function gather(
         state?.mode ===
           "booking"
           ? state.booking.stage
-          : undefined,
+          : state?.mode === "management" ? (state.management.stage === "confirm" ? "confirm" : "time") : undefined,
         services
       ),
 
@@ -554,20 +584,81 @@ function spokenTime(
       )} ${suffix}`;
 }
 
-function bookingSummary(
-  state: VoiceBookingState
+/*
+ * Speak a business-local calendar day the way a receptionist would. The value
+ * is already a business-local day string, so it is formatted in UTC to avoid
+ * re-applying any timezone shift.
+ */
+function spokenDate(
+  value: string,
+  timezone: string | null
 ) {
-  return `${state.booking.serviceName} on ${state.booking.date} at ${spokenTime(
-    state.booking.time || ""
-  )}`;
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(
+      value
+    )
+  ) {
+    return value;
+  }
+
+  if (
+    value ===
+    businessLocalDate(
+      timezone
+    )
+  ) {
+    return "today";
+  }
+
+  if (
+    value ===
+    businessLocalDate(
+      timezone,
+      1
+    )
+  ) {
+    return "tomorrow";
+  }
+
+  try {
+    return new Intl.DateTimeFormat(
+      "en-US",
+      {
+        timeZone: "UTC",
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }
+    ).format(
+      new Date(
+        `${value}T00:00:00Z`
+      )
+    );
+  } catch {
+    return value;
+  }
 }
 
-function beginBooking(
+async function beginBooking({
+  response,
+  ingress,
+  binding,
+  business,
+  speech,
+  confidence,
+  callerPhone,
+  previousState,
+}: {
   response:
-    twilio.twiml.VoiceResponse,
-  ingress: VoiceIngress,
-  binding: VoiceBinding
-) {
+    twilio.twiml.VoiceResponse;
+  ingress: VoiceIngress;
+  binding: VoiceBinding;
+  business: BusinessContext;
+  speech: string;
+  confidence: string;
+  callerPhone: string;
+  previousState: VoiceState | null;
+}) {
   if (
     !voiceStateConfigured()
   ) {
@@ -582,58 +673,46 @@ function beginBooking(
     return;
   }
 
-  const state =
-    initialBookingState();
+  const budget = previousState ? {
+    turns: previousState.turns, expires: previousState.expires,
+    silence: previousState.silence, recovery: previousState.recovery,
+  } : { turns: 1 };
+  const state = Object.assign(previousState || {}, initialBookingState(), budget) as VoiceBookingState;
 
-  state.turns = 1;
+  /*
+   * The utterance that STARTED the booking usually carries details:
+   * "I want to book an appointment for tomorrow at 1 PM" already supplies the
+   * day and the time. Replaying it through the ordinary booking turn keeps
+   * those values instead of discarding them and asking from scratch.
+   */
+  if (speech) {
+    await bookingTurn({
+      response,
+      ingress,
+      binding,
+      business,
+      state,
+      speech,
+      digits: "",
+      confidence,
+      callerPhone,
+      opening: true,
+    });
+
+    return;
+  }
 
   gather(
     response,
     ingress,
     binding,
-    "I can help book an appointment. What name should I put on the appointment?",
+    "I can help with that. What name should I put on the appointment?",
     state
   );
 }
 
-function recognitionConfidence(
-  formData: FormData
-) {
-  const raw =
-    formData.get(
-      "Confidence"
-    );
-
-  if (
-    typeof raw !==
-    "string" ||
-    !raw.trim()
-  ) {
-    return "missing";
-  }
-
-  const value =
-    Number(raw);
-
-  if (
-    !Number.isFinite(
-      value
-    ) ||
-    value < 0 ||
-    value > 1
-  ) {
-    return "invalid";
-  }
-
-  if (value < 0.35) {
-    return "low";
-  }
-
-  if (value < 0.7) {
-    return "medium";
-  }
-
-  return "high";
+function recognitionConfidence(formData: FormData) {
+  return voiceConfidence(formData.get("Confidence"));
 }
 
 function logRecognition({
@@ -700,6 +779,7 @@ async function understand({
   services = [],
 }: {
   stage:
+    | "name"
     | "service"
     | "date"
     | "time"
@@ -783,80 +863,38 @@ function validateDateExpression(
   };
 }
 
-function validateTimeExpression(
-  expression: string
-) {
-  return parseSpokenTime(
-    expression
-  );
-}
+/*
+ * Period answers to an AM/PM clarification. Deliberately narrow: anything
+ * richer than a bare period falls through to full extraction so the caller can
+ * replace the detail outright instead of being trapped in the clarification.
+ */
+function periodChoice(
+  speech: string
+): "am" | "pm" | null {
+  const text = speech
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[.!?,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
-async function availabilityForState(
-  business: BusinessContext,
-  state: VoiceBookingState,
-  time: string
-): Promise<AvailabilityResult | null> {
   if (
-    !state.booking
-      .serviceId ||
-    !state.booking.date
+    /^(?:the )?(?:a ?m|in the morning|morning)$/.test(
+      text
+    )
   ) {
-    return null;
+    return "am";
   }
 
-  const started =
-    Date.now();
+  if (
+    /^(?:the )?(?:p ?m|in the afternoon|afternoon|in the evening|evening|at night|night)$/.test(
+      text
+    )
+  ) {
+    return "pm";
+  }
 
-  const result =
-    await checkVoiceAvailability({
-      businessId:
-        business.businessId,
-
-      serviceId:
-        state.booking
-          .serviceId,
-
-      date:
-        state.booking.date,
-
-      time,
-    });
-
-  console.info(
-    `AnaAI voice availability completed duration_ms=${
-      Date.now() -
-      started
-    } result=${
-      result.available
-        ? "available"
-        : result.reason
-    }`
-  );
-
-  return result;
-}
-
-function resetAfterServiceChange(
-  state: VoiceBookingState
-) {
-  state.booking.date =
-    null;
-
-  state.booking.time =
-    null;
-
-  state.booking.pendingTimeOptions =
-    undefined;
-}
-
-function resetAfterDateChange(
-  state: VoiceBookingState
-) {
-  state.booking.time =
-    null;
-
-  state.booking.pendingTimeOptions =
-    undefined;
+  return null;
 }
 
 async function bookingTurn({
@@ -866,7 +904,11 @@ async function bookingTurn({
   business,
   state,
   speech,
+  digits,
+  confidence,
   callerPhone,
+  opening = false,
+  onMutation,
 }: {
   response:
     twilio.twiml.VoiceResponse;
@@ -875,1162 +917,983 @@ async function bookingTurn({
   business: BusinessContext;
   state: VoiceBookingState;
   speech: string;
+  digits: string;
+  confidence: string;
   callerPhone: string;
+  opening?: boolean;
+  onMutation?: () => void;
 }) {
-  if (!speech) {
-    if (
-      state.silence >= 1
-    ) {
-      response.say(
-        voiceOptions(),
-        "I couldn't hear you clearly. No appointment was booked. Please call again when you're ready. Goodbye."
-      );
+  const booking = state.booking;
+  const recoveryBefore = state.recovery || 0;
+  const failuresBefore = booking.failures || 0;
 
-      response.hangup();
-      return;
-    }
+  // Defense in depth: entry-point classification rejects low/invalid speech
+  // before this function can collect fields or invoke dependencies.
+  const lowConfidence =
+    confidence === "low" || confidence === "invalid";
 
-    state.silence = 1;
-
-    const prompt =
-      state.booking.stage ===
-      "name"
-        ? "I didn't hear the name. What name should I put on the appointment?"
-        : state.booking.stage ===
-            "service"
-          ? "I didn't hear the service clearly. Which service would you like?"
-          : state.booking.stage ===
-              "date"
-            ? "I didn't hear the date clearly. You can say something like October second, tomorrow, or next Friday."
-            : state.booking.stage ===
-                "time"
-              ? "I didn't hear the time clearly. Please say a time such as 10 AM or 2:30 PM."
-              : `I didn't hear your answer clearly. ${bookingSummary(
-                  state
-                )}. Say yes to book it, no to cancel, or tell me what you want to change.`;
-
-    gather(
-      response,
-      ingress,
-      binding,
-      prompt,
-      state
-    );
-
-    return;
-  }
-
-  state.silence = 0;
-
-  if (
-    interpretConfirmation(
-      speech
-    ) === "no"
-  ) {
+  const say = (
+    message: string
+  ) => {
     response.say(
       voiceOptions(),
-      "Okay. No appointment was booked. Thanks for calling. Goodbye."
+      message
     );
 
     response.hangup();
+  };
+
+  const services =
+    await loadVoiceServices(
+      business.businessId
+    );
+
+  if (!services.length) {
+    say(
+      "I'm sorry, I can't find any services available for phone booking right now. No appointment was booked."
+    );
+
     return;
   }
 
+  const serviceNames =
+    services.map(
+      (service) =>
+        service.name
+    );
+
+  /*
+   * Every booking turn biases recognition toward the routed service names, not
+   * just the turn that asks for a service: any question may be answered with a
+   * service, a day and a time in one sentence.
+   */
+  const listen = (
+    message: string,
+    hints: string[] = serviceNames
+  ) =>
+    gather(
+      response,
+      ingress,
+      binding,
+      message,
+      state,
+      "listen",
+      hints
+    );
+
   const retry = (
     message: string,
-    names: string[] = []
+    hints: string[] = []
   ) => {
-    state.booking.failures =
-      (state.booking.failures ||
-        0) + 1;
+    booking.failures = failuresBefore + 1;
+    state.recovery = recoveryBefore;
 
     if (
-      state.booking.failures >=
-      3
+      recoverVoiceInput(state) || booking.failures >= 3
     ) {
-      response.say(
-        voiceOptions(),
-        "I'm having trouble understanding. No appointment was booked. A team-member transfer isn't configured yet. Please contact someone at the salon for help. Goodbye."
+      say(
+        "I'm having trouble understanding. No appointment was booked. Please call the salon directly and someone can help. Goodbye."
       );
 
-      response.hangup();
-    } else {
-      gather(
-        response,
-        ingress,
-        binding,
-        message,
-        state,
-        "listen",
-        names
-      );
+      return;
     }
-  };
 
-  const askForDate = (
-    serviceName: string
-  ) => {
-    state.booking.stage =
-      "date";
-
-    gather(
-      response,
-      ingress,
-      binding,
-      `What date would you like for ${serviceName}? You can say tomorrow, a month and day, or a weekday such as next Friday.`,
-      state
+    listen(
+      message,
+      hints
     );
   };
 
-  const askForTime = () => {
-    state.booking.stage =
-      "time";
-
-    gather(
-      response,
-      ingress,
-      binding,
-      "What time would you like? For example, say 10 AM or 2:30 PM.",
-      state
-    );
-  };
-
-  const handleAvailability = async (
-    time: string
+  /*
+   * The single question for whatever is still missing. Every prompt names only
+   * the outstanding field, so a caller is never re-asked for something already
+   * supplied and never re-hears the whole service menu.
+   */
+  const ask = (
+    prefix = ""
   ) => {
-    const availability =
-      await availabilityForState(
-        business,
-        state,
-        time
+    const missing =
+      missingBookingField(
+        booking
       );
 
-    if (!availability) {
-      response.say(
-        voiceOptions(),
-        "I couldn't verify all of the booking details. No appointment was booked. Please call again."
+    if (missing === "name") {
+      listen(
+        `${prefix}What name should I put on the appointment?`
       );
 
-      response.hangup();
-
-      return false;
+      return;
     }
 
     if (
-      !availability.available
+      missing === "service"
     ) {
-      state.booking.time =
-        null;
+      listen(
+        `${prefix}Which service would you like? We offer ${serviceNames
+          .slice(0, 6)
+          .join(", ")}.`,
+        serviceNames
+      );
+
+      return;
+    }
+
+    if (missing === "date") {
+      listen(
+        `${prefix}What day would you like for ${booking.serviceName}? You can say tomorrow, a weekday, or a month and day.`
+      );
+
+      return;
+    }
+
+    listen(
+      `${prefix}What time would you like? For example, 10 AM or 2:30 PM.`
+    );
+  };
+
+  const summary = () => {
+    const day = spokenDate(
+      booking.date || "",
+      business.timezone
+    );
+
+    /* "on tomorrow" is not how a receptionist speaks. */
+    return `${booking.serviceName} for ${booking.customerName} ${
+      day === "today" || day === "tomorrow"
+        ? day
+        : `on ${day}`
+    } at ${spokenTime(
+      booking.time ||
+        booking.requestedTime ||
+        ""
+    )}`;
+  };
+
+  const askAmPm = (
+    options: [
+      string,
+      string,
+    ],
+    prefix = ""
+  ) => {
+    booking.pendingTimeOptions =
+      options;
+
+    listen(
+      `${prefix}Did you mean ${spokenTime(
+        options[0]
+      )} or ${spokenTime(
+        options[1]
+      )}? Say AM or PM, or press 1 for ${spokenTime(
+        options[0]
+      )} and 2 for ${spokenTime(
+        options[1]
+      )}.`
+    );
+  };
+
+  /*
+   * Availability is advisory and always recomputed here. `booking.time` is set
+   * ONLY by a successful check, so an availability answer can never outlive the
+   * service, date or time it was computed for.
+   */
+  const checkAvailability =
+    async () => {
+      const requested =
+        booking.requestedTime;
+
+      if (
+        !booking.serviceId ||
+        !booking.date ||
+        !requested
+      ) {
+        ask();
+        return;
+      }
+
+      const started =
+        Date.now();
+
+      const availability =
+        await checkVoiceAvailability(
+          {
+            businessId:
+              business.businessId,
+
+            serviceId:
+              booking.serviceId,
+
+            date:
+              booking.date,
+
+            time:
+              requested,
+          }
+        );
+
+      console.info(
+        `AnaAI voice availability completed duration_ms=${
+          Date.now() -
+          started
+        } result=${
+          availability.available
+            ? "available"
+            : availability.reason
+        }`
+      );
+
+      if (
+        availability.available
+      ) {
+        booking.failures = 0;
+        acceptVoiceProgress(state);
+        booking.time =
+          requested;
+
+        booking.stage =
+          "confirm";
+
+        listen(
+          `I have ${summary()}. Say yes or press 1 to book it, no to cancel, or tell me what to change.`
+        );
+
+        return;
+      }
+
+      booking.time = null;
 
       if (
         availability.reason ===
         "slot_unavailable"
       ) {
+        booking.requestedTime =
+          null;
+
+        booking.stage =
+          "time";
+
         retry(
-          "That time is not available. Please choose another time."
+          `That time isn't available for ${booking.serviceName} on ${spokenDate(
+            booking.date,
+            business.timezone
+          )}. What other time works?`
         );
 
-        return false;
+        return;
       }
 
       if (
         availability.reason ===
         "outside_hours"
       ) {
+        booking.requestedTime =
+          null;
+
+        booking.stage =
+          "time";
+
         retry(
-          "That time is outside the business hours for that day. Please choose another time."
+          "That's outside our hours that day. What other time works?"
         );
 
-        return false;
+        return;
       }
 
       if (
         availability.reason ===
         "closed"
       ) {
-        state.booking.failures =
-          0;
+        booking.date = null;
 
-        state.booking.date =
+        booking.requestedTime =
           null;
 
-        state.booking.stage =
+        booking.stage =
           "date";
 
-        gather(
-          response,
-          ingress,
-          binding,
-          "The business is closed on that date. Please choose another date.",
-          state
-        );
+        retry("We're closed that day. What other day would you like?");
 
-        return false;
+        return;
       }
 
-      response.say(
-        voiceOptions(),
-        "I'm sorry, I couldn't verify appointment availability right now. No appointment was booked. Please contact the business for help. Goodbye."
+      say(
+        "I'm sorry, I couldn't check availability right now. No appointment was booked. Please call the salon directly. Goodbye."
+      );
+    };
+
+  const commit = async () => {
+    if (
+      !booking.customerName ||
+      !booking.serviceId ||
+      !booking.serviceName ||
+      !booking.date ||
+      !booking.time
+    ) {
+      say(
+        "I couldn't verify all of the booking details. No appointment was booked. Please call again."
       );
 
-      response.hangup();
-
-      return false;
+      return;
     }
 
-    state.booking.failures =
-      0;
+    const phone =
+      normalizePhone(
+        callerPhone
+      );
 
-    state.booking.time =
-      time;
+    if (
+      !PHONE.test(phone)
+    ) {
+      say(
+        "I couldn't verify a callback phone number for this appointment. No appointment was booked."
+      );
 
-    state.booking.stage =
-      "confirm";
+      return;
+    }
 
-    gather(
-      response,
-      ingress,
-      binding,
-      `I have ${bookingSummary(
-        state
-      )}. Say yes to book this appointment, no to cancel, or tell me what you'd like to change.`,
-      state
+    /*
+     * AUTHORITATIVE MUTATION BOUNDARY
+     *
+     * Reached only after an explicit affirmative. The semantic model cannot
+     * reach it, and the database revalidates everything including capacity.
+     */
+    const bookingStarted =
+      Date.now();
+
+    onMutation?.();
+    const result =
+      await executeVoiceBooking(
+        {
+          businessId:
+            business.businessId,
+
+          idempotencyKey:
+            booking.idempotencyKey,
+
+          customerName:
+            booking.customerName,
+
+          customerPhone:
+            phone,
+
+          serviceId:
+            booking.serviceId,
+
+          serviceName:
+            booking.serviceName,
+
+          date:
+            booking.date,
+
+          time:
+            booking.time,
+        }
+      );
+
+    console.info(
+      `AnaAI voice booking completed duration_ms=${
+        Date.now() -
+        bookingStarted
+      } result=${
+        result.success
+          ? result.replayed
+            ? "replayed"
+            : "success"
+          : "rejected"
+      }`
     );
 
-    return true;
+    if (!result.success) {
+      say(
+        result.message
+      );
+
+      return;
+    }
+
+    const confirmed =
+      result.replayed
+        ? "Your original booking was already completed. No duplicate appointment was created."
+        : "Your appointment has been booked.";
+
+    const sms =
+      result.smsSent
+        ? " A confirmation text was submitted for sending."
+        : " I couldn't verify the text confirmation status.";
+
+    say(
+      `${confirmed}${sms} Thanks for calling. Goodbye.`
+    );
   };
 
-  if (
-    state.booking.stage ===
-      "confirm" &&
-    state.booking
-      .pendingTimeOptions
-  ) {
-    const period =
-      speech
-        .normalize("NFKC")
-        .toLowerCase()
-        .replace(/[.\s]/g, "");
-
+  /*
+   * 1. DTMF is unambiguous and is resolved before any speech interpretation.
+   */
+  if (digits) {
     if (
-      period === "am" ||
-      period === "pm"
+      booking.pendingTimeOptions &&
+      (digits === "1" ||
+        digits === "2")
     ) {
-      const options =
-        state.booking
-          .pendingTimeOptions;
+      const chosen =
+        booking.pendingTimeOptions[
+          digits === "1"
+            ? 0
+            : 1
+        ];
 
-      const selectedTime =
-        period === "am"
-          ? options[0]
-          : options[1];
-
-      state.booking.pendingTimeOptions =
+      booking.pendingTimeOptions =
         undefined;
 
-      state.booking.time =
-        null;
+      booking.failures = 0;
+      acceptVoiceProgress(state);
 
-      await handleAvailability(
-        selectedTime
-      );
-
-      return;
-    }
-
-    retry(
-      "I still need to know whether you mean AM or PM. Please say AM or PM."
-    );
-
-    return;
-  }
-
-  if (
-    state.booking.stage ===
-    "name"
-  ) {
-    const name =
-      speech
-        .replace(
-          /\s+/g,
-          " "
-        )
-        .trim();
-
-    if (
-      name.length < 2 ||
-      name.length > 120 ||
-      /[<>\x00-\x1f]/.test(
-        name
-      )
-    ) {
-      retry(
-        "I couldn't use that name. Please say the name for the appointment."
-      );
-
-      return;
-    }
-
-    state.booking.failures =
-      0;
-
-    state.booking.customerName =
-      name;
-
-    state.booking.stage =
-      "service";
-
-    const services =
-      await loadVoiceServices(
-        business.businessId
-      );
-
-    if (
-      !services.length
-    ) {
-      response.say(
-        voiceOptions(),
-        "I'm sorry, I can't find any services available for phone booking right now. No appointment was booked."
-      );
-
-      response.hangup();
-      return;
-    }
-
-    const names =
-      services
-        .slice(0, 6)
-        .map(
-          (service) =>
-            service.name
-        )
-        .join(", ");
-
-    gather(
-      response,
-      ingress,
-      binding,
-      `Which service would you like? Available services include ${names}. You can also tell me the date and time in the same sentence.`,
-      state,
-      "listen",
-      services.map(
-        (service) =>
-          service.name
-      )
-    );
-
-    return;
-  }
-
-  if (
-    state.booking.stage ===
-    "service"
-  ) {
-    const services =
-      await loadVoiceServices(
-        business.businessId
-      );
-
-    if (
-      !services.length
-    ) {
-      response.say(
-        voiceOptions(),
-        "I'm sorry, I can't find any services available for phone booking right now. No appointment was booked."
-      );
-
-      response.hangup();
-
-      return;
-    }
-
-    const deterministic =
-      matchVoiceService(
-        services,
-        speech
-      );
-
-    const understanding =
-      await understand({
-        stage: "service",
-        speech,
-        services,
-      });
-
-    const semanticService =
-      resolveService(
-        services,
-        understanding
-          .serviceName
-      );
-
-    const service =
-      deterministic.match ||
-      semanticService;
-
-    if (!service) {
-      const choices =
-        (
-          deterministic.candidates
-            .length
-            ? deterministic.candidates
-            : services
-        )
-          .slice(0, 3)
-          .map(
-            (item) =>
-              item.name
-          )
-          .join(", ");
-
-      retry(
-        deterministic
-          .candidates
-          .length > 1
-          ? `Which service did you mean: ${choices}?`
-          : `I couldn't match that service. ${
-              choices
-                ? `Available options include ${choices}.`
-                : "Please contact the business for services."
-            }`,
-        services.map(
-          (item) =>
-            item.name
-        )
-      );
-
-      return;
-    }
-
-    state.booking.failures =
-      0;
-
-    state.booking.serviceId =
-      service.id;
-
-    state.booking.serviceName =
-      service.name;
-
-    resetAfterServiceChange(
-      state
-    );
-
-    if (
-      understanding
-        ?.dateExpression
-    ) {
-      const parsedDate =
-        validateDateExpression(
-          understanding
-            .dateExpression,
-          business
-        );
-
-      if (
-        !parsedDate.valid
-      ) {
-        state.booking.stage =
-          "date";
-
-        retry(
-          parsedDate.reason ===
-            "past"
-            ? `I understood ${service.name}, but that date has already passed. Please choose another date.`
-            : `I understood ${service.name}, but I couldn't verify the date. Please say the date again.`
-        );
-
-        return;
-      }
-
-      state.booking.date =
-        parsedDate.date;
-    }
-
-    if (
-      understanding
-        ?.timeExpression &&
-      state.booking.date
-    ) {
-      const parsedTime =
-        validateTimeExpression(
-          understanding
-            .timeExpression
-        );
-
-      if (
-        parsedTime.kind ===
-        "valid"
-      ) {
-        await handleAvailability(
-          parsedTime.value
-        );
-
-        return;
-      }
-
-      state.booking.stage =
-        "time";
-
-      retry(
-        parsedTime.kind ===
-          "ambiguous"
-          ? `I understood ${service.name} and the date, but I need AM or PM for the time. Did you mean ${spokenTime(
-              parsedTime.options[0]
-            )} or ${spokenTime(
-              parsedTime.options[1]
-            )}?`
-          : `I understood ${service.name} and the date, but I couldn't verify the time. Please say the time again.`
-      );
-
-      return;
-    }
-
-    if (
-      state.booking.date
-    ) {
-      askForTime();
-      return;
-    }
-
-    askForDate(
-      service.name
-    );
-
-    return;
-  }
-
-  if (
-    state.booking.stage ===
-    "date"
-  ) {
-    let date =
-      bookingDate(
-        speech,
-        business.timezone
-      );
-
-    let understanding:
-      | VoiceTurnUnderstanding
-      | null = null;
-
-    if (!date) {
-      understanding =
-        await understand({
-          stage: "date",
-          speech,
-        });
-
-      if (
-        understanding
-          .dateExpression
-      ) {
-        const parsedDate =
-          validateDateExpression(
-            understanding
-              .dateExpression,
-            business
-          );
-
-        if (
-          parsedDate.valid
-        ) {
-          date =
-            parsedDate.date;
-        } else if (
-          parsedDate.reason ===
-          "past"
-        ) {
-          retry(
-            "That date has already passed. Please choose another date."
-          );
-
-          return;
+      applyBookingDetails(
+        booking,
+        {
+          time: chosen,
         }
+      );
+
+      await checkAvailability();
+
+      return;
+    }
+
+    if (
+      booking.stage ===
+        "confirm" &&
+      booking.time
+    ) {
+      if (digits === "1") {
+        await commit();
+        return;
       }
-    }
 
-    if (!date) {
-      retry(
-        "I couldn't verify that date. Please say the month and day, or a date such as next Friday."
-      );
-
-      return;
-    }
-
-    const today =
-      businessLocalDate(
-        business.timezone
-      );
-
-    if (
-      today &&
-      date < today
-    ) {
-      retry(
-        "That date has already passed. Please choose another date."
-      );
-
-      return;
-    }
-
-    state.booking.failures =
-      0;
-
-    state.booking.date =
-      date;
-
-    resetAfterDateChange(
-      state
-    );
-
-    if (
-      understanding
-        ?.timeExpression
-    ) {
-      const parsedTime =
-        validateTimeExpression(
-          understanding
-            .timeExpression
-        );
-
-      if (
-        parsedTime.kind ===
-        "valid"
-      ) {
-        await handleAvailability(
-          parsedTime.value
+      if (digits === "2") {
+        say(
+          "Okay. No appointment was booked. Thanks for calling. Goodbye."
         );
 
         return;
       }
-
-      state.booking.stage =
-        "time";
-
-      retry(
-        parsedTime.kind ===
-          "ambiguous"
-          ? `I have the date. For the time, did you mean ${spokenTime(
-              parsedTime.options[0]
-            )} or ${spokenTime(
-              parsedTime.options[1]
-            )}? Please say AM or PM.`
-          : "I have the date, but I couldn't verify the time. Please say the time again."
-      );
-
-      return;
     }
-
-    askForTime();
-
-    return;
   }
 
+  /*
+   * 3. An explicit refusal ends the booking at any stage.
+   */
   if (
-    state.booking.stage ===
-    "time"
-  ) {
-    let parsed =
-      parseSpokenTime(
-        speech
-      );
-
-    let understanding:
-      | VoiceTurnUnderstanding
-      | null = null;
-
-    if (
-      parsed.kind ===
-      "invalid"
-    ) {
-      understanding =
-        await understand({
-          stage: "time",
-          speech,
-        });
-
-      if (
-        understanding
-          .timeExpression
-      ) {
-        parsed =
-          parseSpokenTime(
-            understanding
-              .timeExpression
-          );
-      }
-    }
-
-    if (
-      parsed.kind !==
-      "valid"
-    ) {
-      retry(
-        parsed.kind ===
-          "ambiguous"
-          ? `Did you mean ${spokenTime(
-              parsed.options[0]
-            )} or ${spokenTime(
-              parsed.options[1]
-            )}? Please say the full time with AM or PM.`
-          : "I couldn't interpret that time. Please say a valid time such as one PM or two thirty PM."
-      );
-
-      return;
-    }
-
-    await handleAvailability(
-      parsed.value
-    );
-
-    return;
-  }
-
-  let confirmation =
     interpretConfirmation(
       speech
-    );
-
-  if (
-    confirmation === "yes"
+    ) === "no"
   ) {
-    /*
-     * Continue to the authoritative mutation boundary.
-     */
-  } else {
-    const services =
-      await loadVoiceServices(
-        business.businessId
-      );
-
-    const understanding =
-      await understand({
-        stage: "confirm",
-        speech,
-        services,
-      });
-
-    const hasReplacementDetails =
-      Boolean(
-        understanding
-          .serviceName ||
-        understanding
-          .dateExpression ||
-        understanding
-          .timeExpression
-      );
-
-    /*
-     * At confirmation, validated replacement details are correction
-     * intent even if the semantic model mislabels correction=false.
-     *
-     * The model still has no authority to mutate booking data:
-     * service/date/time values continue through the existing
-     * deterministic validation and fresh availability paths below.
-     */
-    if (
-      understanding.correction ||
-      hasReplacementDetails
-    ) {
-      if (
-        understanding
-          .serviceName
-      ) {
-        const service =
-          resolveService(
-            services,
-            understanding
-              .serviceName
-          );
-
-        if (!service) {
-          retry(
-            "I understood that you want to change the service, but I couldn't verify which service you meant."
-          );
-
-          return;
-        }
-
-        state.booking.serviceId =
-          service.id;
-
-        state.booking.serviceName =
-          service.name;
-
-        resetAfterServiceChange(
-          state
-        );
-
-        state.booking.failures =
-          0;
-
-        if (
-          understanding
-            .dateExpression
-        ) {
-          const parsedDate =
-            validateDateExpression(
-              understanding
-                .dateExpression,
-              business
-            );
-
-          if (
-            parsedDate.valid
-          ) {
-            state.booking.date =
-              parsedDate.date;
-          }
-        }
-
-        if (
-          state.booking.date &&
-          understanding
-            .timeExpression
-        ) {
-          const parsedTime =
-            validateTimeExpression(
-              understanding
-                .timeExpression
-            );
-
-          if (
-            parsedTime.kind ===
-            "valid"
-          ) {
-            await handleAvailability(
-              parsedTime.value
-            );
-
-            return;
-          }
-        }
-
-        if (
-          state.booking.date
-        ) {
-          askForTime();
-        } else {
-          askForDate(
-            service.name
-          );
-        }
-
-        return;
-      }
-
-      if (
-        understanding
-          .dateExpression
-      ) {
-        const parsedDate =
-          validateDateExpression(
-            understanding
-              .dateExpression,
-            business
-          );
-
-        if (
-          !parsedDate.valid
-        ) {
-          state.booking.stage =
-            "date";
-
-          retry(
-            parsedDate.reason ===
-              "past"
-              ? "That new date has already passed. Please choose another date."
-              : "I understood that you want to change the date, but I couldn't verify the new date."
-          );
-
-          return;
-        }
-
-        state.booking.date =
-          parsedDate.date;
-
-        resetAfterDateChange(
-          state
-        );
-
-        state.booking.failures =
-          0;
-
-        if (
-          understanding
-            .timeExpression
-        ) {
-          const parsedTime =
-            validateTimeExpression(
-              understanding
-                .timeExpression
-            );
-
-          if (
-            parsedTime.kind ===
-            "valid"
-          ) {
-            await handleAvailability(
-              parsedTime.value
-            );
-
-            return;
-          }
-        }
-
-        askForTime();
-
-        return;
-      }
-
-      if (
-        understanding
-          .timeExpression
-      ) {
-        const parsedTime =
-          validateTimeExpression(
-            understanding
-              .timeExpression
-          );
-
-        if (
-          parsedTime.kind !==
-          "valid"
-        ) {
-          if (
-            parsedTime.kind ===
-            "ambiguous"
-          ) {
-            state.booking.pendingTimeOptions =
-              parsedTime.options;
-
-            state.booking.failures =
-              0;
-
-            retry(
-              `I understand you want to change the time. Did you mean ${spokenTime(
-                parsedTime.options[0]
-              )} or ${spokenTime(
-                parsedTime.options[1]
-              )}? Please say AM or PM.`
-            );
-
-            return;
-          }
-
-          retry(
-            "I understand you want to change the time, but I couldn't verify the new time."
-          );
-
-          return;
-        }
-
-        state.booking.pendingTimeOptions =
-          undefined;
-
-        state.booking.time =
-          null;
-
-        await handleAvailability(
-          parsedTime.value
-        );
-
-        return;
-      }
-
-      retry(
-        `I understand you want to change something. You can tell me the service, date, or time you'd like instead. I currently have ${bookingSummary(
-          state
-        )}.`
-      );
-
-      return;
-    }
-
-    if (
-      understanding
-        .confirmation ===
-        "no"
-    ) {
-      response.say(
-        voiceOptions(),
-        "Okay. No appointment was booked. Thanks for calling. Goodbye."
-      );
-
-      response.hangup();
-
-      return;
-    }
-
-    if (
-      understanding
-        .confirmation ===
-        "yes" &&
-      !understanding
-        .correction &&
-      !understanding
-        .serviceName &&
-      !understanding
-        .dateExpression &&
-      !understanding
-        .timeExpression
-    ) {
-      confirmation =
-        "yes";
-    } else {
-      retry(
-        understanding
-          .meaningful
-          ? `I haven't booked it yet. I have ${bookingSummary(
-              state
-            )}. Say yes to book it, no to cancel, or tell me what you'd like to change.`
-          : `I couldn't understand that clearly enough to book anything. I have ${bookingSummary(
-              state
-            )}. Say yes to book it, no to cancel, or tell me what you'd like to change.`
-      );
-
-      return;
-    }
-  }
-
-  if (
-    confirmation !== "yes"
-  ) {
-    retry(
-      `Please say yes to book ${bookingSummary(
-        state
-      )}, or no to cancel.`
+    say(
+      "Okay. No appointment was booked. Thanks for calling. Goodbye."
     );
 
-    return;
-  }
-
-  const booking =
-    state.booking;
-
-  if (
-    !booking.customerName ||
-    !booking.serviceId ||
-    !booking.serviceName ||
-    !booking.date ||
-    !booking.time
-  ) {
-    response.say(
-      voiceOptions(),
-      "I couldn't verify all of the booking details. No appointment was booked. Please call again."
-    );
-
-    response.hangup();
-    return;
-  }
-
-  const phone =
-    normalizePhone(
-      callerPhone
-    );
-
-  if (
-    !PHONE.test(phone)
-  ) {
-    response.say(
-      voiceOptions(),
-      "I couldn't verify a callback phone number for this appointment. No appointment was booked."
-    );
-
-    response.hangup();
     return;
   }
 
   /*
-   * AUTHORITATIVE MUTATION BOUNDARY
-   *
-   * The semantic model cannot reach the booking RPC
-   * without explicit confirmation above.
-   *
-   * The database remains authoritative and revalidates
-   * the booking.
+   * 4. A pending AM/PM clarification, answerable at ANY stage. A richer reply
+   *    falls through so the caller can replace the time instead.
    */
-  const bookingStarted =
-    Date.now();
+  if (
+    booking.pendingTimeOptions
+  ) {
+    const period =
+      periodChoice(speech);
 
-  const result =
-    await executeVoiceBooking({
-      businessId:
-        business.businessId,
+    if (period) {
+      const chosen =
+        booking.pendingTimeOptions[
+          period === "am"
+            ? 0
+            : 1
+        ];
 
-      idempotencyKey:
-        booking.idempotencyKey,
+      booking.pendingTimeOptions =
+        undefined;
 
-      customerName:
-        booking.customerName,
+      booking.failures = 0;
+      acceptVoiceProgress(state);
 
-      customerPhone:
-        phone,
+      applyBookingDetails(
+        booking,
+        {
+          time: chosen,
+        }
+      );
 
-      serviceId:
-        booking.serviceId,
+      await checkAvailability();
 
-      serviceName:
-        booking.serviceName,
+      return;
+    }
+  }
 
-      date:
-        booking.date,
+  /*
+   * 5. Deterministic extraction. Every utterance may contribute ANY field,
+   *    regardless of which question was asked.
+   */
+  const detected =
+    extractBookingDetails({
+      speech,
+      services,
 
-      time:
-        booking.time,
+      timezone:
+        business.timezone,
+
+      wantName:
+        !booking.customerName,
     });
 
-  console.info(
-    `AnaAI voice booking completed duration_ms=${
-      Date.now() -
-      bookingStarted
-    } result=${
-      result.success
-        ? result.replayed
-          ? "replayed"
-          : "success"
-        : "rejected"
-    }`
-  );
+  const readyToBook =
+    booking.stage ===
+      "confirm" &&
+    Boolean(booking.time);
 
-  if (!result.success) {
-    response.say(
-      voiceOptions(),
-      result.message
-    );
+  /*
+   * 6. A plain affirmative at confirmation, with nothing else in the sentence,
+   *    is booking authorization.
+   */
+  if (
+    readyToBook &&
+    !detected.any &&
+    interpretConfirmation(
+      speech
+    ) === "yes"
+  ) {
+    if (lowConfidence) {
+      retry(
+        `I didn't hear that clearly enough to book it. I have ${summary()}. Say yes or press 1 to book it, or no to cancel.`
+      );
 
-    response.hangup();
+      return;
+    }
+
+    await commit();
     return;
   }
 
-  const bookingConfirmation =
-    result.replayed
-      ? "Your original booking was already completed. No duplicate appointment was created."
-      : "Your appointment has been booked successfully.";
+  /*
+   * 7. Ask the semantic layer only when determinism left something open. It
+   *    supplements; it is never authority over any value.
+   */
+  const stage:
+    | "name"
+    | "service"
+    | "date"
+    | "time"
+    | "confirm" =
+    readyToBook
+      ? "confirm"
+      : missingBookingField(
+            booking
+          ) || "confirm";
 
-  const sms =
-    result.smsSent
-      ? " A confirmation text was submitted for sending."
-      : " I couldn't verify the text confirmation status.";
+  const deterministicTime =
+    detected.time?.kind ===
+    "valid"
+      ? detected.time.value
+      : null;
 
-  response.say(
-    voiceOptions(),
-    `${bookingConfirmation}${sms} Thanks for calling. Goodbye.`
-  );
+  const settled =
+    Boolean(
+      (booking.customerName ||
+        detected.name) &&
+        (booking.serviceId ||
+          detected.service) &&
+        (booking.date ||
+          detected.date) &&
+        (booking.requestedTime ||
+          deterministicTime)
+    ) &&
+    detected.time?.kind !==
+      "ambiguous";
 
-  response.hangup();
+  const understanding =
+    readyToBook || !settled
+      ? await understand({
+          stage,
+          speech,
+          services,
+        })
+      : null;
+
+  /*
+   * 8. Merge. Deterministic values win; the model only fills gaps, and every
+   *    model value still passes through the deterministic validators.
+   */
+  let mergedDate:
+    | string
+    | null = null;
+
+  let dateRejected:
+    | "past"
+    | "invalid"
+    | null = null;
+
+  /*
+   * Every date reaches the SAME validation regardless of whether it was read
+   * deterministically or supplied by the model. A past day is never accepted.
+   */
+  const dateExpression =
+    detected.date ||
+    (!detected.date &&
+    !detected.dateUnresolved
+      ? understanding?.dateExpression ||
+        null
+      : null);
+
+  if (dateExpression) {
+    const parsed =
+      validateDateExpression(
+        dateExpression,
+        business
+      );
+
+    if (parsed.valid) {
+      mergedDate =
+        parsed.date;
+    } else {
+      dateRejected =
+        parsed.reason;
+    }
+  }
+
+  let semanticTime:
+    | TimeInterpretation
+    | null = null;
+
+  if (
+    !detected.time &&
+    understanding?.timeExpression
+  ) {
+    semanticTime =
+      parseSpokenTime(
+        understanding.timeExpression
+      );
+  }
+
+  const semanticService =
+    detected.service
+      ? null
+      : resolveService(
+          services,
+          understanding?.serviceName ||
+            null
+        );
+
+  const chosenTime =
+    detected.time ||
+    semanticTime;
+
+  const change =
+    applyBookingDetails(
+      booking,
+      {
+        name:
+          detected.name ||
+          (understanding?.customerName ??
+            null),
+
+        service:
+          detected.service ||
+          semanticService,
+
+        date: mergedDate,
+
+        time:
+          chosenTime?.kind ===
+          "valid"
+            ? chosenTime.value
+            : null,
+      }
+    );
+
+  const understood =
+    change.name ||
+    change.service ||
+    change.date ||
+    change.time;
+
+  if (understood) {
+    booking.failures = 0;
+    acceptVoiceProgress(state);
+
+    if (
+      !chosenTime ||
+      chosenTime.kind !==
+        "ambiguous"
+    ) {
+      booking.pendingTimeOptions =
+        undefined;
+    }
+  }
+
+  /*
+   * 9. Genuine ambiguity gets a focused question rather than a guess.
+   */
+  if (
+    detected.serviceCandidates
+      .length > 1
+  ) {
+    /*
+     * The caller is changing the service. Even though we cannot tell which one
+     * yet, any previously confirmed availability is already stale.
+     */
+    booking.time = null;
+
+    booking.stage =
+      "service";
+
+    retry(
+      `I heard more than one service. Did you want ${detected.serviceCandidates
+        .slice(0, 3)
+        .map(
+          (item) =>
+            item.name
+        )
+        .join(" or ")}?`,
+      serviceNames
+    );
+
+    return;
+  }
+
+  if (
+    chosenTime?.kind ===
+    "ambiguous"
+  ) {
+    /*
+     * A replacement time we cannot resolve yet still invalidates the old one.
+     * Leaving `time` set would let a later affirmative book a slot the caller
+     * has already moved away from.
+     */
+    booking.time = null;
+    booking.requestedTime = null;
+
+    booking.stage = "time";
+
+    state.recovery = recoveryBefore;
+    if (recoverVoiceInput(state)) {
+      say("I'm having trouble understanding. No appointment was booked. Please call the salon directly and someone can help. Goodbye.");
+      return;
+    }
+    askAmPm(chosenTime.options);
+
+    return;
+  }
+
+  if (dateRejected) {
+    booking.stage = "date";
+
+    retry(
+      dateRejected === "past"
+        ? "That day has already passed. What day would you like instead?"
+        : "I couldn't work out that day. You can say tomorrow, a weekday, or a month and day."
+    );
+
+    return;
+  }
+
+  if (
+    detected.dateUnresolved &&
+    !change.date &&
+    !booking.date
+  ) {
+    booking.stage = "date";
+
+    retry(
+      "I couldn't work out that day. You can say tomorrow, a weekday, or a month and day."
+    );
+
+    return;
+  }
+
+  /*
+   * 10. Nothing usable. Report the specific reason where one is known.
+   */
+  if (!understood) {
+    if (
+      readyToBook &&
+      understanding?.confirmation ===
+        "no"
+    ) {
+      say(
+        "Okay. No appointment was booked. Thanks for calling. Goodbye."
+      );
+
+      return;
+    }
+
+    /*
+     * A turn that names ANY appointment detail is a correction, never booking
+     * authorization -- including when the detail happens to repeat the current
+     * value, and including when the semantic layer labels it confirmation.
+     * The model must not be able to book by attaching "yes" to a restatement.
+     */
+    const mentionsDetail =
+      detected.any ||
+      Boolean(
+        understanding?.customerName ||
+          understanding?.serviceName ||
+          understanding?.serviceUnresolved ||
+          understanding?.dateExpression ||
+          understanding?.timeExpression ||
+          understanding?.correction
+      );
+
+    if (
+      readyToBook &&
+      !mentionsDetail &&
+      understanding?.confirmation ===
+        "yes"
+    ) {
+      if (lowConfidence) {
+        retry(
+          `I didn't hear that clearly enough to book it. I have ${summary()}. Say yes or press 1 to book it, or no to cancel.`
+        );
+
+        return;
+      }
+
+      await commit();
+      return;
+    }
+
+    if (readyToBook) {
+      retry(
+        `I haven't booked anything yet. I have ${summary()}. Say yes or press 1 to book it, no to cancel, or tell me what to change.`
+      );
+
+      return;
+    }
+
+    /*
+     * A focused, field-specific re-ask. Every one of these counts toward the
+     * escalation limit, so a caller cannot be looped indefinitely.
+     */
+    const missing =
+      missingBookingField(
+        booking
+      );
+
+    /*
+     * The utterance that opened the booking ("I'd like to book something")
+     * carries no details by design. That is the start of the conversation, not
+     * a failure to understand, so it must not count toward escalation.
+     */
+    if (opening) {
+      booking.stage =
+        missing as VoiceBookingStage;
+
+      ask();
+
+      return;
+    }
+
+    /*
+     * An unresolved AM/PM question stays the active question. An affirmative
+     * here answers nothing, and must never fall through to booking.
+     */
+    if (
+      booking.pendingTimeOptions
+    ) {
+      booking.stage = "time";
+
+      retry(
+        `I still need to know which one. Did you mean ${spokenTime(
+          booking.pendingTimeOptions[0]
+        )} or ${spokenTime(
+          booking.pendingTimeOptions[1]
+        )}? Say AM or PM.`
+      );
+
+      return;
+    }
+
+    if (
+      understanding?.serviceUnresolved ||
+      missing === "service"
+    ) {
+      booking.stage =
+        "service";
+
+      retry(
+        `I couldn't match that to a service. We offer ${serviceNames
+          .slice(0, 6)
+          .join(", ")}.`,
+        serviceNames
+      );
+
+      return;
+    }
+
+    if (missing === "name") {
+      booking.stage = "name";
+
+      retry(
+        "Sorry, I didn't catch the name. What name should I put on the appointment?"
+      );
+
+      return;
+    }
+
+    if (missing === "date") {
+      booking.stage = "date";
+
+      retry(
+        "I couldn't work out that day. You can say tomorrow, a weekday, or a month and day."
+      );
+
+      return;
+    }
+
+    booking.stage = "time";
+
+    retry(
+      "I couldn't interpret that time. Please say a time such as 10 AM or 2:30 PM."
+    );
+
+    return;
+  }
+
+  /*
+   * 11. Something was understood. Ask for what is still missing, otherwise
+   *     recheck availability for the current combination.
+   */
+  if (
+    missingBookingField(
+      booking
+    )
+  ) {
+    booking.stage =
+      missingBookingField(
+        booking
+      ) as VoiceBookingStage;
+
+    ask();
+
+    return;
+  }
+
+  await checkAvailability();
 }
 
-export async function buildVoiceResponse({
+async function buildVoiceResponseInternal({
   formData,
   mode,
   ingress,
   stateToken = "",
+  diagnostics,
 }: {
   formData: FormData;
   mode: string;
   ingress: VoiceIngress;
   stateToken?: string;
+  diagnostics: VoiceDiagnostics;
 }) {
   const requestStarted =
     Date.now();
@@ -2050,6 +1913,7 @@ export async function buildVoiceResponse({
     new twilio.twiml.VoiceResponse();
 
   if (!business) {
+    diagnostics.reason = "business_unresolved";
     console.warn(
       "AnaAI voice request did not resolve to an active business."
     );
@@ -2090,6 +1954,8 @@ export async function buildVoiceResponse({
     | VoiceState
     | null = null;
 
+  diagnostics.call = voiceDiagnosticId(binding);
+  diagnostics.callback = voiceDiagnosticId(binding, stateToken || `stateless:${mode}`);
   if (stateToken) {
     try {
       state =
@@ -2098,6 +1964,7 @@ export async function buildVoiceResponse({
           binding
         );
     } catch {
+      diagnostics.reason = "invalid_or_expired_state";
       response.say(
         voiceOptions(),
         "This conversation has expired. No appointment was changed. Please call again. Goodbye."
@@ -2107,6 +1974,12 @@ export async function buildVoiceResponse({
 
       return response.toString();
     }
+  } else if (voiceStateConfigured() && /^(?:listen|retry|recovery-[12]-[01])$/.test(mode)) {
+    // A continuation cannot silently acquire a new lifetime/recovery budget.
+    diagnostics.reason = "missing_callback_state";
+    response.say(voiceOptions(), "I couldn't verify this conversation. No appointment was changed. Please call again. Goodbye.");
+    response.hangup();
+    return response.toString();
   } else if (
     voiceStateConfigured() &&
     /^CA[0-9a-f]{32}$/i.test(
@@ -2117,6 +1990,8 @@ export async function buildVoiceResponse({
       initialVoiceState();
   }
 
+  diagnostics.state = state;
+  diagnostics.before = stateSnapshot(state);
   if (state) {
     state.turns++;
   }
@@ -2146,18 +2021,33 @@ export async function buildVoiceResponse({
   const callerPhone =
     read("From");
 
-  /*
-   * Privacy-safe ASR observability.
-   *
-   * We deliberately do NOT log:
-   * - transcript contents
-   * - exact transcript length
-   * - caller phone
-   * - CallSid
-   * - business/customer/appointment IDs
-   * - state token
-   * - Twilio signatures
-   */
+  const input = classifyVoiceInput(speech, digits, recognitionConfidence(formData));
+  const recovery = state || statelessVoiceRecovery(mode);
+  diagnostics.recovery = recovery;
+  if (!state) diagnostics.before = { ...diagnostics.before, recovery: recovery.recovery || 0, empty_count: recovery.silence };
+  const initial = !mode && !stateToken && !speech && !digits;
+  const recover = (reason: string, empty = false, prompt?: string) => {
+    diagnostics.reason = reason;
+    if (recoverVoiceInput(recovery, empty)) {
+      response.say(voiceOptions(), state?.mode === "booking"
+        ? "I couldn't hear you clearly. No appointment was booked. Please call again when you're ready. Goodbye."
+        : state?.mode === "management"
+          ? "I couldn't hear you clearly. Your appointment has not been changed. Please call again or contact the business. Goodbye."
+          : "I couldn't hear you clearly. Please call again when you're ready. Goodbye.");
+      response.hangup();
+    } else {
+      gather(response, ingress, binding, prompt || recoveryPrompt(state, empty, business.timezone), state,
+        state ? (empty && (state.mode === "menu" || state.mode === "info") ? "retry" : "listen")
+          : voiceRecoveryMode(recovery));
+    }
+  };
+  if (!initial && (input.kind !== "speech" && input.kind !== "dtmf" ||
+      input.kind === "dtmf" && !voiceDigitAllowed(state, digits))) {
+    recover(input.kind === "dtmf" ? "invalid_digit_for_stage" : input.reason, input.kind === "empty",
+      input.kind === "dtmf" && (!state || state.mode === "menu" || state.mode === "info")
+        ? "That option isn't available. Speak naturally, or press 0 to hear the options." : undefined);
+    return response.toString();
+  }
 
   /*
    * Human handoff requests are authoritative conversation control,
@@ -2186,14 +2076,9 @@ export async function buildVoiceResponse({
       });
 
     if (!transferred) {
-      gather(
-        response,
-        ingress,
-        binding,
-        TRANSFER_UNAVAILABLE,
-        state,
-        "listen"
-      );
+      recover("transfer_unavailable", false, TRANSFER_UNAVAILABLE);
+    } else {
+      acceptVoiceProgress(recovery);
     }
 
     console.info(
@@ -2206,18 +2091,108 @@ export async function buildVoiceResponse({
     return response.toString();
   }
 
+    const intent = managementIntent(
+      speech,
+      state?.mode === "booking"
+    );
+
+  if (
+    state?.mode === "management" ||
+    (intent && state)
+  ) {
+    const openingManagement =
+      state!.mode !== "management";
+
+    const managementState =
+      state!.mode === "management"
+        ? state!
+        : initialManagementState(
+            state!,
+            intent!
+          );
+
+    /*
+     * Recognizing a valid appointment-management intent is real
+     * conversational progress. Recovery accumulated in the menu or
+     * information flow must not be inherited by the newly entered
+     * management flow.
+     *
+     * Once management has started, unresolved target/time/availability
+     * turns still consume its normal bounded recovery budget.
+     */
+    if (openingManagement) {
+      acceptVoiceProgress(
+        managementState
+      );
+    }
+
+    diagnostics.state =
+      managementState;
+
+    const result =
+      await voiceManagementTurn({
+        state:
+          managementState,
+
+        businessId:
+          business.businessId,
+
+        callerPhone,
+
+        timezone:
+          business.timezone,
+
+        speech,
+        digits,
+
+        confidence:
+          recognitionConfidence(
+            formData
+          ),
+
+        opening:
+          openingManagement,
+
+        onMutation: () => {
+          diagnostics.operation =
+            "appointment_mutation";
+        },
+      });
+
+    if (result.done) {
+      response.say(
+        voiceOptions(),
+        result.message
+      );
+
+      response.hangup();
+    } else {
+      gather(
+        response,
+        ingress,
+        binding,
+        result.message,
+        managementState
+      );
+    }
+
+    return response.toString();
+  }
+
   if (
     state?.mode ===
     "booking"
   ) {
+    const confidence =
+      recognitionConfidence(
+        formData
+      );
+
     logRecognition({
       stage:
         state.booking.stage,
       speech,
-      confidence:
-        recognitionConfidence(
-          formData
-        ),
+      confidence,
     });
 
     await bookingTurn({
@@ -2227,7 +2202,10 @@ export async function buildVoiceResponse({
       business,
       state,
       speech,
+      digits,
+      confidence,
       callerPhone,
+      onMutation: () => { diagnostics.operation = "appointment_mutation"; },
     });
 
     console.info(
@@ -2250,7 +2228,7 @@ export async function buildVoiceResponse({
       binding,
       message,
       state,
-      nextMode
+      !state && recovery.recovery ? voiceRecoveryMode(recovery) : nextMode
     );
 
   const goodbye =
@@ -2276,50 +2254,14 @@ export async function buildVoiceResponse({
         business.businessName
       )
     );
-  } else if (
-    !speech &&
-    !digits
-  ) {
-    if (
-      (
-        state?.silence ??
-        (mode === "retry"
-          ? 1
-          : 0)
-      ) >= 1
-    ) {
-      response.say(
-        voiceOptions(),
-        "I couldn't hear you. Please call again when you're ready. Goodbye."
-      );
-
-      response.hangup();
-    } else {
-      if (state) {
-        state.silence = 1;
-      }
-
-      listen(
-        `I didn't hear anything. ${
-          state?.mode ===
-          "info"
-            ? INFO_PROMPT
-            : "Speak naturally, or press 0 to hear the options."
-        }`,
-        "retry"
-      );
-    }
   } else {
-    if (state) {
-      state.silence = 0;
-    }
-
     if (
       digits === "0" ||
       /^(?:please )?(?:repeat(?: the)? (?:menu|options)|main menu|start over)[.!?, ]*$/i.test(
         speech
       )
     ) {
+      acceptVoiceProgress(recovery);
       if (state) {
         state.mode =
           "menu";
@@ -2336,14 +2278,30 @@ export async function buildVoiceResponse({
         speech
       )
     ) {
-      beginBooking(
+      if (!state) {
+        recover("booking_unavailable", false, BOOKING_STATE_UNAVAILABLE);
+        return response.toString();
+      }
+      acceptVoiceProgress(recovery);
+      await beginBooking({
         response,
         ingress,
-        binding
-      );
+        binding,
+        business,
+        speech,
+
+        confidence:
+          recognitionConfidence(
+            formData
+          ),
+
+        callerPhone,
+        previousState: state,
+      });
     } else if (
       digits === "2"
     ) {
+      acceptVoiceProgress(recovery);
       if (state) {
         state.mode =
           "info";
@@ -2371,35 +2329,32 @@ export async function buildVoiceResponse({
         });
 
       if (!transferred) {
-        listen(
-          TRANSFER_UNAVAILABLE
-        );
+        recover("transfer_unavailable", false, TRANSFER_UNAVAILABLE);
+      } else {
+        acceptVoiceProgress(recovery);
       }
     } else if (
       digits
     ) {
-      listen(
-        `That option isn't available. ${mainMenu(
-          business.businessName
-        )}`
-      );
+      recover("invalid_digit_for_stage");
     } else {
-      if (state) {
-        state.mode =
-          "info";
-      }
-
+      let answered = false;
       const answer =
         await answerVoiceQuestion(
           business.businessId,
           business.businessName,
           speech,
-          business.timezone
+          business.timezone,
+          () => { answered = true; }
         );
-
-      listen(
-        `${answer} What else would you like to know?`
-      );
+      if (answered) {
+        acceptVoiceProgress(recovery);
+        if (state) state.mode = "info";
+        diagnostics.outcome = "answer";
+        listen(`${answer} What else would you like to know?`);
+      } else {
+        recover("unresolved_question", false, answer);
+      }
     }
   }
 
@@ -2413,4 +2368,67 @@ export async function buildVoiceResponse({
   );
 
   return response.toString();
+}
+function stateSnapshot(state: VoiceState | null) {
+  return { flow: state?.mode || "menu", stage: state?.mode === "booking" ? state.booking.stage :
+    state?.mode === "management" ? state.management.stage : "none",
+    turns: state?.turns || 0, recovery: state?.recovery || 0, empty_count: state?.silence || 0 };
+}
+
+type VoiceDiagnostics = {
+  state: VoiceState | null;
+  before: ReturnType<typeof stateSnapshot>;
+  call: string | null;
+  callback: string | null;
+  reason: string;
+  outcome?: string;
+  operation?: string;
+  recovery?: VoiceRecovery;
+};
+
+/** One completion event, including exceptions and every early return. */
+export async function buildVoiceResponse(args: {
+  formData: FormData; mode: string; ingress: VoiceIngress; stateToken?: string;
+}): Promise<string> {
+  const started = Date.now();
+  const read = (key: string) => {
+    const value = args.formData.get(key);
+    return typeof value === "string" ? value.trim() : "";
+  };
+  const speech = read("SpeechResult");
+  const digits = read("Digits");
+  const confidence = recognitionConfidence(args.formData);
+  const input = classifyVoiceInput(speech, digits, confidence);
+  const diagnostics: VoiceDiagnostics = { state: null, before: stateSnapshot(null),
+    call: null, callback: null, reason: input.reason };
+  let xml = "";
+  try {
+    xml = await buildVoiceResponseInternal({ ...args, diagnostics });
+    return xml;
+  } finally {
+    const next = stateSnapshot(diagnostics.state);
+    if (!diagnostics.state && diagnostics.recovery) {
+      next.recovery = diagnostics.recovery.recovery || 0;
+      next.empty_count = diagnostics.recovery.silence;
+    }
+    if (diagnostics.reason === "candidate_speech" && next.recovery > diagnostics.before.recovery) {
+      diagnostics.reason = `unresolved_${next.flow}`;
+    }
+    const outcome = !xml ? "error" : /<Hangup/.test(xml) ? "hangup" : /<Dial/.test(xml) ? "transfer" :
+      diagnostics.outcome || (next.flow !== diagnostics.before.flow || next.stage !== diagnostics.before.stage ? "transition" : "reprompt");
+    console.info("AnaAI voice turn", {
+      call: diagnostics.call, callback: diagnostics.callback, ingress: args.ingress,
+      incoming_mode: /^(?:listen|retry|recovery-[12]-[01])$/.test(args.mode) ? args.mode : args.mode ? "unknown" : "initial",
+      state_present: Boolean(args.stateToken), before: diagnostics.before, after: next,
+      speech_field_present: args.formData.has("SpeechResult"),
+      speech_length: !speech ? "empty" : speech.length <= 20 ? "short" : speech.length <= 80 ? "medium" : "long",
+      digits_present: Boolean(digits), confidence, classification: input.kind,
+      reason: diagnostics.reason, outcome, operation: diagnostics.operation || "none", duration_ms: Date.now() - started,
+      ...(/<Gather/.test(xml) ? { gather: {
+        input: "speech dtmf", num_digits: 1, timeout: 6, speech_timeout: 2,
+        action_on_empty_result: true, method: "POST", language: "en-US",
+        speech_model: "experimental_conversations",
+      } } : {}),
+    });
+  }
 }

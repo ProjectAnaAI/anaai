@@ -120,6 +120,8 @@ function verifyTwilioWebhook({
 }
 
 export async function POST(request: Request) {
+  const started = Date.now();
+  let outcome = "error";
   try {
     const url = new URL(request.url);
     const mode = url.searchParams.get("mode") || "";
@@ -133,6 +135,7 @@ export async function POST(request: Request) {
         params: twilioParams,
       })
     ) {
+      outcome = "rejected";
       return forbiddenResponse();
     }
 
@@ -143,6 +146,7 @@ export async function POST(request: Request) {
       ingress: "production",
     });
 
+    outcome = "responded";
     return twimlResponse(xml);
   } catch {
     console.error("AnaAI voice request failed.");
@@ -155,6 +159,8 @@ export async function POST(request: Request) {
     );
 
     return twimlResponse(response.toString());
+  } finally {
+    console.info("AnaAI voice ingress", { ingress: "production", outcome, duration_ms: Date.now() - started });
   }
 }
 

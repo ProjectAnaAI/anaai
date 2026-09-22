@@ -32,6 +32,7 @@ function loadUnderstanding({
             response === undefined
               ? JSON.stringify({
                   meaningful: false,
+                  customer_name: null,
                   service_name: null,
                   date_expression: null,
                   time_expression: null,
@@ -136,6 +137,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name:
             'Facial',
           date_expression:
@@ -204,6 +206,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression:
             'October second',
@@ -257,6 +260,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression:
@@ -299,6 +303,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression: null,
@@ -350,6 +355,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression: null,
@@ -396,6 +402,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression:
@@ -447,6 +454,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression:
@@ -508,6 +516,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name:
             'Haircut',
           date_expression: null,
@@ -559,6 +568,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression:
             'next Friday',
@@ -611,6 +621,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: false,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression: null,
@@ -656,6 +667,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: false,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression: null,
@@ -721,6 +733,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name:
             'Massage',
           date_expression: null,
@@ -767,6 +780,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression:
@@ -819,6 +833,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: false,
+          customer_name: null,
           service_name:
             'Facial',
           date_expression: null,
@@ -865,6 +880,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name: null,
           date_expression: null,
           time_expression: null,
@@ -939,6 +955,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name:
             'Facial',
           date_expression: null,
@@ -1028,6 +1045,7 @@ test(
 
         response: {
           meaningful: true,
+          customer_name: null,
           service_name:
             'Facial',
           date_expression: null,
@@ -1130,6 +1148,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name:
             'Facial',
           date_expression:
@@ -1195,6 +1214,7 @@ test(
       loadUnderstanding({
         response: {
           meaningful: true,
+          customer_name: null,
           service_name:
             'Facial',
           date_expression: null,

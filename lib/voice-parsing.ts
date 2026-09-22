@@ -515,7 +515,7 @@ export function bookingDate(
   }
 
   const weekday =
-    /^(this|next) (sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/.exec(
+    /^(?:(this|next) )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/.exec(
       text
     );
 
@@ -544,13 +544,23 @@ export function bookingDate(
      * "this" = current calendar week;
      * "next" = following calendar week
      * (Monday start).
+     *
+     * A BARE weekday ("Friday") is the next occurrence on or
+     * after today. Unlike the calendar-week forms it can never
+     * resolve into the past, so a caller who simply says a day
+     * name is not rejected for naming a past date.
      */
     const delta =
-      ((desired + 6) % 7) -
-      ((current + 6) % 7) +
-      (weekday[1] === "next"
-        ? 7
-        : 0);
+      weekday[1]
+        ? ((desired + 6) % 7) -
+          ((current + 6) % 7) +
+          (weekday[1] === "next"
+            ? 7
+            : 0)
+        : (desired -
+            current +
+            7) %
+          7;
 
     return businessLocalDate(
       timezone,

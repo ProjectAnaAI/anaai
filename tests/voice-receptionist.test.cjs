@@ -49,7 +49,9 @@ function load(file, imports, logs = [], overrides = {}) {
 }
 
 const parsing = load('lib/voice-parsing.ts', { './ai-actions': load('lib/ai-actions.ts', {}) });
+const slots = load('lib/voice-slots.ts', { '@/lib/voice-parsing': parsing });
 const voiceConfig = load('lib/voice-config.ts', {});
+const voiceInput = load('lib/voice-input.ts', {});
 
 function callbackState(xml) {
   const action = /action="([^"]+)"/.exec(xml)?.[1];
@@ -74,7 +76,7 @@ function handlerHarness({
   understandingResult = { kind: 'unclear' },
   handoffSettings = null,
 } = {}) {
-  const queries = [], requests = [], logs = [], bookings = [], availabilityChecks = [], serviceLoads = [], serviceResolutions = [];
+  const queries = [], requests = [], logs = [], bookings = [], availabilityChecks = [], serviceLoads = [], serviceResolutions = [], understandings = [];
 
   const db = {
     from(table) {
@@ -177,11 +179,24 @@ function handlerHarness({
       '@/lib/supabase-server': { createSupabaseServiceClient: () => db },
       '@/lib/voice-receptionist': receptionist,
       '@/lib/voice-state': state,
+      '@/lib/voice-input': voiceInput,
+      '@/lib/voice-appointment-management': load('lib/voice-appointment-management.ts', {
+        'node:crypto': require('node:crypto'),
+        '@/lib/supabase-server': { createSupabaseServiceClient: () => db },
+        '@/lib/voice-state': state,
+        '@/lib/voice-input': voiceInput, '@/lib/voice-slots': slots, '@/lib/voice-parsing': parsing,
+      }, logs),
       '@/lib/voice-booking': booking,
       '@/lib/voice-parsing': parsing,
+      '@/lib/voice-slots': slots,
       '@/lib/voice-config': voiceConfig,
       '@/lib/voice-understanding': {
-        understandVoiceTurn: async () => understandingResult,
+        understandVoiceTurn: async request => {
+          understandings.push(request);
+          return typeof understandingResult === 'function'
+            ? understandingResult(request)
+            : understandingResult;
+        },
       },
     },
     logs,
@@ -190,7 +205,7 @@ function handlerHarness({
 
   const run = async ({
     speech = '',
-    mode = 'listen',
+    mode,
     ingress = 'trial',
     digits = '',
     stateToken = '',
@@ -204,12 +219,12 @@ function handlerHarness({
     formData.set('Digits', digits);
     formData.set('From', from);
     formData.set('business_id', 'untrusted');
-    return handler.buildVoiceResponse({ formData, mode, ingress, stateToken });
+    return handler.buildVoiceResponse({ formData, mode: mode ?? (stateToken ? "listen" : ""), ingress, stateToken });
   };
 
   return {
     ...receptionist, state, run, queries, requests, logs,
-    bookings, availabilityChecks, serviceLoads, serviceResolutions,
+    bookings, availabilityChecks, serviceLoads, serviceResolutions, understandings,
   };
 }
 
@@ -290,12 +305,11 @@ test('keypad 1 starts booking only when encrypted state is configured', async ()
 test('booking collects name, service, date and time without mutation before explicit yes', async () => {
   const h = handlerHarness({ stateEnabled: true });
   const flow = await advanceBooking(h);
-  assert.match(flow.name, /Available services include Haircut/);
-  assert.match(flow.service, /What date would you like for Haircut/);
+  assert.match(flow.name, /We offer Haircut/);
+  assert.match(flow.service, /What day would you like for Haircut/);
   assert.match(flow.dated, /What time would you like/);
-  assert.match(flow.timed, /Say yes to book this appointment/);
+  assert.match(flow.timed, /Say yes or press 1 to book it/);
   assert.equal(h.bookings.length, 0);
-  assert.deepEqual(h.serviceLoads, [BUSINESS_ID, BUSINESS_ID]);
   assert.ok(h.serviceLoads.length >= 2);
   assert.ok(h.serviceLoads.every(id => id === BUSINESS_ID));
 });
@@ -373,7 +387,7 @@ test('phone booking rejects impossible natural spoken dates', async () => {
 
   assert.match(
     dated,
-    /couldn't verify that date/
+    /couldn't work out that day/
   );
 
   assert.equal(h.bookings.length, 0);
@@ -384,7 +398,7 @@ test('availability is checked before confirmation and does not mutate', async ()
   const h = handlerHarness({ stateEnabled: true });
   const flow = await advanceBooking(h);
 
-  assert.match(flow.timed, /Say yes to book this appointment/);
+  assert.match(flow.timed, /Say yes or press 1 to book it/);
   assert.equal(h.availabilityChecks.length, 1);
   assert.equal(h.availabilityChecks[0].businessId, BUSINESS_ID);
   assert.equal(h.availabilityChecks[0].serviceId, SERVICE_ID);
@@ -404,8 +418,8 @@ test('unavailable slot never reaches confirmation and never mutates', async () =
 
   const flow = await advanceBooking(h);
 
-  assert.match(flow.timed, /That time is not available/);
-  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.match(flow.timed, /isn't available for/);
+  assert.doesNotMatch(flow.timed, /Say yes or press 1 to book it/);
   assert.equal(h.availabilityChecks.length, 1);
   assert.equal(h.bookings.length, 0);
 
@@ -435,8 +449,8 @@ test('outside-hours slot remains in time selection without mutation', async () =
 
   const flow = await advanceBooking(h);
 
-  assert.match(flow.timed, /outside the business hours/);
-  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.match(flow.timed, /outside our hours/);
+  assert.doesNotMatch(flow.timed, /Say yes or press 1 to book it/);
   assert.equal(h.bookings.length, 0);
 
   const state = h.state.openVoiceState(
@@ -463,8 +477,8 @@ test('closed date returns to date selection without mutation', async () => {
 
   const flow = await advanceBooking(h);
 
-  assert.match(flow.timed, /business is closed on that date/);
-  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.match(flow.timed, /We're closed that day/);
+  assert.doesNotMatch(flow.timed, /Say yes or press 1 to book it/);
   assert.equal(h.bookings.length, 0);
 
   const state = h.state.openVoiceState(
@@ -492,10 +506,10 @@ test('unverified availability fails closed without confirmation or mutation', as
 
   const flow = await advanceBooking(h);
 
-  assert.match(flow.timed, /couldn't verify appointment availability/);
+  assert.match(flow.timed, /couldn't check availability/);
   assert.match(flow.timed, /No appointment was booked/);
   assert.match(flow.timed, /<Hangup/);
-  assert.doesNotMatch(flow.timed, /Say yes to book/);
+  assert.doesNotMatch(flow.timed, /Say yes or press 1 to book it/);
   assert.equal(callbackState(flow.timed), null);
   assert.equal(h.bookings.length, 0);
 });
@@ -514,7 +528,7 @@ test('authoritative booking can still reject a race after successful availabilit
 
   assert.equal(h.availabilityChecks.length, 1);
   assert.equal(h.bookings.length, 0);
-  assert.match(flow.timed, /Say yes to book/);
+  assert.match(flow.timed, /Say yes or press 1 to book it/);
 
   const xml = await h.run({
     speech: 'yes',
@@ -551,7 +565,7 @@ test('confirmed booking uses routed business and Twilio From, never form busines
   const h = handlerHarness({ stateEnabled: true });
   const flow = await advanceBooking(h);
   const xml = await h.run({ speech: 'yes', stateToken: flow.confirmToken, from: CALLER });
-  assert.match(xml, /booked successfully/);
+  assert.match(xml, /appointment has been booked/);
   assert.match(xml, /confirmation text was submitted/);
   assert.match(xml, /<Hangup/);
   assert.equal(h.bookings.length, 1);
@@ -599,7 +613,7 @@ test('SMS uncertainty does not undermine authoritative booking confirmation', as
   });
   const flow = await advanceBooking(h);
   const xml = await h.run({ speech: 'yes', stateToken: flow.confirmToken, from: CALLER });
-  assert.match(xml, /booked successfully/);
+  assert.match(xml, /appointment has been booked/);
   assert.match(xml, /couldn't verify the text confirmation status/);
 });
 
@@ -613,7 +627,7 @@ test('invalid service, date and time reprompt without mutation', async () => {
 
   const service = await h.run({ speech: 'Haircut', stateToken: callbackState(badService), from: CALLER });
   const badDate = await h.run({ speech: 'sometime next week', stateToken: callbackState(service), from: CALLER });
-  assert.match(badDate, /couldn't verify that date/);
+  assert.match(badDate, /couldn't work out that day/);
   assert.equal(h.bookings.length, 0);
 
   const date = await h.run({ speech: '2099-09-20', stateToken: callbackState(badDate), from: CALLER });
@@ -791,7 +805,7 @@ test('configured human request during confirmation transfers without booking', a
   });
 
   assert.match(xml, /<Dial/);
-  assert.doesNotMatch(xml, /booked successfully/);
+  assert.doesNotMatch(xml, /appointment has been booked/);
   assert.doesNotMatch(xml, /<Gather/);
   assert.equal(h.bookings.length, 0);
 });
@@ -916,7 +930,7 @@ test('explicit human request during booking cannot submit the in-progress appoin
     /transferring to a team member isn't available/
   );
   assert.match(xml, /<Gather/);
-  assert.doesNotMatch(xml, /booked successfully/);
+  assert.doesNotMatch(xml, /appointment has been booked/);
   assert.equal(h.bookings.length, 0);
 });
 
@@ -1005,7 +1019,7 @@ test('third genuine booking failure escalates without mutation', async () => {
     assert.match(xml, /<Gather/);
     assert.doesNotMatch(
       xml,
-      /team-member transfer isn't configured/
+      /call the salon directly/
     );
     assert.equal(h.bookings.length, 0);
   }
@@ -1022,7 +1036,7 @@ test('third genuine booking failure escalates without mutation', async () => {
   );
   assert.match(
     xml,
-    /team-member transfer isn't configured/
+    /call the salon directly/
   );
   assert.match(xml, /No appointment was booked/);
   assert.match(xml, /<Hangup/);
@@ -1095,7 +1109,7 @@ function route(ingress, overrides = {}, throws = false) {
     }));
   };
 
-  return { post, get calls() { return calls; }, logs };
+  return { post, postRequest: r.POST, get calls() { return calls; }, logs };
 }
 
 test('trial token validation remains in front of privileged handler', async () => {
@@ -1519,13 +1533,15 @@ test('ambiguous time clarification preserves stage and canonicalizes full answer
   const h=handlerHarness({stateEnabled:true}); const flow=await advanceBooking(h,{time:'two thirty'});
   assert.match(flow.timed,/2:30 AM or 2:30 PM/); assert.equal(h.bookings.length,0);
   const clarified=await h.run({speech:'two thirty PM',stateToken:flow.confirmToken,from:CALLER});
-  assert.match(clarified,/Say yes to book/); assert.match(clarified,/2:30 PM/);
+  assert.match(clarified,/Say yes or press 1 to book it/); assert.match(clarified,/2:30 PM/);
   assert.equal(h.bookings.length,0);
 });
 test('confirmation time correction preserves ambiguous time until bare PM resolves it', async () => {
   const h=handlerHarness({
     stateEnabled:true,
-    understandingResult:{
+    // Supply the semantic correction only for the correction utterance, not
+    // for every name/service/date answer during fixture setup.
+    understandingResult:({speech}) => speech.includes("3:30") ? {
       kind:'unclear',
       meaningful:true,
       serviceName:null,
@@ -1533,7 +1549,7 @@ test('confirmation time correction preserves ambiguous time until bare PM resolv
       timeExpression:'3:30',
       confirmation:null,
       correction:true,
-    },
+    } : {kind:'unclear'},
   });
   const flow=await advanceBooking(h,{time:'2:30 PM'});
   const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
@@ -1558,7 +1574,9 @@ test('confirmation time correction preserves ambiguous time until bare PM resolv
       ['03:30','15:30']
     )
   );
-  assert.equal(pending.booking.stage,'confirm');
+  // The active question is now the time, so the stage reflects that. The
+  // pending AM/PM options are honoured at any stage, not only at confirmation.
+  assert.equal(pending.booking.stage,'time');
 
   const clarified=await h.run({
     speech:'p.m.',
@@ -1567,7 +1585,7 @@ test('confirmation time correction preserves ambiguous time until bare PM resolv
   });
 
   assert.match(clarified,/3:30 PM/);
-  assert.match(clarified,/Say yes to book/);
+  assert.match(clarified,/Say yes or press 1 to book it/);
   assert.equal(h.bookings.length,0);
 
   const clarifiedState=h.state.openVoiceState(
@@ -1594,7 +1612,9 @@ test('confirmation time correction preserves ambiguous time until bare PM resolv
 test('affirmative cannot book old appointment while AM PM correction is unresolved', async () => {
   const h=handlerHarness({
     stateEnabled:true,
-    understandingResult:{
+    // Supply the semantic correction only for the correction utterance, not
+    // for every name/service/date answer during fixture setup.
+    understandingResult:({speech}) => speech.includes("3:30") ? {
       kind:'unclear',
       meaningful:true,
       serviceName:null,
@@ -1602,7 +1622,7 @@ test('affirmative cannot book old appointment while AM PM correction is unresolv
       timeExpression:'3:30',
       confirmation:null,
       correction:true,
-    },
+    } : {kind:'unclear'},
   });
   const flow=await advanceBooking(h,{time:'2:30 PM'});
 
@@ -1618,7 +1638,7 @@ test('affirmative cannot book old appointment while AM PM correction is unresolv
     from:CALLER,
   });
 
-  assert.match(xml,/whether you mean AM or PM/);
+  assert.match(xml,/Say AM or PM/);
   assert.equal(h.bookings.length,0);
 });
 
@@ -1659,9 +1679,9 @@ test('semantic replacement time is revalidated as a correction even when correct
   });
 
   assert.equal(h.bookings.length,0);
-  assert.doesNotMatch(xml,/booked successfully/);
+  assert.doesNotMatch(xml,/appointment has been booked/);
   assert.match(xml,/4 PM/);
-  assert.match(xml,/Say yes to book/);
+  assert.match(xml,/Say yes or press 1 to book it/);
 
   const corrected=h.state.openVoiceState(
     callbackState(xml),
@@ -1680,12 +1700,13 @@ test('semantic replacement time is revalidated as a correction even when correct
   assert.equal(h.bookings[0].time,'16:00');
 });
 
-test('semantic replacement date is revalidated as a correction even when correction flag is false', async () => {
+test('semantic replacement date is revalidated as a correction and keeps the time', async () => {
   const h=handlerHarness({
     stateEnabled:true,
     understandingResult:{
       kind:'unclear',
       meaningful:true,
+      customerName:null,
       serviceName:null,
       dateExpression:'October 5th 2099',
       timeExpression:null,
@@ -1693,30 +1714,37 @@ test('semantic replacement date is revalidated as a correction even when correct
       correction:false,
     },
   });
-  const flow=await advanceBooking(h,{time:'2:30 PM'});
+  const flow=await advanceBooking(h,{date:'2099-09-20',time:'2:30 PM'});
   const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
 
   const xml=await h.run({
-    speech:'Yes, book it for October 5th.',
+    speech:'Yes, book it for October 5th 2099.',
     stateToken:flow.confirmToken,
     from:CALLER,
   });
 
+  // Booking language alongside a replacement detail is a correction, never
+  // authorization: the old appointment must not be booked.
   assert.equal(h.bookings.length,0);
-  assert.doesNotMatch(xml,/booked successfully/);
-  assert.match(xml,/What time would you like/);
+  assert.doesNotMatch(xml,/appointment has been booked/);
 
   const corrected=h.state.openVoiceState(
     callbackState(xml),
     binding
   );
 
+  // The date changed; the unrelated service and time survive the correction
+  // and availability is recomputed for the new combination.
   assert.equal(corrected.booking.date,'2099-10-05');
-  assert.equal(corrected.booking.time,null);
-  assert.equal(corrected.booking.stage,'time');
+  assert.equal(corrected.booking.serviceName,'Haircut');
+  assert.equal(corrected.booking.requestedTime,'14:30');
+  assert.equal(corrected.booking.stage,'confirm');
+  assert.equal(h.availabilityChecks.at(-1).date,'2099-10-05');
+  assert.equal(h.availabilityChecks.at(-1).time,'14:30');
+  assert.match(xml,/Say yes or press 1 to book it/);
 });
 
-test('semantic replacement service is revalidated as a correction even when correction flag is false', async () => {
+test('semantic replacement service is revalidated as a correction and keeps date and time', async () => {
   const h=handlerHarness({
     stateEnabled:true,
     services:[
@@ -1726,6 +1754,7 @@ test('semantic replacement service is revalidated as a correction even when corr
     understandingResult:{
       kind:'unclear',
       meaningful:true,
+      customerName:null,
       serviceName:'Facial',
       dateExpression:null,
       timeExpression:null,
@@ -1733,7 +1762,7 @@ test('semantic replacement service is revalidated as a correction even when corr
       correction:false,
     },
   });
-  const flow=await advanceBooking(h,{time:'2:30 PM'});
+  const flow=await advanceBooking(h,{date:'2099-09-20',time:'2:30 PM'});
   const binding={businessId:BUSINESS_ID,callSid:CALL_SID,ingress:'trial'};
 
   const xml=await h.run({
@@ -1743,19 +1772,22 @@ test('semantic replacement service is revalidated as a correction even when corr
   });
 
   assert.equal(h.bookings.length,0);
-  assert.doesNotMatch(xml,/booked successfully/);
-  assert.match(xml,/What date would you like for Facial/);
+  assert.doesNotMatch(xml,/appointment has been booked/);
 
   const corrected=h.state.openVoiceState(
     callbackState(xml),
     binding
   );
 
+  // Changing the service changes the duration, so availability is recomputed,
+  // but the day and time the caller already chose are not thrown away.
   assert.equal(corrected.booking.serviceId,CUSTOMER_ID);
   assert.equal(corrected.booking.serviceName,'Facial');
-  assert.equal(corrected.booking.date,null);
-  assert.equal(corrected.booking.time,null);
-  assert.equal(corrected.booking.stage,'date');
+  assert.equal(corrected.booking.date,'2099-09-20');
+  assert.equal(corrected.booking.requestedTime,'14:30');
+  assert.equal(corrected.booking.stage,'confirm');
+  assert.equal(h.availabilityChecks.at(-1).serviceId,CUSTOMER_ID);
+  assert.equal(h.availabilityChecks.at(-1).time,'14:30');
 });
 
 test('pending time state accepts canonical pair and rejects malformed values', () => {
@@ -1814,8 +1846,10 @@ test('ambiguous services prompt only the routed service list with no selection',
   const started=await h.run({digits:'1',from:CALLER});
   const named=await h.run({speech:'Alex Customer',stateToken:callbackState(started),from:CALLER});
   const xml=await h.run({speech:'a haircut please',stateToken:callbackState(named),from:CALLER});
-  assert.match(xml,/Which service did you mean: Haircut basic, Haircut premium/);
-  assert.match(xml,/hints="Haircut basic,Haircut premium"/);
+  assert.match(xml,/Did you want Haircut basic or Haircut premium/);
+  // Routed service names lead the hint list, followed by shared scheduling
+  // vocabulary. No service from another business may appear.
+  assert.match(xml,/hints="Haircut basic,Haircut premium,/);
   assert.ok(h.serviceLoads.every(id=>id===BUSINESS_ID)); assert.equal(h.bookings.length,0);
 });
 test('past dates reprompt and silence never books', async () => {
@@ -1861,7 +1895,7 @@ for (const ingress of ['production', 'trial']) {
       for (let n = 1; n <= invalidAttempts; n++) {
         const previous = callbackState(xml);
         xml = await h.run({ speech: 'unmatched service', stateToken: previous, ingress, from: CALLER });
-        assert.match(xml, /couldn't match that service.*facial, haircut, waxing/);
+        assert.match(xml, /couldn't match that to a service.*facial, haircut, waxing/);
         assert.notEqual(callbackState(xml), previous);
         const state = h.state.openVoiceState(callbackState(xml), binding);
         assert.equal(state.booking.stage, 'service');
@@ -1875,7 +1909,7 @@ for (const ingress of ['production', 'trial']) {
         assert.equal(action.pathname, ingress === 'trial' ? '/api/voice/trial' : '/api/voice');
         assert.equal(action.searchParams.get('token'), ingress === 'trial' ? env.TWILIO_TRIAL_VOICE_TOKEN : null);
         assert.equal(action.searchParams.get('mode'), 'listen');
-        assert.match(xml, /hints="facial,haircut,waxing"/);
+        assert.match(xml, /hints="facial,haircut,waxing,/);
         assert.match(xml, /speechModel="experimental_conversations"/);
         assert.match(xml, /speechTimeout="2"/);
         assert.match(xml, /actionOnEmptyResult="true"/);
@@ -1883,7 +1917,7 @@ for (const ingress of ['production', 'trial']) {
         assert.equal(h.bookings.length, 0);
       }
       xml = await h.run({ speech: invalidAttempts ? 'Facial' : 'I would like a facial, please.', stateToken: callbackState(xml), ingress, from: CALLER });
-      assert.match(xml, /What date would you like for facial/);
+      assert.match(xml, /What day would you like/);
       assert.doesNotMatch(xml, /No appointment was booked|<Hangup/);
       const selected = h.state.openVoiceState(callbackState(xml), binding);
       assert.equal(selected.booking.stage, 'date');
@@ -1896,10 +1930,10 @@ for (const ingress of ['production', 'trial']) {
       xml = await h.run({ speech: 'tomorrow', stateToken: callbackState(xml), ingress, from: CALLER });
       assert.match(xml, /What time would you like/);
       xml = await h.run({ speech: 'two thirty PM', stateToken: callbackState(xml), ingress, from: CALLER });
-      assert.match(xml, /Say yes to book/);
+      assert.match(xml, /Say yes or press 1 to book it/);
       assert.equal(h.bookings.length, 0);
       xml = await h.run({ speech: 'yes', stateToken: callbackState(xml), ingress, from: CALLER });
-      assert.match(xml, /booked successfully/);
+      assert.match(xml, /appointment has been booked/);
       assert.equal(h.bookings.length, 1);
       assert.equal(h.bookings[0].idempotencyKey, key);
       assert.equal(h.bookings[0].time, '14:30');
@@ -1937,7 +1971,7 @@ test('two failures in every collection stage reset before the next stage', async
     assert.equal(h.bookings.length, 0);
   }
   xml = await h.run({ speech: 'yes', stateToken: callbackState(xml), from: CALLER });
-  assert.match(xml, /booked successfully/);
+  assert.match(xml, /appointment has been booked/);
   assert.equal(h.bookings.length, 1);
 });
 
@@ -1994,9 +2028,9 @@ for (const verified of [true, false]) test(`recovered facial booking requires au
   }
   xml = await h.run({ speech: 'yes', stateToken: callbackState(xml), from: CALLER });
   assert.equal(real.calls.filter(call => call.name === 'voice_book_appointment_business').length, 1);
-  if (verified) assert.match(xml, /booked successfully/);
+  if (verified) assert.match(xml, /appointment has been booked/);
   else {
-    assert.doesNotMatch(xml, /booked successfully/);
+    assert.doesNotMatch(xml, /appointment has been booked/);
     assert.match(xml, /couldn't verify the booking/);
     assert.equal(real.sms.length, 0);
   }
@@ -2010,10 +2044,62 @@ for (const failures of [undefined, 0, 1, 2]) test(`legacy/current service state 
   state.booking.customerName = 'Randy';
   if (failures !== undefined) state.booking.failures = failures;
   const xml = await h.run({ speech: 'Facial', stateToken: h.state.sealVoiceState(state, binding), from: CALLER });
-  assert.match(xml, /What date would you like for facial/);
+  assert.match(xml, /What day would you like/);
   const next = h.state.openVoiceState(callbackState(xml), binding);
   assert.equal(next.booking.stage, 'date');
   assert.equal(next.booking.failures, 0);
   assert.equal(next.booking.idempotencyKey, state.booking.idempotencyKey);
   assert.equal(h.bookings.length, 0);
+});
+
+for (const selection of [{ kind: 'unavailable', fact_ids: [] }, { kind: 'clarify', fact_ids: [] }]) {
+  test(`real Q&A ${selection.kind} does not reset the shared recovery budget`, async () => {
+    const h = handlerHarness({ stateEnabled: true, selection });
+    let xml = await h.run({ mode: '' });
+    for (let n = 1; n <= 3; n++) {
+      const url = new URL(/action="([^"]+)"/.exec(xml)[1].replaceAll('&amp;', '&'));
+      xml = await h.run({ speech: 'unrelated background conversation', stateToken: url.searchParams.get('state'), mode: url.searchParams.get('mode') });
+      if (n < 3) assert.equal(h.state.openVoiceState(callbackState(xml), { businessId: BUSINESS_ID, callSid: CALL_SID, ingress: 'trial' }).recovery, n);
+    }
+    assert.match(xml, /<Hangup/);
+    assert.equal(h.requests.length, 3);
+    assert.equal(h.bookings.length, 0);
+  });
+}
+test('real Q&A grounded answer resets prior recovery, including missing Confidence', async () => {
+  const h = handlerHarness({ stateEnabled: true });
+  const initial = await h.run({ mode: '' });
+  const rejected = await h.run({ speech: '...', stateToken: callbackState(initial) });
+  const answered = await h.run({ speech: 'What is the business name?', stateToken: callbackState(rejected) });
+  const next = h.state.openVoiceState(callbackState(answered), { businessId: BUSINESS_ID, callSid: CALL_SID, ingress: 'trial' });
+  assert.equal(next.recovery, 0);
+  assert.equal(next.silence, 0);
+  assert.equal(next.mode, 'info');
+  assert.equal(h.requests.length, 1);
+});
+test('signature validation covers state and recovery query parameters without logging them', async () => {
+  const h = route('production');
+  const url = `${env.TWILIO_VOICE_WEBHOOK_URL}?mode=retry&state=PRIVATE_STATE`;
+  const params = { To: '+12025550100', From: CALLER, CallSid: CALL_SID, SpeechResult: 'PRIVATE_TRANSCRIPT', Confidence: '0.01' };
+  const signature = twilio.getExpectedTwilioSignature(env.TWILIO_AUTH_TOKEN, url, params);
+  const request = (target, body = params) => new Request(target, { method: 'POST', headers: {
+    'content-type': 'application/x-www-form-urlencoded', 'x-twilio-signature': signature,
+  }, body: new URLSearchParams(body) });
+  assert.equal((await h.postRequest(request(url))).status, 200);
+  assert.equal((await h.postRequest(request(url.replace('mode=retry', 'mode=listen')))).status, 403);
+  assert.equal((await h.postRequest(request(url.replace('PRIVATE_STATE', 'altered')))).status, 403);
+  assert.equal((await h.postRequest(request(url, { ...params, Confidence: '0.95' }))).status, 403);
+  assert.equal(h.calls, 1);
+  const events = h.logs.filter(x => x[0] === 'AnaAI voice ingress').map(x => x[1]);
+  assert.equal(events.length, 4);
+  assert.deepEqual(events.map(x => x.outcome), ['responded', 'rejected', 'rejected', 'rejected']);
+  for (const secret of ['PRIVATE_STATE', 'PRIVATE_TRANSCRIPT', CALLER, CALL_SID, signature]) assert.ok(!JSON.stringify(h.logs).includes(secret));
+});
+test('ingress exception emits a structured completion event with no exception text', async () => {
+  const h = route('trial', {}, true);
+  assert.equal((await h.post(env.TWILIO_TRIAL_VOICE_TOKEN)).status, 200);
+  const events = h.logs.filter(x => x[0] === 'AnaAI voice ingress');
+  assert.equal(events.length, 1);
+  assert.equal(events[0][1].outcome, 'error');
+  assert.ok(!JSON.stringify(h.logs).includes('PRIVATE'));
 });

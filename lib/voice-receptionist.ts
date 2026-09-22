@@ -81,7 +81,7 @@ async function loadFacts(businessId: string, businessName: string, signal: Abort
   return { facts, tone };
 }
 
-export async function answerVoiceQuestion(businessId: string, businessName: string, speech: string, timezone: string | null = null): Promise<string> {
+export async function answerVoiceQuestion(businessId: string, businessName: string, speech: string, timezone: string | null = null, onAnswer?: () => void): Promise<string> {
   if (speech.length > 1200) return "Please ask one short question about the business.";
   if (ACTION_WORDS.test(speech)) return VOICE_BOOKING_DISABLED;
   if (/\b(transfer|representative|human|text me|send (?:me )?(?:an? )?(?:sms|message))\b/i.test(speech)) {
@@ -118,6 +118,7 @@ export async function answerVoiceQuestion(businessId: string, businessName: stri
     if (selection.kind === "appointment_action") return VOICE_BOOKING_DISABLED;
     if (selection.kind === "unsupported") return "I can only answer business information questions through this test receptionist. I haven't taken any action.";
     if (selection.kind !== "answer" || selection.fact_ids.length === 0) return UNAVAILABLE;
+    onAnswer?.();
     return [...new Set<number>(selection.fact_ids)].map(id => context.facts[id].text).join(" ");
   } catch {
     console.error("AnaAI read-only voice answer failed.");

@@ -96,14 +96,87 @@ which must all still pass unchanged:
 - Delete the business row mid-transaction / revoke visibility so the capacity
   read returns nothing: the RPC must return `INTERNAL_ERROR` and write nothing.
 
+## Scheduling paths and their capacity status
+
+| Path | Function | Capacity |
+|---|---|---|
+| Manual create | `create_appointment_atomic_business` | 202609210003 |
+| Manual reschedule | `reschedule_appointment_atomic_business` | 202609210003 |
+| Voice availability | `voice_check_appointment_availability` | 202609210004 |
+| Voice booking | `voice_book_appointment_business` | 202609210005 |
+| AI chat booking | `book_appointment_atomic_business` | 202609210006 |
+
+**All five scheduling paths now share one capacity rule** and take the
+byte-identical business/date advisory lock
+`hashtext(p_business_id::text || ':' || p_appointment_date::text)`, so they
+serialize against each other.
+
+> **Superseded by `202609210007`.** That migration adds
+> `appointments.duration_minutes`, a durable per-appointment duration snapshot,
+> and restates the capacity helper plus all four writers to record and prefer
+> it. The definitions in 002, 003, 005 and 006 are applied history and must not
+> be edited, but they are no longer the live bodies. Read
+> `tests/appointment-duration-snapshot.README.md` before changing any of them.
+>
+> It exists because `appointments.service_id` is `ON DELETE SET NULL`: deleting
+> a service made its historical appointments' durations unknowable, which
+> correctly failed closed and blocked every later booking on that business/date.
+
+### `book_appointment_atomic_business` (202609210006)
+
+This function has no `CREATE FUNCTION` anywhere in this repository or in git
+history — it predates the repo. 202609210006 therefore restates the deployed
+body obtained from `pg_get_functiondef`, **verbatim**, with exactly one region
+changed: the per-appointment overlap loop becomes a call to the shared helper.
+The four declarations that loop owned (`v_existing`, `v_existing_duration`,
+`v_existing_start`, `v_existing_end`) are dropped and `v_capacity` added.
+
+Because the repository cannot cross-check that body, the migration's fidelity
+is pinned by `tests/legacy-ai-capacity.test.cjs`, which asserts the signature,
+SECURITY INVOKER, `search_path`, the `auth.uid()` and membership guards, the
+lock expression, all 17 unrelated reason strings, the customer
+lookup/create/update shape, the appointment insert and the full success
+receipt. **Treat any future edit to this function as requiring a fresh
+`pg_get_functiondef` comparison.**
+
+Points worth knowing when reviewing it:
+
+- It is reachable only through `public.schedule_appointment_idempotent_business`
+  with `p_operation = 'ai_book'`, whose sole caller is `app/api/ai/route.ts`.
+- **No grant was added or needed.** 202609210002 already grants schema USAGE
+  and function EXECUTE to `authenticated` and `service_role`, which covers both
+  callers of this SECURITY INVOKER function.
+- `anon` holds EXECUTE on the outer function but **not** on the capacity
+  helper. Its `auth.uid()` guard is load-bearing for *permissions*, not only
+  authorization: it returns before the helper is reached, so an unauthenticated
+  caller still gets `'Authentication is required.'` rather than a permission
+  error. A test pins that ordering.
+- `search_path` is `'public'` only, so `anaai_private` is not on the path and
+  the call must stay schema-qualified.
+- Rejections must be exactly `{"success": false, "reason": "<exact string>"}`
+  with no other key — 202609150004 raises otherwise. Capacity reuses
+  `'That time overlaps an existing appointment.'`; a malformed existing
+  schedule reuses `'An existing appointment does not have a valid service
+  duration, so availability cannot be checked safely.'`
+- An indeterminate capacity result **raises**. This function has no top-level
+  exception handler, so it propagates to the wrapper's handler, which rolls
+  back the whole invocation including the durable action claim and returns
+  `INTERNAL_ERROR`. Nothing is written; retry with the same key is permitted.
+
+### Pre-existing items NOT addressed here
+
+- `if not public.is_business_member(p_business_id)` is **not** wrapped in
+  `coalesce(..., false)` as the manual RPCs are. A NULL return would make the
+  guard fall through. Preserved verbatim because this patch had no evidence to
+  change authorization behaviour; worth a separate hardening pass.
+- `search_path=public` rather than `pg_catalog, public`, already recorded as
+  outstanding by 202609150004.
+- The deployed ACL (postgres, anon, authenticated, service_role) is untouched;
+  `CREATE OR REPLACE` preserves it. Tightening `anon` is a separate decision.
+
 ## Boundaries retained deliberately
 
-Voice booking (`voice_book_appointment_business`), Voice availability
-(`voice_check_appointment_availability`) and the legacy
-`book_appointment_atomic_business` still use their own single-slot overlap
-rules and are unchanged in this milestone. Until they adopt the shared helper,
-a capacity > 1 business will have Voice under-book relative to manual
-scheduling. The dashboard, calendar and any capacity editing UI are also out of
-scope; `appointment_capacity` has no client-side authority and no UI surface
-yet. No exclusion constraint or trigger was added, so direct table writes still
-bypass the capacity protocol.
+The dashboard, calendar and any capacity editing UI are out of scope;
+`appointment_capacity` has no client-side authority and no UI surface yet. No
+exclusion constraint or trigger was added, so direct table writes still bypass
+the capacity protocol.

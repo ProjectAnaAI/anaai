@@ -3,6 +3,7 @@ import "server-only";
 import OpenAI from "openai";
 
 export type VoiceUnderstandingStage =
+  | "name"
   | "service"
   | "date"
   | "time"
@@ -10,7 +11,10 @@ export type VoiceUnderstandingStage =
 
 type VoiceUnderstandingBase = {
   meaningful: boolean;
+  customerName: string | null;
   serviceName: string | null;
+  /* The model named a service the application never offered. */
+  serviceUnresolved: boolean;
   dateExpression: string | null;
   timeExpression: string | null;
   confirmation: "yes" | "no" | null;
@@ -35,6 +39,7 @@ export type VoiceTurnUnderstanding =
 
 type StructuredUnderstanding = {
   meaningful: boolean;
+  customer_name: string | null;
   service_name: string | null;
   date_expression: string | null;
   time_expression: string | null;
@@ -44,6 +49,7 @@ type StructuredUnderstanding = {
 
 const MAX_CALLER_TEXT = 500;
 const MAX_SERVICE_NAME = 120;
+const MAX_CUSTOMER_NAME = 120;
 const MAX_EXPRESSION = 120;
 const MAX_SERVICES = 50;
 
@@ -51,7 +57,9 @@ function unclear(): VoiceTurnUnderstanding {
   return {
     kind: "unclear",
     meaningful: false,
+    customerName: null,
     serviceName: null,
+    serviceUnresolved: false,
     dateExpression: null,
     timeExpression: null,
     confirmation: null,
@@ -151,6 +159,7 @@ function parseStructuredUnderstanding(
 
     const expectedKeys = [
       "meaningful",
+      "customer_name",
       "service_name",
       "date_expression",
       "time_expression",
@@ -184,6 +193,12 @@ function parseStructuredUnderstanding(
       return null;
     }
 
+    const customerName =
+      optionalExpression(
+        object.customer_name,
+        MAX_CUSTOMER_NAME
+      );
+
     const serviceName =
       optionalExpression(
         object.service_name,
@@ -203,6 +218,8 @@ function parseStructuredUnderstanding(
       );
 
     if (
+      customerName ===
+        undefined ||
       serviceName ===
         undefined ||
       dateExpression ===
@@ -228,6 +245,7 @@ function parseStructuredUnderstanding(
     }
 
     const hasMeaning =
+      customerName !== null ||
       serviceName !== null ||
       dateExpression !== null ||
       timeExpression !== null ||
@@ -261,6 +279,9 @@ function parseStructuredUnderstanding(
     return {
       meaningful:
         object.meaningful,
+
+      customer_name:
+        customerName,
 
       service_name:
         serviceName,
@@ -299,25 +320,27 @@ function buildUnderstanding({
       : null;
 
   /*
-   * The model is never service authority.
+   * The model is never service authority. A name it supplies that the
+   * application did not offer is discarded and reported as unresolved.
    *
-   * If it returns a service that was not supplied by
-   * the application, fail closed rather than silently
-   * discarding the invented value.
+   * It is NOT grounds for discarding the whole turn: "Facial on October 2nd
+   * at 2:30" must still yield the date and time even when the service name
+   * comes back unusable, so the caller is asked only about the service.
    */
-  if (
-    parsed.service_name !==
-      null &&
-    serviceName === null
-  ) {
-    return unclear();
-  }
+  const serviceUnresolved =
+    parsed.service_name !== null &&
+    serviceName === null;
 
   const common = {
     meaningful:
       parsed.meaningful,
 
+    customerName:
+      parsed.customer_name,
+
     serviceName,
+
+    serviceUnresolved,
 
     dateExpression:
       parsed.date_expression,
@@ -471,8 +494,9 @@ export async function understandVoiceTurn({
           "",
           "GENERAL UNDERSTANDING:",
           "Interpret ordinary natural phone speech rather than requiring rigid command phrases.",
-          "A caller may provide several appointment details in one sentence.",
-          "Extract every appointment detail that is clearly expressed.",
+          "A caller may provide several appointment details in one sentence, in any order.",
+          "Extract every appointment detail that is clearly expressed, including details the current stage did not ask for.",
+          "Never drop a detail merely because it was not the one being asked about.",
           "Do not require the utterance to match the current conversation stage exactly.",
           "Do not manufacture a missing detail.",
           "Do not guess merely to keep the conversation moving.",
@@ -481,6 +505,14 @@ export async function understandVoiceTurn({
           "'Facial tomorrow at two thirty in the afternoon.'",
           "'I need a haircut October second around four thirty PM.'",
           "'Can you get me in for a facial next Friday at three?'",
+          "",
+          "CUSTOMER NAME:",
+          "customer_name is the name the appointment should be booked under.",
+          "Return only the name itself, with no surrounding words.",
+          "Examples: 'the name is BJ' gives 'BJ'; 'it's for Alex Rivera' gives 'Alex Rivera'; 'BJ, haircut' gives 'BJ'.",
+          "Never use a business name, a service name, a day, a time, or a greeting as customer_name.",
+          "Never invent a name, and never guess a spelling you did not hear.",
+          "If no name is clearly expressed, customer_name must be null.",
           "",
           "SERVICE:",
           "service_name may only be one exact name from allowed_services.",
@@ -534,8 +566,8 @@ export async function understandVoiceTurn({
           "When uncertain, prefer meaningful=false or leave uncertain fields null.",
           "",
           "CONSISTENCY:",
-          "meaningful=true only when at least one of service_name, date_expression, time_expression, confirmation, or correction contains appointment-related meaning.",
-          "meaningful=false requires service_name=null, date_expression=null, time_expression=null, confirmation=null, and correction=false.",
+          "meaningful=true only when at least one of customer_name, service_name, date_expression, time_expression, confirmation, or correction contains appointment-related meaning.",
+          "meaningful=false requires customer_name=null, service_name=null, date_expression=null, time_expression=null, confirmation=null, and correction=false.",
         ].join("\n"),
 
         input:
@@ -568,6 +600,7 @@ export async function understandVoiceTurn({
 
               required: [
                 "meaningful",
+                "customer_name",
                 "service_name",
                 "date_expression",
                 "time_expression",
@@ -579,6 +612,13 @@ export async function understandVoiceTurn({
                 meaningful: {
                   type:
                     "boolean",
+                },
+
+                customer_name: {
+                  type: [
+                    "string",
+                    "null",
+                  ],
                 },
 
                 service_name: {
@@ -662,6 +702,11 @@ export async function understandVoiceTurn({
       });
 
     const fields = [
+      understanding
+        .customerName
+        ? "name"
+        : "",
+
       understanding
         .serviceName
         ? "service"

@@ -19,6 +19,7 @@ type VoiceMenuState = {
   expires: number;
   turns: number;
   silence: number;
+  recovery?: number;
   mode: "menu" | "info";
 };
 
@@ -34,6 +35,7 @@ export type VoiceBookingState = {
   expires: number;
   turns: number;
   silence: number;
+  recovery?: number;
   mode: "booking";
   booking: {
     stage: VoiceBookingStage;
@@ -43,12 +45,116 @@ export type VoiceBookingState = {
     serviceId: string | null;
     serviceName: string | null;
     date: string | null;
+    /*
+     * The caller's chosen time, which has NOT been checked against
+     * availability. Changing the service, date or time sets this and clears
+     * `time`, so stale availability can never survive a correction.
+     */
+    requestedTime?: string | null;
+    /*
+     * Availability state. Non-null only while the database has confirmed this
+     * exact service/date/time combination is available. It is the single
+     * signal that the summary may be offered for confirmation.
+     */
     time: string | null;
     pendingTimeOptions?: [string, string];
   };
 };
 
-export type VoiceState = VoiceMenuState | VoiceBookingState;
+export type VoiceAppointmentTarget = {
+  id: string;
+  businessId: string;
+  customerId: string;
+  serviceId: string | null;
+  serviceName: string;
+  date: string;
+  time: string;
+  status: "Booked" | "Confirmed";
+};
+
+export type VoiceManagementState = {
+  version: 2;
+  expires: number;
+  turns: number;
+  silence: number;
+  recovery?: number;
+  mode: "management";
+  management: {
+    action: "cancel" | "reschedule";
+    stage: "select" | "replacement" | "confirm";
+    idempotencyKey: string;
+    target: VoiceAppointmentTarget | null;
+    selector: { date: string | null; time: string | null; serviceName: string | null };
+    date: string | null;
+    time: string | null;
+    verified: boolean;
+    pendingTimeOptions: [string, string] | null;
+  };
+};
+
+export type VoiceState = VoiceMenuState | VoiceBookingState | VoiceManagementState;
+
+export function initialManagementState(
+  state: VoiceState,
+  action: "cancel" | "reschedule"
+): VoiceManagementState {
+  return {
+    version: 2, expires: state.expires, turns: state.turns, silence: state.silence,
+    ...(state.recovery !== undefined ? { recovery: state.recovery } : {}),
+    mode: "management",
+    management: {
+      action, stage: "select", idempotencyKey: randomUUID(), target: null,
+      selector: { date: null, time: null, serviceName: null },
+      date: null, time: null, verified: false, pendingTimeOptions: null,
+    },
+  };
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function exactKeys(value: Record<string, unknown>, keys: string[]) {
+  return Object.keys(value).length === keys.length && keys.every(key => key in value);
+}
+function managementDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+}
+function managementTime(value: unknown): value is string {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+export function validVoiceTarget(value: unknown): value is VoiceAppointmentTarget {
+  return record(value) && exactKeys(value, ["id", "businessId", "customerId", "serviceId", "serviceName", "date", "time", "status"]) &&
+    [value.id, value.businessId, value.customerId].every(id => typeof id === "string" && UUID.test(id)) &&
+    (value.serviceId === null || typeof value.serviceId === "string" && UUID.test(value.serviceId)) &&
+    typeof value.serviceName === "string" && validText(value.serviceName, 120) &&
+    managementDate(value.date) && managementTime(value.time) &&
+    (value.status === "Booked" || value.status === "Confirmed");
+}
+function validManagementState(value: Record<string, unknown>): value is VoiceManagementState {
+  const m = value.management;
+  if (value.mode !== "management" || !record(m) || !exactKeys(m, [
+    "action", "stage", "idempotencyKey", "target", "selector", "date", "time", "verified", "pendingTimeOptions"
+  ]) || !["cancel", "reschedule"].includes(String(m.action)) ||
+    !["select", "replacement", "confirm"].includes(String(m.stage)) ||
+    typeof m.idempotencyKey !== "string" || !UUID.test(m.idempotencyKey) ||
+    !record(m.selector) || !exactKeys(m.selector, ["date", "time", "serviceName"]) ||
+    !(m.selector.date === null || managementDate(m.selector.date)) ||
+    !(m.selector.time === null || managementTime(m.selector.time)) ||
+    !validText(m.selector.serviceName, 120) ||
+    !(m.date === null || managementDate(m.date)) || !(m.time === null || managementTime(m.time)) ||
+    typeof m.verified !== "boolean" ||
+    !(m.target === null || validVoiceTarget(m.target))) return false;
+  if (m.pendingTimeOptions !== null && (!Array.isArray(m.pendingTimeOptions) ||
+    m.pendingTimeOptions.length !== 2 || !m.pendingTimeOptions.every(managementTime) ||
+    m.pendingTimeOptions[0] === m.pendingTimeOptions[1] || m.time !== null || m.verified)) return false;
+  if ((m.stage === "select") !== (m.target === null)) return false;
+  if (m.action === "cancel" && (m.date !== null || m.time !== null || m.verified ||
+    m.pendingTimeOptions !== null || m.stage === "replacement")) return false;
+  if (m.verified && (!m.target || !m.date || !m.time || m.stage !== "confirm")) return false;
+  if (m.action === "reschedule" && m.stage === "confirm" && !m.verified) return false;
+  return true;
+}
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -85,6 +191,7 @@ export function initialBookingState(
       serviceId: null,
       serviceName: null,
       date: null,
+      requestedTime: null,
       time: null,
     },
   };
@@ -169,6 +276,7 @@ function validBookingState(
         ![
           ...expectedKeys,
           "failures",
+          "requestedTime",
           "pendingTimeOptions",
         ].includes(key)
     ) ||
@@ -253,6 +361,29 @@ function validBookingState(
     return false;
   }
 
+  if (
+    booking.requestedTime !== undefined &&
+    booking.requestedTime !== null &&
+    (typeof booking.requestedTime !== "string" ||
+      !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(
+        booking.requestedTime
+      ))
+  ) {
+    return false;
+  }
+
+  /*
+   * An availability-verified time must always be the time that was actually
+   * requested. A token claiming otherwise is rejected rather than reconciled.
+   */
+  if (
+    booking.time !== null &&
+    booking.requestedTime !== undefined &&
+    booking.requestedTime !== booking.time
+  ) {
+    return false;
+  }
+
   return true;
 }
 
@@ -278,8 +409,10 @@ function validateState(
           "expires",
           "turns",
           "silence",
+          "recovery",
           "mode",
           "booking",
+          "management",
         ].includes(field)
     ) ||
     value.version !== 2 ||
@@ -294,13 +427,16 @@ function validateState(
     typeof value.silence !== "number" ||
     !Number.isInteger(value.silence) ||
     value.silence < 0 ||
-    value.silence > 1
+    value.silence > 1 ||
+    (value.recovery !== undefined &&
+      (!Number.isInteger(value.recovery) || typeof value.recovery !== "number" ||
+        value.recovery < 0 || value.recovery > 2))
   ) {
     throw new Error("Expired or invalid voice state");
   }
 
   if (value.mode === "menu" || value.mode === "info") {
-    if (Object.keys(value).length !== 5) {
+    if (Object.keys(value).length !== (value.recovery === undefined ? 5 : 6)) {
       throw new Error("Invalid voice state");
     }
 
@@ -308,8 +444,8 @@ function validateState(
   }
 
   if (
-    Object.keys(value).length !== 6 ||
-    !validBookingState(value)
+    Object.keys(value).length !== (value.recovery === undefined ? 6 : 7) ||
+    !(validBookingState(value) || validManagementState(value))
   ) {
     throw new Error("Invalid voice state");
   }
@@ -383,5 +519,17 @@ export function openVoiceState(
     throw new Error("Invalid voice state");
   }
 
-  return validateState(decoded, now);
+  const state = validateState(decoded, now);
+  if (state.mode === "management" && state.management.target &&
+    state.management.target.businessId !== binding.businessId) throw new Error("Invalid voice scope");
+  return state;
+}
+
+/** Keyed, non-reversible operational correlation; never emit the binding itself. */
+export function voiceDiagnosticId(binding: VoiceBinding, callback?: string): string | null {
+  if (!voiceStateConfigured()) return null;
+  return createHmac("sha256", key()).update(JSON.stringify([
+    "voice-diagnostic-v1", binding.businessId, binding.callSid, binding.ingress,
+    ...(callback === undefined ? [] : [callback]),
+  ])).digest("hex").slice(0, 24);
 }

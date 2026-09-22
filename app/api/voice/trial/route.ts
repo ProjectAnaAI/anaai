@@ -65,8 +65,11 @@ function verifyTrialIngress(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const started = Date.now();
+  let outcome = "error";
   try {
     if (!verifyTrialIngress(request)) {
+      outcome = "rejected";
       return forbiddenResponse();
     }
 
@@ -82,6 +85,7 @@ export async function POST(request: Request) {
       ingress: "trial",
     });
 
+    outcome = "responded";
     return twimlResponse(xml);
   } catch {
     console.error("AnaAI trial voice request failed.");
@@ -94,6 +98,8 @@ export async function POST(request: Request) {
     );
 
     return twimlResponse(response.toString());
+  } finally {
+    console.info("AnaAI voice ingress", { ingress: "trial", outcome, duration_ms: Date.now() - started });
   }
 }
 

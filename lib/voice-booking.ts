@@ -184,6 +184,10 @@ export async function checkVoiceAvailability({
       time
     )
   ) {
+    console.error(
+      "AnaAI voice availability failed failure=invalid_input"
+    );
+
     return {
       available: false,
       reason: "unverified",
@@ -203,14 +207,28 @@ export async function checkVoiceAvailability({
       }
     );
 
+    if (error) {
+      console.error(
+        `AnaAI voice availability failed failure=rpc_error code=${
+          typeof error.code === "string"
+            ? error.code
+            : "unknown"
+        }`
+      );
+
+      return {
+        available: false,
+        reason: "unverified",
+      };
+    }
+
     if (
-      error ||
       !object(data) ||
       typeof data.available !== "boolean" ||
       typeof data.code !== "string"
     ) {
       console.error(
-        "AnaAI voice availability check failed."
+        "AnaAI voice availability failed failure=malformed_payload"
       );
 
       return {
@@ -220,15 +238,45 @@ export async function checkVoiceAvailability({
     }
 
     if (data.available === true) {
+      if (data.code !== "AVAILABLE") {
+        console.error(
+          `AnaAI voice availability failed failure=receipt_mismatch field=code rpc_code=${data.code}`
+        );
+
+        return {
+          available: false,
+          reason: "unverified",
+        };
+      }
+
+      if (data.service_id !== serviceId) {
+        console.error(
+          "AnaAI voice availability failed failure=receipt_mismatch field=service_id"
+        );
+
+        return {
+          available: false,
+          reason: "unverified",
+        };
+      }
+
+      if (data.date !== date) {
+        console.error(
+          "AnaAI voice availability failed failure=receipt_mismatch field=date"
+        );
+
+        return {
+          available: false,
+          reason: "unverified",
+        };
+      }
+
       if (
-        data.code !== "AVAILABLE" ||
-        data.service_id !== serviceId ||
-        data.date !== date ||
         typeof data.time !== "string" ||
         canonicalTime(data.time) !== canonicalTime(time)
       ) {
         console.error(
-          "AnaAI voice availability returned an unverified result."
+          "AnaAI voice availability failed failure=receipt_mismatch field=time"
         );
 
         return {
@@ -263,13 +311,17 @@ export async function checkVoiceAvailability({
       };
     }
 
+    console.error(
+      `AnaAI voice availability failed failure=rpc_rejection rpc_code=${data.code}`
+    );
+
     return {
       available: false,
       reason: "unverified",
     };
   } catch {
     console.error(
-      "AnaAI voice availability check failed."
+      "AnaAI voice availability failed failure=exception"
     );
 
     return {
