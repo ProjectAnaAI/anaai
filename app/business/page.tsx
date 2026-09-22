@@ -11,10 +11,13 @@ import {
   Globe2,
   Mail,
   MapPin,
+  Minus,
   Phone,
+  Plus,
   Save,
   ShieldCheck,
   User,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -103,6 +106,38 @@ const timezones = [
   },
 ];
 
+const minAppointmentCapacity = 1;
+
+const maxAppointmentCapacity = 100;
+
+/*
+ * businesses.appointment_capacity is
+ * NOT NULL and constrained to 1..100
+ * in the database. The UI mirrors that
+ * range so malformed state is never
+ * persisted silently.
+ */
+function normalizeAppointmentCapacity(
+  value: unknown
+): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < minAppointmentCapacity ||
+    parsed > maxAppointmentCapacity
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function isValidTimezone(
   value: string
 ) {
@@ -186,6 +221,26 @@ export default function BusinessPage() {
   );
 
   const [
+    capacityInput,
+    setCapacityInput,
+  ] = useState(
+    String(minAppointmentCapacity)
+  );
+
+  /*
+   * Tracks whether the canonical
+   * businesses row was read for this
+   * page load. Without a confirmed
+   * read the save path leaves
+   * appointment_capacity untouched
+   * instead of overwriting it.
+   */
+  const [
+    capacityLoaded,
+    setCapacityLoaded,
+  ] = useState(false);
+
+  const [
     businessHours,
     setBusinessHours,
   ] = useState<BusinessHours>(
@@ -209,6 +264,35 @@ export default function BusinessPage() {
 
   const canEditCanonicalBusiness =
     businessRole === "owner";
+
+  const parsedCapacity =
+    normalizeAppointmentCapacity(
+      capacityInput
+    );
+
+  const capacityStepBase =
+    parsedCapacity ??
+    minAppointmentCapacity;
+
+  /*
+   * Capacity is only editable when the
+   * canonical value was actually loaded,
+   * so the control never looks saveable
+   * while the save path is suppressing
+   * the write.
+   */
+  const capacityControlsDisabled =
+    !canEditCanonicalBusiness ||
+    !capacityLoaded ||
+    saving;
+
+  const canDecrementCapacity =
+    capacityStepBase >
+    minAppointmentCapacity;
+
+  const canIncrementCapacity =
+    capacityStepBase <
+    maxAppointmentCapacity;
 
   const openDays =
     businessDayKeys.filter(
@@ -292,6 +376,67 @@ export default function BusinessPage() {
         setTimezone(
           canonicalTimezone
         );
+
+        /*
+         * businesses is canonical for
+         * appointment_capacity. Read it
+         * narrowly for the active
+         * business only.
+         */
+        const {
+          data: canonicalBusiness,
+          error:
+            canonicalBusinessError,
+        } = await supabase
+          .from("businesses")
+          .select(
+            "appointment_capacity"
+          )
+          .eq(
+            "id",
+            activeBusinessId
+          )
+          .maybeSingle();
+
+        if (canonicalBusinessError) {
+          toast.error(
+            "Simultaneous appointment capacity could not be loaded. It will be left unchanged when you save."
+          );
+        } else if (
+          canonicalBusiness
+        ) {
+          const loadedCapacity =
+            normalizeAppointmentCapacity(
+              canonicalBusiness.appointment_capacity
+            );
+
+          if (
+            loadedCapacity === null
+          ) {
+            /*
+             * Show a safe fallback, but
+             * leave capacityLoaded false
+             * so the save path never
+             * persists this placeholder
+             * over the canonical value.
+             */
+            setCapacityInput(
+              String(
+                minAppointmentCapacity
+              )
+            );
+
+            toast.error(
+              "Saved appointment capacity could not be read safely. Review it before saving."
+            );
+          } else {
+            setCapacityInput(
+              String(loadedCapacity)
+            );
+
+            setCapacityLoaded(true);
+          }
+        }
 
         const {
           data,
@@ -409,6 +554,59 @@ export default function BusinessPage() {
     );
   }
 
+  function stepAppointmentCapacity(
+    delta: number
+  ) {
+    setCapacityInput((current) => {
+      const base =
+        normalizeAppointmentCapacity(
+          current
+        ) ??
+        minAppointmentCapacity;
+
+      const next = Math.min(
+        maxAppointmentCapacity,
+        Math.max(
+          minAppointmentCapacity,
+          base + delta
+        )
+      );
+
+      return String(next);
+    });
+  }
+
+  function clampCapacityInput() {
+    setCapacityInput((current) => {
+      const normalized =
+        normalizeAppointmentCapacity(
+          current
+        );
+
+      if (normalized !== null) {
+        return String(normalized);
+      }
+
+      const numeric = Number(
+        current.trim()
+      );
+
+      if (
+        Number.isFinite(numeric) &&
+        numeric >
+          maxAppointmentCapacity
+      ) {
+        return String(
+          maxAppointmentCapacity
+        );
+      }
+
+      return String(
+        minAppointmentCapacity
+      );
+    });
+  }
+
   function toggleClosed(
     day: DayKey
   ) {
@@ -520,6 +718,22 @@ export default function BusinessPage() {
       return;
     }
 
+    const normalizedCapacity =
+      normalizeAppointmentCapacity(
+        capacityInput
+      );
+
+    if (
+      canEditCanonicalBusiness &&
+      capacityLoaded &&
+      normalizedCapacity === null
+    ) {
+      toast.error(
+        "Simultaneous appointment capacity must be a whole number between 1 and 100."
+      );
+      return;
+    }
+
     const hoursValidation =
       validateBusinessHours(
         businessHours
@@ -586,24 +800,56 @@ export default function BusinessPage() {
       if (
         canEditCanonicalBusiness
       ) {
+        const canonicalUpdate: {
+          name: string;
+          timezone: string;
+          updated_at: string;
+          appointment_capacity?: number;
+        } = {
+          name: normalizedBusinessName,
+          timezone:
+            normalizedTimezone,
+          updated_at:
+            new Date().toISOString(),
+        };
+
+        /*
+         * Only write appointment_capacity
+         * when the canonical value was
+         * read successfully, so a failed
+         * load never resets it.
+         */
+        if (
+          capacityLoaded &&
+          normalizedCapacity !== null
+        ) {
+          canonicalUpdate.appointment_capacity =
+            normalizedCapacity;
+        }
+
         const {
           error:
             businessUpdateError,
         } = await supabase
           .from("businesses")
-          .update({
-            name: normalizedBusinessName,
-            timezone:
-              normalizedTimezone,
-            updated_at:
-              new Date().toISOString(),
-          })
+          .update(canonicalUpdate)
           .eq("id", businessId);
 
         if (
           businessUpdateError
         ) {
           throw businessUpdateError;
+        }
+
+        if (
+          canonicalUpdate.appointment_capacity !==
+          undefined
+        ) {
+          setCapacityInput(
+            String(
+              canonicalUpdate.appointment_capacity
+            )
+          );
         }
       }
 
@@ -1121,6 +1367,152 @@ export default function BusinessPage() {
                   can change the
                   timezone used for
                   scheduling.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="anaai-surface overflow-hidden">
+            <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
+              <div className="flex items-start gap-3">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-600">
+                  <Users className="size-5" />
+                </div>
+
+                <div>
+                  <h2 className="text-base font-semibold text-gray-950">
+                    Appointment capacity
+                  </h2>
+
+                  <p className="mt-1 text-sm leading-6 text-gray-500">
+                    AnaAI uses this limit
+                    with your business
+                    hours when checking
+                    availability.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 sm:p-6">
+              <label
+                htmlFor="appointment-capacity"
+                className="block text-sm font-medium text-gray-800"
+              >
+                Simultaneous appointment
+                capacity
+              </label>
+
+              <p className="mt-1 max-w-xl text-sm leading-6 text-gray-500">
+                Maximum number of
+                customers your business
+                can serve at the same
+                time.
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Decrease appointment capacity"
+                  onClick={() =>
+                    stepAppointmentCapacity(
+                      -1
+                    )
+                  }
+                  disabled={
+                    capacityControlsDisabled ||
+                    !canDecrementCapacity
+                  }
+                  className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 transition hover:bg-gray-50 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  <Minus className="size-4" />
+                </button>
+
+                <input
+                  id="appointment-capacity"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  aria-describedby={
+                    capacityLoaded
+                      ? "appointment-capacity-range"
+                      : "appointment-capacity-range appointment-capacity-unavailable"
+                  }
+                  value={capacityInput}
+                  disabled={
+                    capacityControlsDisabled
+                  }
+                  onChange={(event) =>
+                    setCapacityInput(
+                      event.target.value
+                        .replace(
+                          /[^0-9]/g,
+                          ""
+                        )
+                        .slice(0, 3)
+                    )
+                  }
+                  onBlur={
+                    clampCapacityInput
+                  }
+                  className="min-h-11 w-20 rounded-xl border border-gray-300 bg-white px-3 text-center text-base font-semibold text-gray-900 outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
+                />
+
+                <button
+                  type="button"
+                  aria-label="Increase appointment capacity"
+                  onClick={() =>
+                    stepAppointmentCapacity(
+                      1
+                    )
+                  }
+                  disabled={
+                    capacityControlsDisabled ||
+                    !canIncrementCapacity
+                  }
+                  className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 transition hover:bg-gray-50 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  <Plus className="size-4" />
+                </button>
+
+                <p className="text-sm text-gray-500">
+                  customers at a time
+                </p>
+              </div>
+
+              <p
+                id="appointment-capacity-range"
+                className="mt-2 text-xs leading-5 text-gray-500"
+              >
+                Choose a whole number
+                between{" "}
+                {minAppointmentCapacity}{" "}
+                and{" "}
+                {maxAppointmentCapacity}
+                .
+              </p>
+
+              {!capacityLoaded && (
+                <p
+                  id="appointment-capacity-unavailable"
+                  className="mt-2 text-xs leading-5 text-amber-700"
+                >
+                  Appointment capacity is
+                  unavailable right now.
+                  Refresh the page before
+                  changing this setting.
+                </p>
+              )}
+
+              {!canEditCanonicalBusiness && (
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Only a business owner can
+                  change simultaneous
+                  appointment capacity. You
+                  can see the current value
+                  here, but saving the
+                  profile will leave it
+                  unchanged.
                 </p>
               )}
             </div>
