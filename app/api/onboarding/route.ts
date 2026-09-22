@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Check your business details, timezone, hours, services and greeting.",
+            "Check your business details, timezone, hours, capacity, services and greeting.",
         },
         { status: 400 }
       );
@@ -71,8 +71,14 @@ export async function POST(request: Request) {
           email: draft.email,
           address: draft.address,
           timezone: draft.timezone,
+          appointment_capacity: draft.appointment_capacity,
           hours: draft.hours,
-          services: draft.services,
+          services: draft.services.map(({ name, duration, price, description }) => ({
+            name,
+            duration,
+            price,
+            description,
+          })),
           receptionist: draft.receptionist,
           greeting: draft.greeting,
         },

@@ -12,6 +12,7 @@ export type OnboardingDraft = {
   email: string;
   address: string;
   timezone: string;
+  appointment_capacity: number;
   hours: BusinessHours;
   services: {
     name: string;
@@ -42,6 +43,7 @@ export function newOnboardingDraft(): OnboardingDraft {
     email: "",
     address: "",
     timezone: "America/Los_Angeles",
+    appointment_capacity: 1,
     hours: {
       monday: {
         open: "09:00",
@@ -102,6 +104,9 @@ export function isOnboardingDraft(
   const draft = value as OnboardingDraft;
 
   return (
+    Number.isInteger(draft.appointment_capacity) &&
+    draft.appointment_capacity >= 1 &&
+    draft.appointment_capacity <= 100 &&
     [
       "name",
       "phone",

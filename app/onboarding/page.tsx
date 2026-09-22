@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Minus, Plus } from "lucide-react";
 
 import {
   isOnboardingDraft,
@@ -74,6 +75,11 @@ export default function OnboardingPage() {
   const [error, setError] = useState("");
 
   const submitting = useRef(false);
+
+  const capacityIsValid =
+    Number.isInteger(draft.appointment_capacity) &&
+    draft.appointment_capacity >= 1 &&
+    draft.appointment_capacity <= 100;
 
   useEffect(() => {
     let cancelled = false;
@@ -152,7 +158,7 @@ export default function OnboardingPage() {
 
             /*
              * Older saved drafts may predate fields such as
-             * timezone. Merge them with today's defaults first.
+             * timezone or appointment capacity. Merge them with today's defaults first.
              */
             if (
               isOnboardingDraft(restored)
@@ -325,6 +331,12 @@ export default function OnboardingPage() {
   }
 
   function validateHoursStep() {
+    if (!capacityIsValid) {
+      throw new Error(
+        "Choose a whole number between 1 and 100 for appointment capacity."
+      );
+    }
+
     const result =
       validateBusinessHours(
         draft.hours
@@ -857,6 +869,70 @@ export default function OnboardingPage() {
 
           {step === 1 && (
             <div className="space-y-3">
+              <div className="min-w-0 rounded-lg border border-slate-200 p-4">
+                <label
+                  htmlFor="appointment-capacity"
+                  className="block text-sm font-medium text-slate-800"
+                >
+                  How many customers can you usually serve at the same time?
+                </label>
+                <p id="appointment-capacity-help" className="mt-1 text-sm leading-6 text-slate-500">
+                  This sets how many appointments can overlap at your business.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    aria-label="Decrease appointment capacity"
+                    disabled={busy || !capacityIsValid || draft.appointment_capacity <= 1}
+                    onClick={() => setDraft((current) => ({
+                      ...current,
+                      appointment_capacity: Number.isInteger(current.appointment_capacity) &&
+                        current.appointment_capacity > 1 && current.appointment_capacity <= 100
+                        ? current.appointment_capacity - 1 : current.appointment_capacity,
+                    }))}
+                    className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    <Minus className="size-4" aria-hidden="true" />
+                  </button>
+                  <input
+                    id="appointment-capacity"
+                    type="number"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    min={1}
+                    max={100}
+                    step={1}
+                    required
+                    disabled={busy}
+                    aria-invalid={!capacityIsValid}
+                    aria-describedby="appointment-capacity-help appointment-capacity-range"
+                    value={Number.isFinite(draft.appointment_capacity) ? draft.appointment_capacity : ""}
+                    onChange={(event) => {
+                      // Keep invalid/empty input invalid; never clamp a submitted value.
+                      const capacity = event.currentTarget.valueAsNumber;
+                      setDraft((current) => ({ ...current, appointment_capacity: capacity }));
+                    }}
+                    className="min-h-11 w-20 min-w-0 rounded-xl border border-slate-300 bg-white px-2 text-center text-base font-semibold text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Increase appointment capacity"
+                    disabled={busy || !capacityIsValid || draft.appointment_capacity >= 100}
+                    onClick={() => setDraft((current) => ({
+                      ...current,
+                      appointment_capacity: Number.isInteger(current.appointment_capacity) &&
+                        current.appointment_capacity >= 1 && current.appointment_capacity < 100
+                        ? current.appointment_capacity + 1 : current.appointment_capacity,
+                    }))}
+                    className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    <Plus className="size-4" aria-hidden="true" />
+                  </button>
+                </div>
+                <p id="appointment-capacity-range" className="mt-2 text-xs leading-5 text-slate-500">
+                  Choose a whole number between 1 and 100.
+                </p>
+              </div>
               <div className="rounded-lg bg-slate-50 p-4">
                 <p className="text-sm font-medium text-slate-800">
                   Weekly hours
@@ -1240,6 +1316,10 @@ export default function OnboardingPage() {
                     {
                       draft.timezone
                     }
+                  </p>
+                  <p>
+                    Simultaneous capacity: {draft.appointment_capacity}{" "}
+                    {draft.appointment_capacity === 1 ? "customer" : "customers"} at a time.
                   </p>
                 </div>
               </div>
