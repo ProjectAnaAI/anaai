@@ -1075,10 +1075,9 @@ function route(ingress, overrides = {}, throws = false) {
   let calls = 0;
   const logs = [];
   const r = load(
-    `app/api/voice/${ingress === 'trial' ? 'trial/' : ''}route.ts`,
+    `server/handlers/voice${ingress === 'trial' ? '-trial' : ''}.ts`,
     {
       'node:crypto': { default: require('node:crypto') },
-      'next/server': { NextResponse: Response },
       '@/lib/voice-config': voiceConfig,
       twilio: { default: twilio },
       '@/lib/voice-handler': {

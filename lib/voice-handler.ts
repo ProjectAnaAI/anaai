@@ -1,5 +1,3 @@
-import "server-only";
-
 import twilio from "twilio";
 import { acceptVoiceProgress, classifyVoiceInput, recoverVoiceInput, statelessVoiceRecovery,
   voiceConfidence, voiceDigitAllowed, voiceRecoveryMode, type VoiceRecovery } from "@/lib/voice-input";

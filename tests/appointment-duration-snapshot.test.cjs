@@ -556,8 +556,8 @@ test('no capacity or duration authority leaks into client code', () => {
   for (const file of [
     'lib/voice-booking.ts',
     'lib/voice-handler.ts',
-    'app/api/appointments/route.ts',
-    'app/api/ai/route.ts',
+    'server/handlers/appointments.ts',
+    'server/handlers/ai.ts',
     'app/appointments/page.tsx',
   ]) {
     const source = fs.readFileSync(file, 'utf8');

@@ -1,9 +1,6 @@
 import {
   createClient,
 } from "@supabase/supabase-js";
-import {
-  NextResponse,
-} from "next/server";
 
 import {
   resolveBusinessContext,
@@ -16,8 +13,6 @@ import {
   isUuid,
   schedulingIntent,
 } from "@/lib/appointment-actions";
-
-export const runtime = "nodejs";
 
 const schedulingErrors: Record<
   string,
@@ -136,7 +131,7 @@ async function handle(
         ?.trim();
 
     if (!token) {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "Please log in again.",
@@ -160,7 +155,7 @@ async function handle(
       });
 
     if (!context.success) {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             context.status >= 500
@@ -220,7 +215,7 @@ async function handle(
         unknown
       >;
     } catch {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "Invalid request.",
@@ -243,7 +238,7 @@ async function handle(
           body.appointmentId
         ))
     ) {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "A valid request key and appointment reference are required.",
@@ -316,7 +311,7 @@ async function handle(
                 body[snake]
               ).toLowerCase())
         ) {
-          return NextResponse.json(
+          return Response.json(
             {
               error:
                 "Select valid customer and service references.",
@@ -335,7 +330,7 @@ async function handle(
           typeof body.notes !==
             "string")
       ) {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "Invalid scheduling request.",
@@ -371,7 +366,7 @@ async function handle(
             notes: body.notes,
           });
       } catch {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "Select a valid schedule.",
@@ -436,7 +431,7 @@ async function handle(
             ].includes(keyName)
         )
       ) {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "Unsupported appointment action.",
@@ -528,7 +523,7 @@ async function handle(
           "The action could not be verified. Retry with the same request key.",
         ];
 
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error: message,
@@ -563,7 +558,7 @@ async function handle(
           intent.time
       )
     ) {
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
 
@@ -589,7 +584,7 @@ async function handle(
             receipt.action_id
           );
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       appointment:
         receipt.appointment,
@@ -613,7 +608,7 @@ async function handle(
       "Appointment action request failed."
     );
 
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           "The action could not be verified. Retry with the same request key.",

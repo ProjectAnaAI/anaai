@@ -34,6 +34,8 @@ function load(file, imports = {}) {
         );
       },
 
+      Response,
+
       process: {
         env: {
           NEXT_PUBLIC_SUPABASE_URL: "test",
@@ -215,24 +217,11 @@ function api({
   const calls = [];
 
   const route = load(
-    "app/api/onboarding/route.ts",
+    "server/handlers/onboarding.ts",
     {
       "@/lib/onboarding":
         validation,
 
-      "next/server": {
-        NextResponse: {
-          json: (
-            body,
-            options
-          ) => ({
-            body,
-            status:
-              options?.status ||
-              200,
-          }),
-        },
-      },
 
       "@supabase/supabase-js": {
         createClient: (
@@ -281,17 +270,22 @@ function api({
       body = draft(),
       token = true
     ) =>
-      route.POST({
-        headers: {
-          get: () =>
-            token
-              ? "Bearer test-token"
-              : null,
-        },
+      route
+        .POST({
+          headers: {
+            get: () =>
+              token
+                ? "Bearer test-token"
+                : null,
+          },
 
-        json: async () =>
-          body,
-      }),
+          json: async () =>
+            body,
+        })
+        .then(async (response) => ({
+          status: response.status,
+          body: await response.json(),
+        })),
   };
 }
 

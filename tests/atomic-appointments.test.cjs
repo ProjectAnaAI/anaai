@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
-const route = fs.readFileSync('app/api/appointments/route.ts', 'utf8');
+const route = fs.readFileSync('server/handlers/appointments.ts', 'utf8');
 const sql = fs.readFileSync('supabase/migrations/202609140001_atomic_manual_appointments.sql', 'utf8');
 const customerId = '11111111-1111-1111-1111-111111111111';
 const serviceId = '22222222-2222-2222-2222-222222222222';
@@ -38,7 +38,6 @@ function harness({ code, rpcError, smsFails, smsThrows, denied } = {}) {
   const exports = {};
   const context = { exports, Request, Response, console: { error() {}, log() {} }, process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://example.invalid', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'test' } }, require: (name) => {
     if (name === '@supabase/supabase-js') return { createClient: () => supabase };
-    if (name === 'next/server') return { NextResponse: { json: (data, init) => Response.json(data, init) } };
     if (name === '@/lib/business-context') return { resolveBusinessContext: async () => denied ? { success: false, status: 403, error: 'No access' } : { success: true, context: { businessId: '44444444-4444-4444-4444-444444444444', businessName: 'Business' } } };
     if (name === '@/lib/appointment-actions') {
       const helper={}; const ai={};

@@ -1,14 +1,11 @@
-import { NextResponse } from "next/server";
 import { resolveBusinessContext } from "@/lib/business-context";
-
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
     const authorization = request.headers.get("authorization");
 
     if (!authorization?.startsWith("Bearer ")) {
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error: "Missing authorization token.",
@@ -20,7 +17,7 @@ export async function GET(request: Request) {
     const accessToken = authorization.slice("Bearer ".length).trim();
 
     if (!accessToken) {
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error: "Missing authorization token.",
@@ -38,7 +35,7 @@ export async function GET(request: Request) {
     });
 
     if (!result.success) {
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error: result.error,
@@ -48,7 +45,7 @@ export async function GET(request: Request) {
       );
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       business: {
         id: result.context.businessId,
@@ -60,7 +57,7 @@ export async function GET(request: Request) {
   } catch (error: unknown) {
     console.error("AnaAI current business error:", error);
 
-    return NextResponse.json(
+    return Response.json(
       {
         success: false,
         error: "Unexpected current business error.",

@@ -497,8 +497,8 @@ test('22. no grant is added, and none to public or anon', () => {
 
 test('23. no capacity authority exists in browser or API code', () => {
   for (const file of [
-    'app/api/ai/route.ts',
-    'app/api/appointments/route.ts',
+    'server/handlers/ai.ts',
+    'server/handlers/appointments.ts',
     'app/appointments/page.tsx',
     'app/business/page.tsx',
     'lib/ai-actions.ts',
@@ -513,7 +513,7 @@ test('23. no capacity authority exists in browser or API code', () => {
 });
 
 test('the AI path still reaches the database only through the idempotent wrapper', () => {
-  const route = fs.readFileSync('app/api/ai/route.ts', 'utf8');
+  const route = fs.readFileSync('server/handlers/ai.ts', 'utf8');
   assert.match(route, /rpc\("schedule_appointment_idempotent_business"/);
   assert.doesNotMatch(route, /rpc\(\s*"book_appointment_atomic_business"/);
   assert.match(wrapper, /v_result := public\.book_appointment_atomic_business\(p_business_id,/);

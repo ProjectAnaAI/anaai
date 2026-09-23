@@ -1,16 +1,13 @@
 import crypto from "node:crypto";
 
-import { NextResponse } from "next/server";
 import twilio from "twilio";
 
 import { buildVoiceResponse } from "@/lib/voice-handler";
 
 import { voiceOptions } from "@/lib/voice-config";
 
-export const runtime = "nodejs";
-
 function twimlResponse(xml: string) {
-  return new NextResponse(xml, {
+  return new Response(xml, {
     status: 200,
     headers: {
       "Content-Type": "text/xml",
@@ -20,7 +17,7 @@ function twimlResponse(xml: string) {
 }
 
 function forbiddenResponse() {
-  return new NextResponse("Forbidden", {
+  return new Response("Forbidden", {
     status: 403,
     headers: {
       "Content-Type": "text/plain",

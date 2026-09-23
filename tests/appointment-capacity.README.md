@@ -142,7 +142,7 @@ receipt. **Treat any future edit to this function as requiring a fresh
 Points worth knowing when reviewing it:
 
 - It is reachable only through `public.schedule_appointment_idempotent_business`
-  with `p_operation = 'ai_book'`, whose sole caller is `app/api/ai/route.ts`.
+  with `p_operation = 'ai_book'`, whose sole caller is `server/handlers/ai.ts`.
 - **No grant was added or needed.** 202609210002 already grants schema USAGE
   and function EXECUTE to `authenticated` and `service_role`, which covers both
   callers of this SECURITY INVOKER function.

@@ -1,5 +1,3 @@
-import "server-only";
-
 import OpenAI from "openai";
 
 export type VoiceUnderstandingStage =

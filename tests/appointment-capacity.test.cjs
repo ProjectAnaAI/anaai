@@ -14,7 +14,7 @@ const checker = fs.readFileSync('supabase/migrations/202609210002_appointment_ca
 const scheduling = fs.readFileSync('supabase/migrations/202609210003_capacity_based_manual_scheduling.sql', 'utf8');
 const deployed = fs.readFileSync('supabase/migrations/202609140001_atomic_manual_appointments.sql', 'utf8');
 const idempotent = fs.readFileSync('supabase/migrations/202609150004_classify_ai_booking_rejections.sql', 'utf8');
-const route = fs.readFileSync('app/api/appointments/route.ts', 'utf8');
+const route = fs.readFileSync('server/handlers/appointments.ts', 'utf8');
 
 // Statement text with commentary removed, so security assertions below cannot
 // be satisfied (or defeated) by prose in a comment.

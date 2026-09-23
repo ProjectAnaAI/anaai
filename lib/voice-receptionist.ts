@@ -1,4 +1,3 @@
-import "server-only";
 import OpenAI from "openai";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
 

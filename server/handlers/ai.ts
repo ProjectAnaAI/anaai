@@ -2,12 +2,8 @@ import OpenAI from "openai";
 import { fingerprint, schedulingIntent, actionReceipt, deliverActionNotification, isUuid } from "@/lib/appointment-actions";
 import { bookingRejection, bookingRejectionReply, bookingReceipt, uniqueService, executeAiActions } from "@/lib/ai-actions";
 import { createClient } from "@supabase/supabase-js";
-import { NextResponse } from "next/server";
 
 import { resolveBusinessContext } from "@/lib/business-context";
-
-
-export const runtime = "nodejs";
 
 type BusinessDay = {
   open: string;
@@ -305,7 +301,7 @@ export async function POST(request: Request) {
 
     if (!supabaseUrl || !supabaseAnonKey) {
       console.error("AnaAI: Supabase configuration missing.");
-      return NextResponse.json(
+      return Response.json(
         {
           error: "AnaAI is temporarily unavailable.",
         },
@@ -318,7 +314,7 @@ export async function POST(request: Request) {
     const authorization = request.headers.get("authorization");
 
     if (!authorization?.startsWith("Bearer ")) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Invalid authorization header.",
         },
@@ -331,7 +327,7 @@ export async function POST(request: Request) {
     const accessToken = authorization.slice("Bearer ".length).trim();
 
     if (!accessToken) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Authorization token is missing.",
         },
@@ -353,7 +349,7 @@ export async function POST(request: Request) {
       if (businessContextResult.status >= 500) {
         console.error("AnaAI: Business context failed.");
       }
-      return NextResponse.json(
+      return Response.json(
         {
           error: businessContextResult.status >= 500
             ? "Unable to load your business context. Please try again."
@@ -391,7 +387,7 @@ export async function POST(request: Request) {
       typeof body.message === "string" ? body.message.trim() : "";
 
     if (!message) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Customer message is required.",
         },
@@ -406,24 +402,24 @@ export async function POST(request: Request) {
     // a canonical structured intent, independent of model-generated prose.
     if (body.mode !== "preview") {
       const key = request.headers.get("idempotency-key");
-      if (!isUuid(key)) return NextResponse.json({error:"A stable request key is required."},{status:400});
+      if (!isUuid(key)) return Response.json({error:"A stable request key is required."},{status:400});
       const {data:prior,error:lookupError}=await supabase.from("appointment_actions")
         .select("action_type, request_payload, result, completed_at")
         .eq("business_id",businessId).eq("idempotency_key",key).maybeSingle();
-      if(lookupError)return NextResponse.json({error:"Unable to reconcile request. Retry with the same key."},{status:500});
+      if(lookupError)return Response.json({error:"Unable to reconcile request. Retry with the same key."},{status:500});
       if(prior){
-        if(prior.action_type!=="book" || prior.request_payload?.operation!=="ai_book" || prior.request_payload?.origin_hash!==fingerprint({message}))return NextResponse.json({error:"This request key belongs to a different action."},{status:409});
+        if(prior.action_type!=="book" || prior.request_payload?.operation!=="ai_book" || prior.request_payload?.origin_hash!==fingerprint({message}))return Response.json({error:"This request key belongs to a different action."},{status:409});
         const rejected = prior.completed_at && bookingRejection(prior.result,businessId);
         if (rejected) {
           const replay = {...rejected,replayed:true};
-          return NextResponse.json({reply:bookingRejectionReply(replay),action:null,rejection:replay});
+          return Response.json({reply:bookingRejectionReply(replay),action:null,rejection:replay});
         }
         const intent=prior.request_payload;
         const receipt=bookingReceipt(prior.result,businessId,intent.service_id,intent.date,intent.time);
         const action=actionReceipt(prior.result,businessId,"book");
-        if(!prior.completed_at||!receipt||!action)return NextResponse.json({reply:"The original request did not produce a verified booking. No new booking was attempted.",action:null});
+        if(!prior.completed_at||!receipt||!action)return Response.json({reply:"The original request did not produce a verified booking. No new booking was attempted.",action:null});
         const smsSent=await deliverActionNotification(supabase,businessId,action.action_id);
-        return NextResponse.json({reply:"The original booking succeeded. This retry made no new booking. Check appointments for its current state.",action:{type:"booking",receipt,replayed:true,sms_sent:smsSent}});
+        return Response.json({reply:"The original booking succeeded. This retry made no new booking. Check appointments for its current state.",action:{type:"booking",receipt,replayed:true,sms_sent:smsSent}});
       }
     }
 
@@ -475,7 +471,7 @@ export async function POST(request: Request) {
 
     if (settingsResult.error) {
       console.error("AnaAI: AI settings lookup failed.");
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Unable to load AI settings. Please try again.",
         },
@@ -487,7 +483,7 @@ export async function POST(request: Request) {
 
     if (knowledgeResult.error) {
       console.error("AnaAI: Knowledge lookup failed.");
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Unable to load business knowledge. Please try again.",
         },
@@ -499,7 +495,7 @@ export async function POST(request: Request) {
 
     if (businessResult.error) {
       console.error("AnaAI: Business profile lookup failed.");
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Unable to load business profile. Please try again.",
         },
@@ -511,7 +507,7 @@ export async function POST(request: Request) {
 
     if (servicesResult.error) {
       console.error("AnaAI: Services lookup failed.");
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Unable to load services. Please try again.",
         },
@@ -1104,7 +1100,7 @@ GENERAL RULES
 
     if (!process.env.OPENAI_API_KEY) {
       console.error("AnaAI: OpenAI configuration missing.");
-      return NextResponse.json(
+      return Response.json(
         {
           error: "AnaAI is temporarily unavailable.",
         },
@@ -1125,12 +1121,12 @@ GENERAL RULES
 
     // Exactly one proposal round. There is deliberately no final model generation:
     // a post-commit provider failure cannot obscure a committed receipt.
-    return NextResponse.json(await executeAiActions(firstResponse.output, body.mode === "preview", bookAppointment, checkAvailability));
+    return Response.json(await executeAiActions(firstResponse.output, body.mode === "preview", bookAppointment, checkAvailability));
   } catch (error: unknown) {
     console.error("AnaAI: AI request failed.");
 
     if (error instanceof OpenAI.APIError) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: "AnaAI could not complete its response. Please check your appointments before retrying a booking.",
         },
@@ -1140,7 +1136,7 @@ GENERAL RULES
       );
     }
 
-    return NextResponse.json(
+    return Response.json(
       {
         error: "AnaAI could not complete the request. Please check your appointments before retrying a booking.",
       },

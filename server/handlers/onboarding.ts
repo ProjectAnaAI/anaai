@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { NextResponse } from "next/server";
 
 import { validateOnboarding } from "@/lib/onboarding";
 
@@ -9,7 +8,7 @@ export async function POST(request: Request) {
     ?.match(/^Bearer (.+)$/)?.[1];
 
   if (!token) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Please log in again." },
       { status: 401 }
     );
@@ -41,7 +40,7 @@ export async function POST(request: Request) {
     } = await db.auth.getUser(token);
 
     if (authError || !user) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Please log in again." },
         { status: 401 }
       );
@@ -52,7 +51,7 @@ export async function POST(request: Request) {
     try {
       draft = validateOnboarding(await request.json());
     } catch {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "Check your business details, timezone, hours, capacity, services and greeting.",
@@ -86,11 +85,11 @@ export async function POST(request: Request) {
     );
 
     if (!error && data?.success === true) {
-      return NextResponse.json({ success: true });
+      return Response.json({ success: true });
     }
 
     if (!error && data?.code === "ALREADY_PROVISIONED") {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "This account already has a business. Continue to your dashboard.",
@@ -101,7 +100,7 @@ export async function POST(request: Request) {
     }
 
     if (!error && data?.code === "INVALID_SETUP") {
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Check the setup details and try again.",
         },
@@ -111,7 +110,7 @@ export async function POST(request: Request) {
 
     console.error("Business provisioning failed.");
 
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           "Unable to finish setup. Your details are saved in this tab; retry or return to the dashboard.",
@@ -119,7 +118,7 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: "Unable to finish setup. Please try again.",
       },

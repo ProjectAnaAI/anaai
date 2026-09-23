@@ -201,7 +201,7 @@ model mutation authority. More than 20 upcoming appointments requires human help
 
 - `AGENTS.md`, `package.json`, local Next.js guide
   `node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md`.
-- `app/api/voice/route.ts`, `app/api/appointments/route.ts`, `app/api/ai/route.ts`.
+- `server/handlers/voice.ts`, `server/handlers/appointments.ts`, `server/handlers/ai.ts`.
 - `lib/voice-handler.ts`, `lib/voice-state.ts`, `lib/voice-slots.ts`,
   `lib/voice-parsing.ts`, `lib/voice-understanding.ts`, `lib/voice-receptionist.ts`,
   `lib/voice-booking.ts`, `lib/voice-config.ts`, `lib/business-context.ts`,

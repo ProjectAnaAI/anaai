@@ -1,5 +1,3 @@
-import "server-only";
-
 import type VoiceResponse from "twilio/lib/twiml/VoiceResponse";
 
 const VOICES = [
