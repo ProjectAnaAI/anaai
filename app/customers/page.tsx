@@ -24,6 +24,8 @@ import {
   X,
 } from "lucide-react";
 
+import { DialogSurface } from "@/components/ui/dialog-surface";
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   activeBusinessHeaders,
@@ -885,41 +887,22 @@ export default function CustomersPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <header className="flex flex-col gap-5 border-b border-gray-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-              CRM
-            </p>
-
-            <h1 className="anaai-page-title mt-2">
-              Customers
-            </h1>
-
-            <p className="anaai-page-description mt-2 max-w-2xl">
-              Manage customer
-              information and review
-              appointment history.
-            </p>
-          </div>
-
+      <div className="space-y-6" data-page="customers">
+        <PageHeader
+          eyebrow="People & relationships"
+          title={<>Customers</>}
+          description={<>Manage customer information and review appointment history.</>}
+        >
           <Button
             type="button"
-            onClick={
-              openNewCustomer
-            }
-            disabled={
-              saving ||
-              Boolean(
-                customerActionId
-              )
-            }
+            onClick={openNewCustomer}
+            disabled={saving || Boolean(customerActionId)}
             className="shrink-0 gap-2"
           >
             <Plus className="size-4" />
             Add customer
           </Button>
-        </header>
+        </PageHeader>
 
         {feedback &&
           !editorOpen && (
@@ -931,7 +914,7 @@ export default function CustomersPage() {
             </div>
           )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="record-summary">
           <Card className="border-gray-200 shadow-none">
             <CardContent className="flex items-center justify-between p-5">
               <div>
@@ -990,8 +973,8 @@ export default function CustomersPage() {
         <Card className="overflow-hidden border-gray-200 shadow-none">
           <CardContent className="p-0">
             <div className="border-b border-gray-200 p-4 sm:p-5">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                <div className="relative w-full xl:max-w-md">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="relative w-full lg:max-w-md">
                   <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
 
                   <Input
@@ -1145,7 +1128,7 @@ export default function CustomersPage() {
             ) : (
               <>
                 <div className="hidden min-w-0 md:block">
-                  <div className="grid grid-cols-[minmax(190px,1.5fr)_minmax(150px,1fr)_minmax(190px,1.25fr)_110px_minmax(155px,1fr)_52px] gap-4 border-b border-gray-200 bg-gray-50/70 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <div className="grid customer-row customer-row-heading gap-4 border-b border-gray-200 bg-gray-50/70 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     <span>
                       Customer
                     </span>
@@ -1191,7 +1174,7 @@ export default function CustomersPage() {
                           }
                           className="border-b border-gray-100 last:border-b-0"
                         >
-                          <div className="grid min-h-[76px] grid-cols-[minmax(190px,1.5fr)_minmax(150px,1fr)_minmax(190px,1.25fr)_110px_minmax(155px,1fr)_52px] items-center gap-4 px-5 py-3">
+                          <div className="grid min-h-[76px] customer-row items-center gap-4 px-5 py-3">
                             <div className="flex min-w-0 items-center gap-3">
                               <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-green-50 text-xs font-semibold text-green-700">
                                 {initials(
@@ -1475,27 +1458,12 @@ export default function CustomersPage() {
       </div>
 
       {editorOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/25 p-0 backdrop-blur-[1px] sm:items-center sm:p-6"
-          role="presentation"
-          onMouseDown={(
-            event
-          ) => {
-            if (
-              event.target ===
-              event.currentTarget &&
-              !saving
-            ) {
-              closeEditor();
-            }
+        <DialogSurface
+          aria-labelledby="customer-editor-title"
+          onClose={() => {
+            if (!saving) closeEditor();
           }}
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="customer-editor-title"
-            className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-gray-200 bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl"
-          >
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-5 sm:px-6">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
@@ -1674,8 +1642,7 @@ export default function CustomersPage() {
                 </Button>
               </div>
             </form>
-          </div>
-        </div>
+        </DialogSurface>
       )}
     </AppLayout>
   );

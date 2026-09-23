@@ -16,11 +16,11 @@ import {
   Clock3,
   MapPin,
   Scissors,
-  Sparkles,
   Users,
   XCircle,
 } from "lucide-react";
 
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import QuickActions from "@/components/dashboard/QuickActions";
 import {
@@ -620,51 +620,27 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 lg:space-y-7">
-        <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-green-700">
-              <Sparkles className="h-4 w-4" />
-              <span>
-                AnaAI workspace
-              </span>
-            </div>
-
-            <h1 className="anaai-page-title mt-2">
-              {displayName
-                ? `Good to see you, ${displayName}`
-                : "Dashboard"}
-            </h1>
-
-            <p className="anaai-page-description">
-              Here&apos;s what&apos;s
-              happening with{" "}
-              {business?.business_name ||
-                "your business"}
-              {today
-                ? ` on ${formatBusinessDate(
-                    today
-                  )}.`
-                : "."}
-            </p>
-          </div>
-
-          <Button
-            onClick={() =>
-              router.push(
-                "/appointments"
-              )
-            }
-            className="w-full sm:w-auto"
-          >
+      <div className="space-y-6 lg:space-y-7" data-page="dashboard">
+        <PageHeader
+          eyebrow="Today at your business"
+          title={<>{displayName ? `Good to see you, ${displayName}` : "Dashboard"}</>}
+          description={
+            <>
+              Here&apos;s what&apos;s happening with{" "}
+              {business?.business_name || "your business"}
+              {today ? ` on ${formatBusinessDate(today)}.` : "."}
+            </>
+          }
+        >
+          <Button onClick={() => router.push("/appointments")} className="w-full sm:w-auto">
             <CalendarDays className="h-4 w-4" />
             View appointments
           </Button>
-        </header>
+        </PageHeader>
 
         <section
           aria-label="Business summary"
-          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+          className="workspace-metrics"
         >
           <MetricCard
             label="Today's appointments"
@@ -721,7 +697,7 @@ export default function DashboardPage() {
           />
         </section>
 
-        <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]">
+        <section className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(220px,0.8fr)]">
           <div className="anaai-surface min-w-0 overflow-hidden">
             <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div>

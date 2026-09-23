@@ -18,7 +18,7 @@ export function BusinessSelector() {
   if (!selection || selection.businesses.length < 2) return null;
 
   return (
-    <label className="text-sm text-gray-600">
+    <label className="business-selector text-sm text-gray-600">
       Business
       <select
         aria-label="Active business"
@@ -107,11 +107,11 @@ export default function ActiveBusinessProvider({ children }: { children: React.R
   }, [userId, isPublic, isOnboarding, router]);
 
   if (isPublic) return <>{children}</>;
-  if (error) return <main className="p-8"><p role="alert">{error}</p></main>;
-  if (!state || state.userId !== userId) return <main className="p-8">Loading business...</main>;
+  if (error) return <main className="access-state"><p role="alert">{error}</p></main>;
+  if (!state || state.userId !== userId) return <main className="access-state"><p role="status">Loading business...</p></main>;
 
-  if (!state.businesses.length) return isOnboarding ? <Fragment key={state.userId}>{children}</Fragment> : <main className="p-8">Opening setup...</main>;
-  if (isOnboarding) return <main className="p-8">Opening dashboard...</main>;
+  if (!state.businesses.length) return isOnboarding ? <Fragment key={state.userId}>{children}</Fragment> : <main className="access-state"><p role="status">Opening setup...</p></main>;
+  if (isOnboarding) return <main className="access-state"><p role="status">Opening dashboard...</p></main>;
 
   function selectBusiness(id: string) {
     if (!state || !state.businesses.some((business) => business.id === id)) return;
@@ -125,7 +125,7 @@ export default function ActiveBusinessProvider({ children }: { children: React.R
       {state.businessId ? (
         <Fragment key={`${state.userId}:${state.businessId}`}>{children}</Fragment>
       ) : (
-        <main className="p-8"><BusinessSelector /></main>
+        <main className="access-state"><BusinessSelector /></main>
       )}
     </BusinessSelectionContext.Provider>
   );

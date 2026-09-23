@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
@@ -76,25 +77,16 @@ export default function SettingsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <header className="border-b border-gray-200 pb-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-            Workspace
-          </p>
+      <div className="space-y-6" data-page="settings">
+        <PageHeader
+          eyebrow="Your workspace"
+          title={<>Settings</>}
+          description={
+            <>Manage the core areas of your AnaAI workspace and your current account session.</>
+          }
+        ></PageHeader>
 
-          <h1 className="anaai-page-title mt-2">
-            Settings
-          </h1>
-
-          <p className="anaai-page-description mt-2 max-w-2xl">
-            Manage the core areas
-            of your AnaAI workspace
-            and your current account
-            session.
-          </p>
-        </header>
-
-        <section className="grid gap-3 sm:grid-cols-3">
+        <section className="record-summary">
           <div className="anaai-surface p-5">
             <div className="flex items-start justify-between gap-4">
               <div>

@@ -4,8 +4,8 @@ import "./globals.css";
 import ActiveBusinessProvider from "@/components/layout/ActiveBusinessProvider";
 
 export const metadata: Metadata = {
-  title: "AnaAI",
-  description: "AI Receptionist for Modern Salons",
+  title: "AnaAI by ZUDE",
+  description: "AI receptionist and appointment workspace for service businesses",
 };
 
 export default function RootLayout({
@@ -17,7 +17,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <ActiveBusinessProvider>{children}</ActiveBusinessProvider>
-        <Toaster />
+        <Toaster position="bottom-right" richColors closeButton />
       </body>
     </html>
   );

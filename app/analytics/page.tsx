@@ -17,6 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   activeBusinessHeaders,
@@ -394,45 +395,27 @@ export default function AnalyticsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <header className="flex flex-col gap-4 border-b border-gray-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-              Insights
-            </p>
-
-            <h1 className="anaai-page-title mt-2">
-              Analytics
-            </h1>
-
-            <p className="anaai-page-description mt-2 max-w-2xl">
-              Review appointment
-              activity, customer
-              coverage, and booking
-              trends for your
+      <div className="space-y-6" data-page="analytics">
+        <PageHeader
+          eyebrow="Business insights"
+          title={<>Analytics</>}
+          description={
+            <>
+              Review appointment activity, customer coverage, and booking trends for your
               business.
-            </p>
-          </div>
+            </>
+          }
+        >
+          {!loading && !loadError && startDate && endDate && (
+            <div className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-600 shadow-sm">
+              <CalendarDays className="size-4 text-gray-400" />
 
-          {!loading &&
-            !loadError &&
-            startDate &&
-            endDate && (
-              <div className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-600 shadow-sm">
-                <CalendarDays className="size-4 text-gray-400" />
-
-                <span>
-                  {formatShortDate(
-                    startDate
-                  )}{" "}
-                  –{" "}
-                  {formatShortDate(
-                    endDate
-                  )}
-                </span>
-              </div>
-            )}
-        </header>
+              <span>
+                {formatShortDate(startDate)} – {formatShortDate(endDate)}
+              </span>
+            </div>
+          )}
+        </PageHeader>
 
         {loading ? (
           <div className="anaai-surface p-8">
@@ -468,7 +451,7 @@ export default function AnalyticsPage() {
           </div>
         ) : (
           <>
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <section className="workspace-metrics analytics-metrics">
               <div className="anaai-surface p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -569,7 +552,7 @@ export default function AnalyticsPage() {
               </div>
             </section>
 
-            <section className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.7fr)]">
+            <section className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(240px,0.7fr)]">
               <div className="anaai-surface overflow-hidden">
                 <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                   <div>
@@ -613,8 +596,19 @@ export default function AnalyticsPage() {
                       </p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto pb-2">
-                      <div className="min-w-[720px]">
+                    <div className="pb-2">
+                      <details className="analytics-breakdown">
+                        <summary>View daily appointment counts</summary>
+                        <dl>
+                          {dailyCounts.map(item => (
+                            <div key={item.date}>
+                              <dt>{formatShortDate(item.date)}</dt>
+                              <dd>{item.count} {pluralizeAppointments(item.count)}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </details>
+                      <div className="analytics-daily-chart">
                         <div className="flex h-56 items-end gap-1 border-b border-gray-200">
                           {dailyCounts.map(
                             (item) => {
@@ -637,6 +631,8 @@ export default function AnalyticsPage() {
                                     item.date
                                   }
                                   className="group flex min-w-0 flex-1 flex-col items-center justify-end self-stretch"
+                                  role="img"
+                                  aria-label={`${formatShortDate(item.date)}: ${item.count} appointments`}
                                   title={`${formatShortDate(
                                     item.date
                                   )}: ${

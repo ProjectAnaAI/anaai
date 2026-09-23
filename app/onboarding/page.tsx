@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Brand } from "@/components/brand/Brand";
 import { Minus, Plus } from "lucide-react";
 
 import {
@@ -697,7 +698,7 @@ export default function OnboardingPage() {
     !storageKey
   ) {
     return (
-      <main className="min-h-screen bg-slate-50 p-6">
+      <main className="setup-page setup-state"><Brand />
         <div className="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           {error ? (
             <div className="space-y-4">
@@ -727,7 +728,7 @@ export default function OnboardingPage() {
 
   if (completed) {
     return (
-      <main className="min-h-screen bg-slate-50 p-6">
+      <main className="setup-page setup-state"><Brand />
         <div className="mx-auto max-w-2xl rounded-xl border border-emerald-200 bg-white p-8 text-center shadow-sm">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-xl text-emerald-700">
             ✓
@@ -750,8 +751,22 @@ export default function OnboardingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 p-6">
-      <div className="mx-auto max-w-2xl space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <main className="setup-page">
+      <div className="setup-layout">
+        <aside className="setup-sidebar">
+          <Brand />
+          <h2>A front desk that feels like your business.</h2>
+          <p>A few essentials will help AnaAI welcome callers and find the right appointment.</p>
+          <ol className="setup-steps">
+            {steps.map((label, index) => (
+              <li key={label} aria-current={index === step ? "step" : undefined}>
+                <span>{index < step ? "✓" : index + 1}</span>
+                {label}
+              </li>
+            ))}
+          </ol>
+        </aside>
+      <div className="setup-form space-y-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">
             AnaAI setup
@@ -1458,6 +1473,7 @@ export default function OnboardingPage() {
           )}
         </div>
       </div>
+    </div>
     </main>
   );
 }

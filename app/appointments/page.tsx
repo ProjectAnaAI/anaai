@@ -30,6 +30,8 @@ import {
 } from "@/lib/supabase";
 
 import AppointmentCalendar from "@/components/appointments/AppointmentCalendar";
+import { useConfirmation } from "@/components/ui/use-confirmation";
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   Button,
@@ -287,6 +289,7 @@ function statusBadgeClasses(
 }
 
 export default function AppointmentsPage() {
+  const { confirm, confirmation } = useConfirmation();
   const router =
     useRouter();
 
@@ -1384,7 +1387,7 @@ if (businessToday) {
     appointment: Appointment
   ) {
     const confirmed =
-      window.confirm(
+      await confirm(
         `Mark the appointment for ${appointment.customer_name} as completed?`
       );
 
@@ -1438,8 +1441,9 @@ if (businessToday) {
     appointment: Appointment
   ) {
     const confirmed =
-      window.confirm(
-        `Cancel the appointment for ${appointment.customer_name}?`
+      await confirm(
+        `Cancel the appointment for ${appointment.customer_name}?`,
+        { destructive: true }
       );
 
     if (!confirmed) {
@@ -1524,12 +1528,14 @@ if (businessToday) {
 
   requestAnimationFrame(
     () => {
+      const composer = document.getElementById("new-appointment")?.closest("details");
+      if (composer) composer.open = true;
       document
         .getElementById(
           "new-appointment"
         )
         ?.scrollIntoView({
-          behavior: "smooth",
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
           block: "start",
         });
     }
@@ -1594,12 +1600,13 @@ if (businessToday) {
 
     requestAnimationFrame(
       () => {
+        document.getElementById(`appointment-${appointment.id}`)?.focus({ preventScroll: true });
         document
           .getElementById(
             `appointment-${appointment.id}`
           )
           ?.scrollIntoView({
-            behavior: "smooth",
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
             block: "center",
           });
       }
@@ -1608,36 +1615,20 @@ if (businessToday) {
 
   return (
     <AppLayout>
-      <div className="space-y-6 lg:space-y-7">
-        <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-green-700">
-              Scheduling
-            </p>
-
-            <h1 className="anaai-page-title mt-2">
-              Appointments
-            </h1>
-
-            <p className="anaai-page-description">
-              Manage bookings created by
-              your team and AnaAI.
-            </p>
-          </div>
-
+      <div className="space-y-6 lg:space-y-7" data-page="appointments">
+        <PageHeader
+          eyebrow="Your schedule"
+          title={<>Appointments</>}
+          description={<>Manage bookings created by your team and AnaAI.</>}
+        >
           <Button
             type="button"
-            onClick={() =>
-              openNewAppointment(
-                selectedCalendarDate ||
-                  undefined
-              )
-            }
+            onClick={() => openNewAppointment(selectedCalendarDate || undefined)}
             className="w-full sm:w-auto"
           >
             New appointment
           </Button>
-        </header>
+        </PageHeader>
 
         {notice && (
           <div
@@ -1702,6 +1693,11 @@ if (businessToday) {
             />
           )}
 
+        <details className="booking-composer">
+          <summary>
+            <span>New appointment</span>
+            <span>Select a customer, service, and time <span aria-hidden="true">+</span></span>
+          </summary>
         <section
           id="new-appointment"
           className="anaai-surface scroll-mt-24 overflow-hidden"
@@ -2119,6 +2115,7 @@ if (businessToday) {
             </div>
           </div>
         </section>
+        </details>
 
         <section
           id="appointment-schedule"
@@ -2208,6 +2205,7 @@ if (businessToday) {
                   return (
                     <article
                       id={`appointment-${appointment.id}`}
+                      tabIndex={-1}
                       key={
                         appointment.id
                       }
@@ -2676,6 +2674,7 @@ if (businessToday) {
           )}
         </section>
       </div>
+      {confirmation}
     </AppLayout>
   );
 }

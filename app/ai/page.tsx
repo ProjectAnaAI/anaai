@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { activeBusinessHeaders } from "@/lib/active-business";
@@ -617,7 +618,7 @@ export default function AIReceptionistPage() {
       MAX_INSTRUCTIONS_LENGTH
     ) {
       toast.warning(
-        `Custom instructions must be ${MAX_INSTRUCTIONS_LENGTH} characters or fewer.`
+        `Business rules must be ${MAX_INSTRUCTIONS_LENGTH} characters or fewer.`
       );
       return;
     }
@@ -779,46 +780,30 @@ export default function AIReceptionistPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <header className="flex flex-col gap-5 border-b border-gray-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-              AnaAI
-            </p>
-
-            <h1 className="anaai-page-title mt-2">
-              AI Receptionist
-            </h1>
-
-            <p className="anaai-page-description mt-2 max-w-2xl">
-              Configure how AnaAI
-              communicates with
-              customers and test
-              responses using your
-              business information.
-            </p>
-          </div>
-
+      <div className="space-y-6" data-page="ai">
+        <PageHeader
+          eyebrow="AnaAI / Receptionist"
+          title={<>Receptionist</>}
+          description={
+            <>
+              A welcome in your words. Configure your receptionist and preview answers to
+              customer questions.
+            </>
+          }
+        >
           {canManageSettings && (
             <Button
               type="button"
-              onClick={() =>
-                void handleSave()
-              }
-              disabled={
-                saving ||
-                !businessId
-              }
+              onClick={() => void handleSave()}
+              disabled={saving || !businessId}
               className="shrink-0 gap-2"
             >
               <Save className="size-4" />
 
-              {saving
-                ? "Saving..."
-                : "Save settings"}
+              {saving ? "Saving..." : "Save settings"}
             </Button>
           )}
-        </header>
+        </PageHeader>
 
         {businessRole ===
           "staff" && (
@@ -837,7 +822,7 @@ export default function AIReceptionistPage() {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="record-summary">
           <div className="anaai-surface flex items-center justify-between p-5">
             <div>
               <p className="text-xs font-medium text-gray-500">
@@ -900,134 +885,16 @@ export default function AIReceptionistPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.55fr)]">
+        <nav className="section-nav" aria-label="Receptionist settings sections">
+          <a href="#receptionist-preview">Try an answer</a>
+          <a href="#receptionist-identity">Identity & tone</a>
+          <a href="#receptionist-greeting">Greeting</a>
+          <a href="#receptionist-rules">Business rules</a>
+          <a href="#receptionist-handoff">Human handoff</a>
+        </nav>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.72fr)]">
           <div className="space-y-6">
-            <section className="anaai-surface overflow-hidden">
-              <div className="flex items-start gap-3 border-b border-gray-200 px-5 py-5 sm:px-6">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-green-50 text-green-700">
-                  <MessageCircle className="size-5" />
-                </div>
 
-                <div>
-                  <h2 className="text-base font-semibold text-gray-950">
-                    Test AnaAI
-                  </h2>
-
-                  <p className="mt-1 text-sm leading-6 text-gray-500">
-                    Ask a question as if
-                    you were a customer
-                    contacting your
-                    business.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-5 sm:p-6">
-                <div className="mb-2 flex items-center justify-between gap-4">
-                  <label
-                    htmlFor="ai-preview-message"
-                    className="text-sm font-medium text-gray-800"
-                  >
-                    Customer question
-                  </label>
-
-                  <span className="text-xs text-gray-400">
-                    {testMessage.length}/
-                    {
-                      MAX_PREVIEW_MESSAGE_LENGTH
-                    }
-                  </span>
-                </div>
-
-                <textarea
-                  id="ai-preview-message"
-                  aria-description="Preview only: does not book appointments or send SMS."
-                  value={testMessage}
-                  onChange={(event) =>
-                    setTestMessage(
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={
-                    handleKeyDown
-                  }
-                  rows={4}
-                  maxLength={
-                    MAX_PREVIEW_MESSAGE_LENGTH
-                  }
-                  disabled={asking}
-                  placeholder="Example: What time do you close on Saturday?"
-                  className="min-h-28 w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm leading-6 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100 disabled:cursor-not-allowed disabled:bg-gray-100"
-                />
-
-                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-xs text-gray-500">
-                      Preview only. No
-                      appointments are
-                      created or changed,
-                      and no SMS is sent.
-                    </p>
-
-                    <p className="mt-1 text-xs text-gray-400">
-                      Enter sends. Shift +
-                      Enter adds a new
-                      line.
-                    </p>
-                  </div>
-
-                  <Button
-                    type="button"
-                    onClick={() =>
-                      void handleAskAI()
-                    }
-                    disabled={
-                      !businessId ||
-                      asking ||
-                      !testMessage.trim()
-                    }
-                    className="shrink-0 gap-2"
-                  >
-                    <Send className="size-4" />
-
-                    {asking
-                      ? "Thinking..."
-                      : "Ask AnaAI"}
-                  </Button>
-                </div>
-
-                {(asking ||
-                  aiReply) && (
-                  <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex size-9 items-center justify-center rounded-xl bg-green-100 text-green-700">
-                        <Bot className="size-4" />
-                      </div>
-
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {receptionistName}
-                        </p>
-
-                        {asking && (
-                          <p className="mt-0.5 text-xs text-gray-500">
-                            Generating
-                            preview...
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {!asking &&
-                      aiReply && (
-                        <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-gray-700">
-                          {aiReply}
-                        </p>
-                      )}
-                  </div>
-                )}
-              </div>
-            </section>
 
             <fieldset
               disabled={
@@ -1036,7 +903,7 @@ export default function AIReceptionistPage() {
               }
               className="space-y-6 disabled:opacity-75"
             >
-              <section className="anaai-surface overflow-hidden">
+              <section id="receptionist-identity" className="configuration-section anaai-surface overflow-hidden">
                 <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
                   <h2 className="text-base font-semibold text-gray-950">
                     Voice & personality
@@ -1120,7 +987,7 @@ export default function AIReceptionistPage() {
                 </div>
               </section>
 
-              <section className="anaai-surface overflow-hidden">
+              <section id="receptionist-greeting" className="configuration-section anaai-surface overflow-hidden">
                 <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
                   <h2 className="text-base font-semibold text-gray-950">
                     Call greeting
@@ -1144,6 +1011,7 @@ export default function AIReceptionistPage() {
                   </div>
 
                   <textarea
+                    aria-label="Call greeting"
                     value={greeting}
                     maxLength={
                       MAX_GREETING_LENGTH
@@ -1159,10 +1027,10 @@ export default function AIReceptionistPage() {
                 </div>
               </section>
 
-              <section className="anaai-surface overflow-hidden">
+              <section id="receptionist-rules" className="configuration-section anaai-surface overflow-hidden">
                 <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
                   <h2 className="text-base font-semibold text-gray-950">
-                    Custom instructions
+                    Business rules
                   </h2>
 
                   <p className="mt-1 text-sm leading-6 text-gray-500">
@@ -1187,6 +1055,7 @@ export default function AIReceptionistPage() {
                   </div>
 
                   <textarea
+                    aria-label="Business rules"
                     value={instructions}
                     maxLength={
                       MAX_INSTRUCTIONS_LENGTH
@@ -1203,10 +1072,10 @@ export default function AIReceptionistPage() {
                 </div>
               </section>
 
-              <section className="anaai-surface overflow-hidden">
+              <section id="receptionist-handoff" className="configuration-section anaai-surface overflow-hidden">
                 <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
                   <h2 className="text-base font-semibold text-gray-950">
-                    Human transfer
+                    Human handoff
                   </h2>
 
                   <p className="mt-1 text-sm leading-6 text-gray-500">
@@ -1232,6 +1101,7 @@ export default function AIReceptionistPage() {
                   </div>
 
                   <textarea
+                    aria-label="Human handoff instructions"
                     value={
                       transferInstructions
                     }
@@ -1274,7 +1144,132 @@ export default function AIReceptionistPage() {
             )}
           </div>
 
-          <aside className="space-y-6">
+          <aside className="receptionist-support space-y-6"><section id="receptionist-preview" className="configuration-section anaai-surface overflow-hidden">
+              <div className="flex items-start gap-3 border-b border-gray-200 px-5 py-5 sm:px-6">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-green-50 text-green-700">
+                  <MessageCircle className="size-5" />
+                </div>
+
+                <div>
+                  <h2 className="text-base font-semibold text-gray-950">
+                    Test AnaAI
+                  </h2>
+
+                  <p className="mt-1 text-sm leading-6 text-gray-500">
+                    Ask a question as if
+                    you were a customer
+                    contacting your
+                    business.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-5 sm:p-6">
+                <div className="mb-2 flex items-center justify-between gap-4">
+                  <label
+                    htmlFor="ai-preview-message"
+                    className="text-sm font-medium text-gray-800"
+                  >
+                    Customer question
+                  </label>
+
+                  <span className="text-xs text-gray-400">
+                    {testMessage.length}/
+                    {
+                      MAX_PREVIEW_MESSAGE_LENGTH
+                    }
+                  </span>
+                </div>
+
+                <textarea
+                  id="ai-preview-message"
+                  aria-describedby="ai-preview-disclaimer"
+                  value={testMessage}
+                  onChange={(event) =>
+                    setTestMessage(
+                      event.target.value
+                    )
+                  }
+                  onKeyDown={
+                    handleKeyDown
+                  }
+                  rows={4}
+                  maxLength={
+                    MAX_PREVIEW_MESSAGE_LENGTH
+                  }
+                  disabled={asking}
+                  placeholder="Example: What time do you close on Saturday?"
+                  className="min-h-28 w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm leading-6 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-100 disabled:cursor-not-allowed disabled:bg-gray-100"
+                />
+
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p id="ai-preview-disclaimer" className="text-xs text-gray-500">
+                      Preview only. No
+                      appointments are
+                      created or changed,
+                      and no SMS is sent.
+                    </p>
+
+                    <p className="mt-1 text-xs text-gray-400">
+                      Enter sends. Shift +
+                      Enter adds a new
+                      line.
+                    </p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      void handleAskAI()
+                    }
+                    disabled={
+                      !businessId ||
+                      asking ||
+                      !testMessage.trim()
+                    }
+                    className="shrink-0 gap-2"
+                  >
+                    <Send className="size-4" />
+
+                    {asking
+                      ? "Thinking..."
+                      : "Ask AnaAI"}
+                  </Button>
+                </div>
+
+                {(asking ||
+                  aiReply) && (
+                  <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex size-9 items-center justify-center rounded-xl bg-green-100 text-green-700">
+                        <Bot className="size-4" />
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          {receptionistName}
+                        </p>
+
+                        {asking && (
+                          <p className="mt-0.5 text-xs text-gray-500">
+                            Generating
+                            preview...
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {!asking &&
+                      aiReply && (
+                        <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-gray-700">
+                          {aiReply}
+                        </p>
+                      )}
+                  </div>
+                )}
+              </div>
+            </section>
             <section className="anaai-surface p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -1403,15 +1398,12 @@ export default function AIReceptionistPage() {
                 </div>
 
                 <h2 className="text-sm font-semibold text-gray-950">
-                  Business scoped
+                  Your business context
                 </h2>
               </div>
 
               <p className="mt-3 text-sm leading-6 text-gray-500">
-                Settings, knowledge,
-                and preview context are
-                loaded for the current
-                authenticated business.
+                Answers use the settings and knowledge for the business selected in your workspace.
               </p>
             </section>
 

@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { DialogSurface } from "@/components/ui/dialog-surface";
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import {
@@ -688,43 +690,24 @@ export default function ServicesPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <header className="flex flex-col gap-5 border-b border-gray-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-              Business setup
-            </p>
-
-            <h1 className="anaai-page-title mt-2">
-              Services
-            </h1>
-
-            <p className="anaai-page-description mt-2 max-w-2xl">
-              Manage the services
-              customers can book with
-              your business.
-            </p>
-          </div>
-
+      <div className="space-y-6" data-page="services">
+        <PageHeader
+          eyebrow="Your service menu"
+          title={<>Services</>}
+          description={<>Manage the services customers can book with your business.</>}
+        >
           {canManageServices && (
             <Button
               type="button"
-              onClick={
-                openNewService
-              }
-              disabled={
-                saving ||
-                Boolean(
-                  serviceActionId
-                )
-              }
+              onClick={openNewService}
+              disabled={saving || Boolean(serviceActionId)}
               className="shrink-0 gap-2"
             >
               <Plus className="size-4" />
               Add service
             </Button>
           )}
-        </header>
+        </PageHeader>
 
         {businessRole ===
           "staff" && (
@@ -751,7 +734,7 @@ export default function ServicesPage() {
             </div>
           )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="record-summary">
           <Card className="border-gray-200 shadow-none">
             <CardContent className="flex items-center justify-between p-5">
               <div>
@@ -874,8 +857,8 @@ export default function ServicesPage() {
                   <div
                     className={`grid gap-4 border-b border-gray-200 bg-gray-50/70 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${
                       canManageServices
-                        ? "grid-cols-[minmax(190px,1.6fr)_120px_120px_110px_96px]"
-                        : "grid-cols-[minmax(190px,1.6fr)_120px_120px_110px]"
+                        ? "service-row"
+                        : "service-row-readonly"
                     }`}
                   >
                     <span>
@@ -914,8 +897,8 @@ export default function ServicesPage() {
                           }
                           className={`grid min-h-[78px] items-center gap-4 border-b border-gray-100 px-5 py-3 last:border-b-0 ${
                             canManageServices
-                              ? "grid-cols-[minmax(190px,1.6fr)_120px_120px_110px_96px]"
-                              : "grid-cols-[minmax(190px,1.6fr)_120px_120px_110px]"
+                              ? "service-row"
+                              : "service-row-readonly"
                           }`}
                         >
                           <div className="flex min-w-0 items-start gap-3">
@@ -1178,27 +1161,12 @@ export default function ServicesPage() {
 
       {editorOpen &&
         canManageServices && (
-          <div
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black/25 p-0 backdrop-blur-[1px] sm:items-center sm:p-6"
-            role="presentation"
-            onMouseDown={(
-              event
-            ) => {
-              if (
-                event.target ===
-                  event.currentTarget &&
-                !saving
-              ) {
-                closeEditor();
-              }
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="service-editor-title"
-              className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-gray-200 bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl"
-            >
+          <DialogSurface
+          aria-labelledby="service-editor-title"
+          onClose={() => {
+            if (!saving) closeEditor();
+          }}
+        >
               <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-5 sm:px-6">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
@@ -1450,8 +1418,8 @@ export default function ServicesPage() {
                   </Button>
                 </div>
               </form>
-            </div>
-          </div>
+            </DialogSurface>
+
         )}
     </AppLayout>
   );

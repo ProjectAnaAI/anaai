@@ -18,7 +18,7 @@ export default function AppLayout({
   ] = useState(false);
 
   return (
-    <main className="min-h-screen bg-[#f7f9f8]">
+    <main className="workspace min-h-screen"><a href="#workspace-content" className="skip-link">Skip to content</a>
       <div className="flex min-h-screen">
         <Sidebar
           mobileOpen={
@@ -40,7 +40,7 @@ export default function AppLayout({
             }
           />
 
-          <section className="flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-7 xl:px-8 xl:py-7">
+          <section id="workspace-content" tabIndex={-1} className="workspace-content flex-1">
             <div className="anaai-page">
               {children}
             </div>

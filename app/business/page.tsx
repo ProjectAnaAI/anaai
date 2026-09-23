@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { activeBusinessHeaders } from "@/lib/active-business";
@@ -982,38 +983,24 @@ export default function BusinessPage() {
         onSubmit={handleSave}
         className="space-y-6"
       >
-        <header className="flex flex-col gap-5 border-b border-gray-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-              Business setup
-            </p>
-
-            <h1 className="anaai-page-title mt-2">
-              Business Profile
-            </h1>
-
-            <p className="anaai-page-description mt-2 max-w-2xl">
-              Manage your business
-              information, timezone,
-              and weekly operating
-              hours used by AnaAI.
-            </p>
-          </div>
-
+        <PageHeader
+          eyebrow="Business & availability"
+          title={<>Business & availability</>}
+          description={
+            <>
+              Manage your business information, timezone, and weekly operating hours used by
+              AnaAI.
+            </>
+          }
+        >
           {canEditProfile && (
-            <Button
-              type="submit"
-              disabled={saving}
-              className="shrink-0 gap-2"
-            >
+            <Button type="submit" disabled={saving} className="shrink-0 gap-2">
               <Save className="size-4" />
 
-              {saving
-                ? "Saving..."
-                : "Save profile"}
+              {saving ? "Saving..." : "Save profile"}
             </Button>
           )}
-        </header>
+        </PageHeader>
 
         {businessRole ===
           "staff" && (
@@ -1051,7 +1038,7 @@ export default function BusinessPage() {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="record-summary">
           <div className="anaai-surface flex items-center justify-between p-5">
             <div className="min-w-0">
               <p className="text-xs font-medium text-gray-500">
@@ -1107,14 +1094,20 @@ export default function BusinessPage() {
           </div>
         </div>
 
+        <nav className="section-nav" aria-label="Business settings sections">
+          <a href="#business-details">Business details</a>
+          <a href="#business-timezone">Timezone</a>
+          <a href="#business-capacity">Capacity</a>
+          <a href="#business-hours">Weekly hours</a>
+        </nav>
         <fieldset
           disabled={
             !canEditProfile ||
             saving
           }
-          className="space-y-6 disabled:opacity-75"
+          className="business-form-sections disabled:opacity-75"
         >
-          <section className="anaai-surface overflow-hidden">
+          <section id="business-details" className="configuration-section anaai-surface overflow-hidden">
             <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
               <div className="flex items-start gap-3">
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-green-50 text-green-700">
@@ -1282,7 +1275,7 @@ export default function BusinessPage() {
             </div>
           </section>
 
-          <section className="anaai-surface overflow-hidden">
+          <section id="business-timezone" className="configuration-section anaai-surface overflow-hidden">
             <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
               <div className="flex items-start gap-3">
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-600">
@@ -1372,7 +1365,7 @@ export default function BusinessPage() {
             </div>
           </section>
 
-          <section className="anaai-surface overflow-hidden">
+          <section id="business-capacity" className="configuration-section anaai-surface overflow-hidden">
             <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
               <div className="flex items-start gap-3">
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-600">
@@ -1518,7 +1511,7 @@ export default function BusinessPage() {
             </div>
           </section>
 
-          <section className="anaai-surface overflow-hidden">
+          <section id="business-hours" className="configuration-section anaai-surface overflow-hidden">
             <div className="border-b border-gray-200 px-5 py-5 sm:px-6">
               <div className="flex items-start gap-3">
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-green-50 text-green-700">

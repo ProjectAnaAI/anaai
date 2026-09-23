@@ -42,6 +42,9 @@ const globals = read(
   "globals.css"
 );
 
+const design = read("app", "design-system.css");
+const dialog = read("components", "ui", "dialog-surface.tsx");
+
 const compactLayout =
   layout.replace(/\s+/g, " ");
 
@@ -66,47 +69,47 @@ test("app shell uses the shared AnaAI page container", () => {
   );
 
   assert.match(
-    compactLayout,
-    /sm:px-6/
+    design,
+    /\.workspace-content\s*\{[^}]*padding:/
   );
 
   assert.match(
     compactLayout,
-    /xl:px-8/
+    /id="workspace-content"/
   );
 });
 
 test("desktop and iPad landscape retain persistent navigation", () => {
   assert.match(
-    compactSidebar,
-    /hidden h-screen w-60/
+    design,
+    /\.workspace-sidebar\s*\{[^}]*display: none;[^}]*width: 218px;/
   );
 
   assert.match(
-    compactSidebar,
-    /lg:block/
+    design,
+    /@media \(min-width: 1024px\)\s*\{\s*\.workspace-sidebar\s*\{\s*display: block;/
   );
 
   assert.match(
-    compactSidebar,
-    /sticky top-0/
+    design,
+    /\.workspace-sidebar\s*\{[^}]*position: sticky;[^}]*top: 0;/
   );
 });
 
 test("portrait and narrow layouts expose navigation as a dialog", () => {
   assert.match(
-    compactSidebar,
-    /role="dialog"/
+    dialog,
+    /<dialog/
+  );
+
+  assert.match(
+    dialog,
+    /dialog\?\.showModal\(\)/
   );
 
   assert.match(
     compactSidebar,
-    /aria-modal="true"/
-  );
-
-  assert.match(
-    compactSidebar,
-    /lg:hidden/
+    /mobileOpen &&/
   );
 
   assert.match(
@@ -117,8 +120,8 @@ test("portrait and narrow layouts expose navigation as a dialog", () => {
 
 test("primary navigation remains touch friendly and exposes active page semantics", () => {
   assert.match(
-    compactSidebar,
-    /min-h-11 w-full/
+    design,
+    /\.nav-group a,[\s\S]*?min-height: 44px;/
   );
 
   assert.match(
@@ -156,7 +159,7 @@ test("sidebar retains all current product destinations", () => {
     assert.match(
       sidebar,
       new RegExp(
-        `href: "${destination.replace(
+        `href(?:: |=)"${destination.replace(
           "/",
           "\\/"
         )}"`
@@ -202,7 +205,7 @@ test("standard buttons use an iPad-friendly touch height", () => {
 test("global design tokens establish AnaAI surfaces and touch targets", () => {
   assert.match(
     globals,
-    /--primary: oklch\(0\.57 0\.16 158\)/
+    /--primary: #147d52/
   );
 
   assert.match(

@@ -17,6 +17,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { DialogSurface } from "@/components/ui/dialog-surface";
+import { useConfirmation } from "@/components/ui/use-confirmation";
+import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +72,7 @@ const MAX_ANSWER_LENGTH = 4000;
 
 export default function KnowledgePage() {
   const router = useRouter();
+  const { confirm, confirmation } = useConfirmation();
 
   const [
     items,
@@ -637,8 +641,9 @@ export default function KnowledgePage() {
     }
 
     const confirmed =
-      window.confirm(
-        "Delete this knowledge item? AnaAI will no longer have this answer available."
+      await confirm(
+        "Delete this knowledge item? AnaAI will no longer have this answer available.",
+        { destructive: true }
       );
 
     if (!confirmed) {
@@ -701,42 +706,29 @@ export default function KnowledgePage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <header className="flex flex-col gap-5 border-b border-gray-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-              AI training
-            </p>
-
-            <h1 className="anaai-page-title mt-2">
-              Business Knowledge
-            </h1>
-
-            <p className="anaai-page-description mt-2 max-w-2xl">
-              Manage the questions,
-              policies, and business
-              information AnaAI can use
-              when helping customers.
-            </p>
-          </div>
-
+      <div className="space-y-6" data-page="knowledge">
+        <PageHeader
+          eyebrow="AnaAI / Knowledge"
+          title={<>Knowledge</>}
+          description={
+            <>
+              What AnaAI knows about your business. Keep answers, policies, and useful details
+              together.
+            </>
+          }
+        >
           {canManageKnowledge && (
             <Button
               type="button"
-              onClick={
-                openNewKnowledge
-              }
-              disabled={
-                saving ||
-                Boolean(deletingId)
-              }
+              onClick={openNewKnowledge}
+              disabled={saving || Boolean(deletingId)}
               className="shrink-0 gap-2"
             >
               <Plus className="size-4" />
               Add knowledge
             </Button>
           )}
-        </header>
+        </PageHeader>
 
         {businessRole ===
           "staff" && (
@@ -756,7 +748,7 @@ export default function KnowledgePage() {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="record-summary">
           <div className="anaai-surface flex items-center justify-between p-5">
             <div>
               <p className="text-xs font-medium text-gray-500">
@@ -946,7 +938,7 @@ export default function KnowledgePage() {
                   return (
                     <article
                       key={item.id}
-                      className="px-4 py-5 sm:px-5"
+                      className="knowledge-entry px-4 py-5 sm:px-5"
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 flex-1">
@@ -1029,31 +1021,16 @@ export default function KnowledgePage() {
 
       {editorOpen &&
         canManageKnowledge && (
-          <div
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black/25 p-0 backdrop-blur-[1px] sm:items-center sm:p-6"
-            role="presentation"
-            onMouseDown={(
-              event
-            ) => {
-              if (
-                event.target ===
-                  event.currentTarget &&
-                !saving
-              ) {
-                closeEditor();
-              }
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="knowledge-editor-title"
-              className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-gray-200 bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl"
-            >
+          <DialogSurface
+          aria-labelledby="knowledge-editor-title"
+          onClose={() => {
+            if (!saving) closeEditor();
+          }}
+        >
               <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-5 sm:px-6">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
-                    AI training
+                    Business answers
                   </p>
 
                   <h2
@@ -1245,9 +1222,10 @@ export default function KnowledgePage() {
                   )}
                 </Button>
               </div>
-            </div>
-          </div>
+            </DialogSurface>
+
         )}
+      {confirmation}
     </AppLayout>
   );
 }

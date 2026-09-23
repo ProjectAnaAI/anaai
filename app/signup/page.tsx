@@ -1,6 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
+import { Eye, EyeOff, ArrowRight } from "lucide-react";
+import { AuthFrame } from "@/components/auth/AuthFrame";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -9,6 +14,7 @@ export default function SignUpPage() {
   const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [visible, setVisible] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -16,64 +22,86 @@ export default function SignUpPage() {
     e.preventDefault();
 
     if (inFlight.current) return;
-    inFlight.current=true; setBusy(true);
+    inFlight.current = true;
+    setBusy(true);
     try {
-      const { data, error } = await supabase.auth.signUp({email,password});
-      if(error) setMessage("Unable to create account. Check your details and try again.");
-      else if(data.session) router.replace("/dashboard");
-      else setMessage("Check your email to verify your account, then log in to finish setup.");
-    } catch { setMessage("Unable to create account. Please try again."); }
-    finally { inFlight.current=false; setBusy(false); }
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error)
+        setMessage(
+          "Unable to create account. Check your details and try again.",
+        );
+      else if (data.session) router.replace("/dashboard");
+      else
+        setMessage(
+          "Check your email to verify your account, then log in to finish setup.",
+        );
+    } catch {
+      setMessage("Unable to create account. Please try again.");
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
-      <div className="w-full max-w-md rounded-2xl bg-gray-900 p-8 shadow-lg">
-        <h1 className="text-3xl font-bold text-center text-cyan-400">
-          Create Your AnaAI Account
-        </h1>
-
-        <p className="mt-3 text-center text-gray-400">
-          Start using your AI Receptionist today.
-        </p>
-
-        <form onSubmit={handleSignUp} className="mt-8 space-y-5">
-          <div>
-            <label className="block mb-2">Email</label>
-
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 p-3"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block mb-2">Password</label>
-
-            <input
-              type="password"
-              placeholder="Enter your password"
+    <AuthFrame
+      title="A better first hello."
+      description="Create your account. Then make AnaAI part of your business."
+      footer={
+        <>
+          Already have an account?{" "}
+          <Link href="/login">
+            Sign in <ArrowRight size={15} />
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSignUp} className="auth-fields" aria-busy={busy}>
+        <label htmlFor="signup-email">
+          Email address
+          <Input
+            id="signup-email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@yourbusiness.com"
+            required
+          />
+        </label>
+        <label htmlFor="signup-password">
+          Password
+          <span className="password-field">
+            <Input
+              id="signup-password"
+              name="password"
+              type={visible ? "text" : "password"}
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 p-3"
               required
             />
-          </div>
-
-          <button
-            disabled={busy}
-            type="submit"
-            className="w-full rounded-lg bg-cyan-500 p-3 font-bold text-black hover:bg-cyan-400 transition"
-          >
-            {busy ? "Creating account..." : "Create Account"}
-          </button>
-        </form>
-        {message && <p role="status" className="mt-4">{message}</p>}
-      </div>
-    </main>
+            <button
+              type="button"
+              aria-label={visible ? "Hide password" : "Show password"}
+              aria-pressed={visible}
+              onClick={() => setVisible((value) => !value)}
+            >
+              {visible ? <EyeOff size={19} /> : <Eye size={19} />}
+            </button>
+          </span>
+        </label>
+        {message && (
+          <p className="form-message" role="status">
+            {message}
+          </p>
+        )}
+        <Button type="submit" disabled={busy} className="w-full">
+          {busy ? "Creating account..." : "Create account"}
+          <ArrowRight size={17} />
+        </Button>
+      </form>
+    </AuthFrame>
   );
 }

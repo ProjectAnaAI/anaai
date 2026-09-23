@@ -407,7 +407,7 @@ function AppointmentButton({
       } ${statusClasses(
         appointment.status
       )}`}
-      aria-label={`Open appointment for ${appointment.customer_name}`}
+      aria-label={`Open appointment for ${appointment.customer_name}, ${appointment.status || "Status unavailable"}`}
     >
       <div className="flex min-w-0 items-center gap-2">
         <span
@@ -418,7 +418,7 @@ function AppointmentButton({
         />
 
         <span
-          className={`shrink-0 font-semibold ${
+          className={`min-w-0 truncate font-semibold ${
             compact
               ? "text-[11px]"
               : "text-xs"
@@ -451,6 +451,7 @@ function AppointmentButton({
             }
           </p>
         )}
+      <span className="mt-1 block text-[10px] font-medium">{appointment.status || "Status unavailable"}</span>
     </button>
   );
 }
@@ -489,7 +490,7 @@ function MonthView({
 
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[760px]">
+      <div className="calendar-month">
         <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50">
           {weekDays.map(
             (day) => (
@@ -541,7 +542,7 @@ function MonthView({
               return (
                 <div
                   key={date}
-                  className={`relative min-h-[156px] border-b border-r border-gray-100 p-2 ${
+                  className={`calendar-month-cell relative min-h-[156px] border-b border-r border-gray-100 p-2 ${
                     inMonth
                       ? "bg-white"
                       : "bg-gray-50/70"
@@ -559,7 +560,7 @@ function MonthView({
                           date
                         )
                       }
-                      className={`flex h-11 min-w-11 items-center justify-center rounded-full px-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-green-200 ${
+                      className={`calendar-date flex h-11 min-w-11 items-center justify-center rounded-full px-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-green-200 ${
                         isToday
                           ? "bg-green-600 text-white"
                           : isSelected
@@ -599,7 +600,8 @@ function MonthView({
                     </button>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <p className="calendar-day-count">{dayAppointments.length > 0 ? `${dayAppointments.length} appts` : "—"}</p>
+                  <div className="calendar-month-appointments space-y-1.5">
                     {visibleAppointments.map(
                       (
                         appointment
@@ -677,7 +679,7 @@ function TimeSlotAppointment({
       className={`w-full rounded-lg border px-2 py-2 text-left transition focus:outline-none focus:ring-2 focus:ring-green-200 ${statusClasses(
         appointment.status
       )}`}
-      aria-label={`Open appointment for ${appointment.customer_name}`}
+      aria-label={`Open appointment for ${appointment.customer_name}, ${appointment.status || "Status unavailable"}`}
     >
       <p className="truncate text-xs font-semibold">
         {
@@ -699,6 +701,7 @@ function TimeSlotAppointment({
           }
         </p>
       )}
+      <span className="mt-1 block text-[10px] font-medium">{appointment.status || "Status unavailable"}</span>
     </button>
   );
 }
@@ -737,8 +740,8 @@ function WeekView({
 
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[980px]">
-        <div className="sticky top-0 z-20 grid grid-cols-[80px_repeat(7,minmax(120px,1fr))] border-b border-gray-200 bg-white">
+      <div className="calendar-week">
+        <div className="sticky top-0 z-20 grid calendar-week-grid border-b border-gray-200 bg-white">
           <div className="border-r border-gray-100 bg-gray-50" />
 
           {dates.map(
@@ -796,7 +799,7 @@ function WeekView({
             (slot) => (
               <div
                 key={slot}
-                className="grid grid-cols-[80px_repeat(7,minmax(120px,1fr))]"
+                className="grid calendar-week-grid"
               >
                 <div className="flex min-h-16 items-start justify-end border-r border-t border-gray-100 bg-gray-50 px-2 pt-2 text-[11px] font-medium text-gray-500">
                   {formatTime(
@@ -1357,7 +1360,7 @@ export default function AppointmentCalendar({
           );
 
   return (
-    <section className="anaai-surface overflow-hidden">
+    <section className="calendar-shell anaai-surface overflow-hidden">
       <div className="border-b border-gray-100 px-4 py-4 sm:px-5 sm:py-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
@@ -1380,7 +1383,7 @@ export default function AppointmentCalendar({
             </p>
           </div>
 
-          <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="calendar-controls flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
             <div className="grid grid-cols-[auto_1fr_auto] gap-2 sm:flex sm:items-center">
               <Button
                 type="button"

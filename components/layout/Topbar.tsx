@@ -51,8 +51,8 @@ export default function Topbar({
   }
 
   return (
-    <header className="sticky top-0 z-30 border-b border-gray-200/90 bg-white/95 backdrop-blur">
-      <div className="flex min-h-[68px] items-center gap-3 px-4 sm:px-6 lg:px-7 xl:px-8">
+    <header className="workspace-topbar sticky top-0 z-30 border-b border-gray-200 bg-white">
+      <div className="flex min-h-[64px] items-center gap-3 px-4 sm:px-6 lg:px-7 xl:px-8">
         <button
           type="button"
           aria-label="Open navigation"
@@ -73,11 +73,11 @@ export default function Topbar({
 
           <div className="hidden lg:block">
             <p className="text-sm font-semibold text-gray-900">
-              Business workspace
+              Your workspace
             </p>
 
             <p className="text-xs text-gray-400">
-              Manage your receptionist and operations
+              Appointments, people, and a little peace of mind
             </p>
           </div>
         </div>
