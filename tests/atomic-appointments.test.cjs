@@ -115,9 +115,13 @@ test('SQL contract: exact AI lock, self exclusion, invoker, identity and termina
 });
 test('page no longer directly inserts or uses availability to authorize create/reschedule',()=>{
   const page=fs.readFileSync('app/appointments/page.tsx','utf8');
+  // Manual creation lives in the composer shared by the Appointments page and the Dashboard.
+  const composer=fs.readFileSync('components/appointments/AppointmentComposer.tsx','utf8');
   assert.doesNotMatch(page,/\.insert\(/);
-  const create=page.slice(page.indexOf('async function handleCreateAppointment'),page.indexOf('function startEditingAppointment'));
+  assert.doesNotMatch(composer,/\.insert\(/);
+  const create=composer.slice(composer.indexOf('async function handleCreateAppointment'),composer.indexOf('return ('));
   const reschedule=page.slice(page.indexOf('async function saveAppointmentChanges'),page.indexOf('async function confirmAppointment'));
+  assert.ok(create.length>0);
   assert.doesNotMatch(create+reschedule,/validateAppointmentAvailability/);
   assert.match(create,/creating: true/);
 });

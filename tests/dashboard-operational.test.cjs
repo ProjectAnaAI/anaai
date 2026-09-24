@@ -10,8 +10,20 @@ const dashboardPath = path.join(
   "page.tsx"
 );
 
+const composerPath = path.join(
+  process.cwd(),
+  "components",
+  "appointments",
+  "AppointmentComposer.tsx"
+);
+
 const source = fs.readFileSync(
   dashboardPath,
+  "utf8"
+);
+
+const composerSource = fs.readFileSync(
+  composerPath,
   "utf8"
 );
 
@@ -19,10 +31,14 @@ const compact = source
   .replace(/\s+/g, " ")
   .trim();
 
+const compactComposer = composerSource
+  .replace(/\s+/g, " ")
+  .trim();
+
 test("dashboard resolves the active business before loading operational data", () => {
   assert.match(
     compact,
-    /fetch\( "\/api\/current-business"/
+    /fetch\("\/api\/current-business"/
   );
 
   assert.match(
@@ -39,17 +55,12 @@ test("dashboard resolves the active business before loading operational data", (
 test("dashboard derives today from the business timezone", () => {
   assert.match(
     compact,
-    /timeZone: timezone/
-  );
-
-  assert.match(
-    compact,
     /const businessTimezone = context\.business\.timezone/
   );
 
   assert.match(
     compact,
-    /businessDate\( businessTimezone \)/
+    /todayInTimezone\(businessTimezone\)/
   );
 
   assert.doesNotMatch(
@@ -58,27 +69,55 @@ test("dashboard derives today from the business timezone", () => {
   );
 });
 
-test("dashboard appointment schedule is business and date scoped", () => {
+test("dashboard schedule navigation shifts calendar days without mutating data", () => {
   assert.match(
     compact,
-    /\.from\("appointments"\) \.select\( "id, customer_name, service, appointment_time, status" \) \.eq\( "business_id", businessId \) \.eq\( "appointment_date", currentBusinessDate \)/
+    /shiftDateKey\(current, -1\)/
   );
 
   assert.match(
     compact,
-    /\.order\( "appointment_time", \{ ascending: true, \} \)/
+    /shiftDateKey\(current, 1\)/
+  );
+
+  assert.match(
+    compact,
+    /aria-label="Previous day"/
+  );
+
+  assert.match(
+    compact,
+    /aria-label="Next day"/
+  );
+
+  /* Today returns to the business date, never a browser-local date. */
+  assert.match(
+    compact,
+    /function goToToday\(\) \{ if \(today\) \{ setSelectedDate\(today\); \} \}/
+  );
+});
+
+test("dashboard appointment schedule is business and selected-date scoped", () => {
+  assert.match(
+    compact,
+    /\.from\("appointments"\)[\s\S]*?\.eq\("business_id", businessId\)[\s\S]*?\.eq\("appointment_date", selectedDate\)/
+  );
+
+  assert.match(
+    compact,
+    /\.order\("appointment_time", \{ ascending: true \}\)/
   );
 });
 
 test("dashboard counts only active customers and services", () => {
   assert.match(
     compact,
-    /\.from\("customers"\)[\s\S]*?\.eq\( "business_id", businessId \)[\s\S]*?\.eq\( "is_active", true \)/
+    /\.from\("customers"\)[\s\S]*?\.eq\("business_id", businessId\)[\s\S]*?\.eq\("is_active", true\)/
   );
 
   assert.match(
     compact,
-    /\.from\("services"\)[\s\S]*?\.eq\( "business_id", businessId \)[\s\S]*?\.eq\( "is_active", true \)/
+    /\.from\("services"\)[\s\S]*?\.eq\("business_id", businessId\)[\s\S]*?\.eq\("is_active", true\)/
   );
 
   assert.match(
@@ -88,14 +127,26 @@ test("dashboard counts only active customers and services", () => {
 
   assert.match(
     compact,
-    /label="Active services"/
+    /Active services/
+  );
+});
+
+test("dashboard upcoming metric is derived from real appointment rows", () => {
+  assert.match(
+    compact,
+    /\.gte\("appointment_date", upcomingStart\)[\s\S]*?\.lte\("appointment_date", upcomingEnd\)[\s\S]*?\.in\("status", \["Booked", "Confirmed"\]\)/
+  );
+
+  assert.match(
+    compact,
+    /label="Upcoming"/
   );
 });
 
 test("dashboard AI configuration is business scoped and does not claim runtime online status", () => {
   assert.match(
     compact,
-    /\.from\("ai_settings"\) \.select\( "receptionist_name, greeting, tone" \) \.eq\( "business_id", businessId \) \.maybeSingle\(\)/
+    /\.from\("ai_settings"\)[\s\S]*?\.eq\("business_id", businessId\)[\s\S]*?\.maybeSingle\(\)/
   );
 
   assert.match(
@@ -115,7 +166,7 @@ test("dashboard AI configuration is business scoped and does not claim runtime o
 
   assert.doesNotMatch(
     compact,
-    /AI status/
+    /Taking calls/i
   );
 
   assert.doesNotMatch(
@@ -134,34 +185,78 @@ test("dashboard AI configuration is business scoped and does not claim runtime o
   );
 });
 
-test("dashboard provides schedule and status breakdown from today's appointments", () => {
+test("dashboard uses only real appointment statuses in the day summary", () => {
   assert.match(
     compact,
-    /Today&apos;s appointments/
+    /const counts = \{ Booked: 0, Confirmed: 0, Completed: 0, Cancelled: 0, \}/
+  );
+
+  for (const status of [
+    "Booked",
+    "Confirmed",
+    "Completed",
+    "Cancelled",
+  ]) {
+    assert.match(
+      compact,
+      new RegExp(`case "${status}": counts\\.${status} \\+= 1;`)
+    );
+  }
+
+  assert.match(
+    compact,
+    /statusCounts\[status\]/
+  );
+
+  /* No invented status vocabulary. */
+  assert.doesNotMatch(
+    compact,
+    /"(No show|No-show|Pending|Rescheduled|Waitlisted)"/
+  );
+});
+
+test("dashboard booking reuses the shared composer instead of a second scheduling path", () => {
+  assert.match(
+    compact,
+    /import AppointmentComposer/
   );
 
   assert.match(
     compact,
-    /Today&apos;s status/
+    /<AppointmentComposer/
   );
 
-  assert.match(
+  /* Creation goes through the authoritative API, never a direct table write. */
+  assert.doesNotMatch(
     compact,
-    /statusCounts\.Booked/
+    /\.from\("appointments"\)[\s\S]{0,200}\.insert\(/
   );
 
-  assert.match(
+  assert.doesNotMatch(
     compact,
-    /statusCounts\.Confirmed/
+    /\.rpc\(/
+  );
+});
+
+test("the shared composer keeps scheduling authority on the server", () => {
+  assert.match(
+    compactComposer,
+    /onSubmit\(\{ creating: true, notificationType: "none", updates:/
   );
 
-  assert.match(
-    compact,
-    /statusCounts\.Completed/
+  /* No client-side hours, duration, capacity or conflict decisions. */
+  assert.doesNotMatch(
+    compactComposer,
+    /appointment_capacity|business_hours|duration_minutes \*|overlap/i
   );
 
-  assert.match(
-    compact,
-    /statusCounts\.Cancelled/
+  assert.doesNotMatch(
+    compactComposer,
+    /\.from\("appointments"\)/
+  );
+
+  assert.doesNotMatch(
+    compactComposer,
+    /\.rpc\(/
   );
 });

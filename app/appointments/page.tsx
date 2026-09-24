@@ -21,15 +21,15 @@ import {
 import {
   createRequestKeyStore,
 } from "@/lib/appointment-request-key";
-import {
-  normalizeCustomerPhone,
-  saveCustomer,
-} from "@/lib/customer-mutations";
+import { sendAppointmentMutation } from "@/lib/appointment-api";
 import {
   supabase,
 } from "@/lib/supabase";
 
 import AppointmentCalendar from "@/components/appointments/AppointmentCalendar";
+import AppointmentComposer, {
+  type AppointmentComposerHandle,
+} from "@/components/appointments/AppointmentComposer";
 import { useConfirmation } from "@/components/ui/use-confirmation";
 import { PageHeader } from "@/components/ui/page-header";
 import AppLayout from "@/components/layout/AppLayout";
@@ -92,14 +92,6 @@ type AppointmentFormValues = {
   notes: string;
 };
 
-type AppointmentUpdateResponse = {
-  message?: string;
-  success?: boolean;
-  error?: string;
-  sms_sent?: boolean;
-  sms_error?: string | null;
-};
-
 type CurrentBusinessResponse = {
   success: boolean;
   error?: string;
@@ -124,81 +116,6 @@ const emptyForm: AppointmentFormValues =
     appointmentTime: "",
     notes: "",
   };
-
-function normalizeCustomerName(
-  value: string
-) {
-  return value
-    .trim()
-    .toLowerCase();
-}
-
-function findCustomerMatches(
-  customers: Customer[],
-  name: string,
-  phone: string
-) {
-  const activeCustomers =
-    customers.filter(
-      (customer) =>
-        customer.is_active
-    );
-
-  const normalizedName =
-    normalizeCustomerName(name);
-
-  const normalizedPhone =
-    normalizeCustomerPhone(phone);
-
-  /*
-   * Only active customers are eligible for a new
-   * appointment selection.
-   *
-   * Phone takes precedence over names.
-   * Never infer identity from a name alone.
-   */
-  if (phone.trim()) {
-    if (!normalizedPhone) {
-      return [];
-    }
-
-    const exactMatches =
-      activeCustomers.filter(
-        (customer) =>
-          normalizeCustomerPhone(
-            customer.phone || ""
-          ) === normalizedPhone
-      );
-
-    if (
-      exactMatches.length
-    ) {
-      return exactMatches;
-    }
-
-    return activeCustomers.filter(
-      (customer) =>
-        normalizeCustomerPhone(
-          customer.phone || ""
-        ).includes(
-          normalizedPhone
-        )
-    );
-  }
-
-  if (!normalizedName) {
-    return [];
-  }
-
-  return activeCustomers.filter(
-    (customer) =>
-      normalizeCustomerName(
-        customer.full_name
-      ).includes(
-        normalizedName
-      )
-  );
-}
 
 function normalizeTime(
   value: string | null
@@ -353,42 +270,16 @@ export default function AppointmentsPage() {
   ] = useState(true);
 
   const [
-    submitting,
-    setSubmitting,
-  ] = useState(false);
-
-  const [
     actionAppointmentId,
     setActionAppointmentId,
   ] = useState<
     string | null
   >(null);
 
-  const [
-    createForm,
-    setCreateForm,
-  ] =
-    useState<AppointmentFormValues>(
-      emptyForm
+  const composerRef =
+    useRef<AppointmentComposerHandle>(
+      null
     );
-
-  const [
-    customerName,
-    setCustomerName,
-  ] = useState("");
-
-  const [
-    customerPhone,
-    setCustomerPhone,
-  ] = useState("");
-
-  const [
-    customerEmail,
-    setCustomerEmail,
-  ] = useState("");
-
-  const createInFlight =
-    useRef(false);
 
   const actionKeys =
     useRef(
@@ -419,21 +310,6 @@ export default function AppointmentsPage() {
   ] = useState<
     Notice | null
   >(null);
-
-  const matchingCustomers =
-    findCustomerMatches(
-      customers,
-      customerName,
-      customerPhone
-    );
-
-  const selectedCreateCustomer =
-    customers.find(
-      (customer) =>
-        customer.id ===
-          createForm.customerId &&
-        customer.is_active
-    );
 
   useEffect(() => {
     void initializePage();
@@ -733,71 +609,6 @@ if (businessToday) {
     }
   }
 
-  function updateCustomerLookup(
-    field:
-      | "name"
-      | "phone",
-    value: string
-  ) {
-    if (
-      field === "name"
-    ) {
-      setCustomerName(
-        value
-      );
-    } else {
-      setCustomerPhone(
-        value
-      );
-    }
-
-    /*
-     * Require explicit selection again after editing
-     * either customer identity field.
-     */
-    setCreateForm(
-      (current) => ({
-        ...current,
-        customerId: "",
-      })
-    );
-  }
-
-  function selectCreateCustomer(
-    customer: Customer
-  ) {
-    if (
-      !customer.is_active
-    ) {
-      showNotice(
-        "warning",
-        "Archived customers must be reactivated before they can be used for a new appointment."
-      );
-
-      return;
-    }
-
-    setCustomerEmail(
-      customer.email || ""
-    );
-
-    setCustomerName(
-      customer.full_name
-    );
-
-    setCustomerPhone(
-      customer.phone || ""
-    );
-
-    setCreateForm(
-      (current) => ({
-        ...current,
-        customerId:
-          customer.id,
-      })
-    );
-  }
-
   async function sendAppointmentUpdate({
     appointmentId,
     updates,
@@ -858,53 +669,18 @@ if (businessToday) {
           }
         );
 
-      const response =
-        await fetch(
-          "/api/appointments",
+      const result =
+        await sendAppointmentMutation(
           {
-            method:
-              creating
-                ? "POST"
-                : "PATCH",
-
-            headers: {
-              "Idempotency-Key":
-                idempotencyKey,
-
-              ...activeBusinessHeaders(),
-
-              "x-anaai-business-id":
-                businessId,
-
-              "Content-Type":
-                "application/json",
-
-              Authorization:
-                `Bearer ${accessToken}`,
-            },
-
-            body:
-              JSON.stringify({
-                appointmentId,
-                ...updates,
-                notificationType,
-              }),
+            accessToken,
+            businessId,
+            idempotencyKey,
+            creating,
+            appointmentId,
+            updates,
+            notificationType,
           }
         );
-
-      const result =
-        (await response.json()) as AppointmentUpdateResponse;
-
-      if (
-        !response.ok ||
-        result?.success !==
-          true
-      ) {
-        throw new Error(
-          result?.error ||
-            "Appointment update failed."
-        );
-      }
 
       actionKeys.current.clear();
 
@@ -912,208 +688,6 @@ if (businessToday) {
     } finally {
       mutationInFlight.current =
         false;
-    }
-  }
-
-  async function handleCreateAppointment() {
-    if (
-      createInFlight.current
-    ) {
-      return;
-    }
-
-    if (
-      !businessId ||
-      !userId
-    ) {
-      showNotice(
-        "error",
-        "Business context is not available."
-      );
-
-      return;
-    }
-
-    let selectedCustomer =
-      customers.find(
-        (customer) =>
-          customer.id ===
-            createForm.customerId &&
-          customer.is_active
-      );
-
-    const selectedService =
-      services.find(
-        (service) =>
-          service.id ===
-          createForm.serviceId
-      );
-
-    if (
-      createForm.customerId &&
-      (
-        !selectedCustomer ||
-        normalizeCustomerName(
-          customerName
-        ) !==
-          normalizeCustomerName(
-            selectedCustomer.full_name
-          ) ||
-        normalizeCustomerPhone(
-          customerPhone
-        ) !==
-          normalizeCustomerPhone(
-            selectedCustomer.phone ||
-              ""
-          )
-      )
-    ) {
-      showNotice(
-        "warning",
-        "Please select an active existing customer from the matches."
-      );
-
-      return;
-    }
-
-    if (!selectedService) {
-      showNotice(
-        "warning",
-        "Please select a service."
-      );
-
-      return;
-    }
-
-    if (
-      !createForm
-        .appointmentDate
-    ) {
-      showNotice(
-        "warning",
-        "Please select an appointment date."
-      );
-
-      return;
-    }
-
-    if (
-      !createForm
-        .appointmentTime
-    ) {
-      showNotice(
-        "warning",
-        "Please select an appointment time."
-      );
-
-      return;
-    }
-
-    createInFlight.current =
-      true;
-
-    setSubmitting(true);
-
-    try {
-      if (!selectedCustomer) {
-        selectedCustomer =
-          await saveCustomer(
-            businessId,
-            {
-              name:
-                customerName,
-
-              phone:
-                customerPhone,
-
-              email:
-                customerEmail,
-            }
-          );
-
-        const savedCustomer =
-          selectedCustomer;
-
-        setCustomers(
-          (current) => [
-            ...current.filter(
-              (item) =>
-                item.id !==
-                savedCustomer.id
-            ),
-
-            savedCustomer,
-          ]
-        );
-
-        selectCreateCustomer(
-          savedCustomer
-        );
-      }
-
-      if (
-        !selectedCustomer.is_active
-      ) {
-        throw new Error(
-          "Archived customers must be reactivated before they can be used for a new appointment."
-        );
-      }
-
-      const result =
-        await sendAppointmentUpdate(
-          {
-            creating: true,
-
-            updates: {
-              customerId:
-                selectedCustomer.id,
-
-              serviceId:
-                selectedService.id,
-
-              appointmentDate:
-                createForm.appointmentDate,
-
-              appointmentTime:
-                createForm.appointmentTime,
-
-              notes:
-                createForm.notes.trim() ||
-                null,
-            },
-
-            notificationType:
-              "none",
-          }
-        );
-
-      showNotice(
-        "success",
-        result.message ||
-          "Appointment action succeeded."
-      );
-
-      setCreateForm(
-        emptyForm
-      );
-
-      setCustomerName("");
-      setCustomerPhone("");
-      setCustomerEmail("");
-
-      await loadAppointments();
-    } catch (error) {
-      showNotice(
-        "error",
-        error instanceof Error
-          ? error.message
-          : "Could not create appointment."
-      );
-    } finally {
-      createInFlight.current =
-        false;
-
-      setSubmitting(false);
     }
   }
 
@@ -1515,14 +1089,9 @@ if (businessToday) {
       appointmentDate
     );
 
-    setCreateForm(
-      (current) => ({
-        ...current,
-        appointmentDate,
-        appointmentTime:
-          time ??
-          current.appointmentTime,
-      })
+    composerRef.current?.setSchedule(
+      appointmentDate,
+      time
     );
   }
 
@@ -1722,397 +1291,46 @@ if (businessToday) {
           </div>
 
           <div className="p-5 sm:p-6">
-            <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
-              <div className="min-w-0 space-y-5">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-950">
-                    Customer
-                  </h3>
+            <AppointmentComposer
+              ref={composerRef}
+              businessId={
+                businessId
+              }
+              userId={userId}
+              customers={
+                customers
+              }
+              services={
+                services
+              }
+              onSubmit={(input) =>
+                sendAppointmentUpdate(
+                  input
+                )
+              }
+              onNotice={showNotice}
+              onCreated={() =>
+                loadAppointments()
+              }
+              onCustomerCreated={(
+                customer
+              ) =>
+                setCustomers(
+                  (current) => [
+                    ...current.filter(
+                      (item) =>
+                        item.id !==
+                        customer.id
+                    ),
 
-                  <p className="mt-1 text-xs leading-5 text-gray-500">
-                    Search active customers
-                    or enter a new customer.
-                  </p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-2 text-sm font-medium text-gray-700">
-                    <span>
-                      Customer name
-                    </span>
-
-                    <Input
-                      disabled={
-                        submitting
-                      }
-                      value={
-                        customerName
-                      }
-                      onChange={(
-                        event
-                      ) =>
-                        updateCustomerLookup(
-                          "name",
-                          event
-                            .target
-                            .value
-                        )
-                      }
-                      placeholder="Search by name"
-                    />
-                  </label>
-
-                  <label className="space-y-2 text-sm font-medium text-gray-700">
-                    <span>
-                      Phone number
-                      <span className="ml-1 font-normal text-gray-400">
-                        Optional
-                      </span>
-                    </span>
-
-                    <Input
-                      type="tel"
-                      disabled={
-                        submitting
-                      }
-                      value={
-                        customerPhone
-                      }
-                      onChange={(
-                        event
-                      ) =>
-                        updateCustomerLookup(
-                          "phone",
-                          event
-                            .target
-                            .value
-                        )
-                      }
-                      placeholder="Search by phone"
-                    />
-                  </label>
-                </div>
-
-                {selectedCreateCustomer ? (
-                  <div
-                    role="status"
-                    className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4"
-                  >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 text-sm font-bold text-green-700">
-                      {selectedCreateCustomer.full_name
-                        .charAt(0)
-                        .toUpperCase()}
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-green-900">
-                        {
-                          selectedCreateCustomer.full_name
-                        }
-                      </p>
-
-                      <p className="mt-0.5 text-xs leading-5 text-green-700">
-                        Existing customer
-                        selected
-                        {selectedCreateCustomer.phone
-                          ? ` · ${selectedCreateCustomer.phone}`
-                          : ""}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <p
-                      role="status"
-                      className="text-sm leading-6 text-gray-500"
-                    >
-                      {matchingCustomers.length
-                        ? "Matching active customers — select one below, or continue with a new customer."
-                        : customerName.trim() ||
-                            customerPhone.trim()
-                          ? "No active customer selected. A new customer will be created when this appointment is saved."
-                          : "Enter a customer name. Phone and email are optional."}
-                    </p>
-
-                    {customerPhone.trim() && (
-                      <p className="text-xs leading-5 text-gray-400">
-                        Phone matches take
-                        priority. Clear the
-                        phone field to search
-                        by name.
-                      </p>
-                    )}
-
-                    {matchingCustomers.length >
-                      0 && (
-                      <div className="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-2">
-                        {matchingCustomers.map(
-                          (
-                            customer
-                          ) => (
-                            <button
-                              key={
-                                customer.id
-                              }
-                              type="button"
-                              disabled={
-                                submitting
-                              }
-                              onClick={() =>
-                                selectCreateCustomer(
-                                  customer
-                                )
-                              }
-                              className="flex min-h-14 w-full items-center justify-between gap-3 rounded-lg bg-white px-3 py-2.5 text-left transition hover:bg-green-50 disabled:opacity-50"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-gray-900">
-                                  {
-                                    customer.full_name
-                                  }
-                                </p>
-
-                                <p className="mt-0.5 truncate text-xs text-gray-500">
-                                  {customer.phone ||
-                                    "No phone number"}
-                                  {customer.email
-                                    ? ` · ${customer.email}`
-                                    : ""}
-                                </p>
-                              </div>
-
-                              <span className="shrink-0 text-xs font-semibold text-green-700">
-                                Select
-                              </span>
-                            </button>
-                          )
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <label className="block space-y-2 text-sm font-medium text-gray-700">
-                  <span>
-                    Email
-                    <span className="ml-1 font-normal text-gray-400">
-                      Optional
-                    </span>
-                  </span>
-
-                  <Input
-                    type="email"
-                    value={
-                      customerEmail
-                    }
-                    disabled={
-                      submitting ||
-                      Boolean(
-                        selectedCreateCustomer
-                      )
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setCustomerEmail(
-                        event
-                          .target
-                          .value
-                      )
-                    }
-                    placeholder="customer@example.com"
-                  />
-                </label>
-              </div>
-
-              <div className="min-w-0 rounded-2xl bg-gray-50 p-4 sm:p-5">
-                <h3 className="text-sm font-semibold text-gray-950">
-                  Appointment details
-                </h3>
-
-                <div className="mt-4 space-y-4">
-                  <label className="block space-y-2 text-sm font-medium text-gray-700">
-                    <span>
-                      Service
-                    </span>
-
-                    <select
-                      className="min-h-11 w-full rounded-xl border border-input bg-white px-3 text-sm outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100"
-                      value={
-                        createForm.serviceId
-                      }
-                      disabled={
-                        submitting
-                      }
-                      onChange={(
-                        event
-                      ) =>
-                        setCreateForm(
-                          (
-                            current
-                          ) => ({
-                            ...current,
-
-                            serviceId:
-                              event
-                                .target
-                                .value,
-                          })
-                        )
-                      }
-                    >
-                      <option value="">
-                        Select service
-                      </option>
-
-                      {services.map(
-                        (service) => (
-                          <option
-                            key={
-                              service.id
-                            }
-                            value={
-                              service.id
-                            }
-                          >
-                            {
-                              service.name
-                            }
-                            {service.duration_minutes
-                              ? ` · ${service.duration_minutes} min`
-                              : ""}
-                          </option>
-                        )
-                      )}
-                    </select>
-                  </label>
-
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                    <label className="block space-y-2 text-sm font-medium text-gray-700">
-                      <span>
-                        Date
-                      </span>
-
-                      <Input
-                        type="date"
-                        disabled={
-                          submitting
-                        }
-                        value={
-                          createForm.appointmentDate
-                        }
-                        onChange={(
-                          event
-                        ) => {
-                          const date =
-                            event
-                              .target
-                              .value;
-
-                          setCreateForm(
-                            (
-                              current
-                            ) => ({
-                              ...current,
-
-                              appointmentDate:
-                                date,
-                            })
-                          );
-
-                          if (date) {
-                            setSelectedCalendarDate(
-                              date
-                            );
-                          }
-                        }}
-                      />
-                    </label>
-
-                    <label className="block space-y-2 text-sm font-medium text-gray-700">
-                      <span>
-                        Time
-                      </span>
-
-                      <Input
-                        type="time"
-                        disabled={
-                          submitting
-                        }
-                        value={
-                          createForm.appointmentTime
-                        }
-                        onChange={(
-                          event
-                        ) =>
-                          setCreateForm(
-                            (
-                              current
-                            ) => ({
-                              ...current,
-
-                              appointmentTime:
-                                event
-                                  .target
-                                  .value,
-                            })
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
-
-                  <label className="block space-y-2 text-sm font-medium text-gray-700">
-                    <span>
-                      Internal notes
-                    </span>
-
-                    <Textarea
-                      disabled={
-                        submitting
-                      }
-                      placeholder="Add notes for your team"
-                      value={
-                        createForm.notes
-                      }
-                      onChange={(
-                        event
-                      ) =>
-                        setCreateForm(
-                          (
-                            current
-                          ) => ({
-                            ...current,
-
-                            notes:
-                              event
-                                .target
-                                .value,
-                          })
-                        )
-                      }
-                    />
-                  </label>
-
-                  <Button
-                    type="button"
-                    onClick={
-                      handleCreateAppointment
-                    }
-                    disabled={
-                      submitting ||
-                      !businessId ||
-                      !userId
-                    }
-                    className="w-full"
-                  >
-                    {submitting
-                      ? "Saving appointment..."
-                      : "Save appointment"}
-                  </Button>
-                </div>
-              </div>
-            </div>
+                    customer,
+                  ]
+                )
+              }
+              onDateChange={
+                setSelectedCalendarDate
+              }
+            />
           </div>
         </section>
         </details>

@@ -1,6 +1,6 @@
 /* AnaAI: quiet operational surfaces, expressive public storytelling. */
 :root {
-  --font-sans: Arial, Helvetica, sans-serif;
+  --font-sans: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   --background: #f8f9f6;
   --foreground: #19231e;
   --card: #fff;
@@ -24,7 +24,11 @@
   --orange: #dc7b40;
 }
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 :where(button, a, input, select, textarea):focus-visible {
   outline: 2px solid #168658;
@@ -371,6 +375,11 @@ fieldset {
 }
 .dialog-surface::backdrop {
   background: #14231b70;
+}
+/* Manual booking sheet: roomier than a default dialog on tablet and desktop.
+   The narrow-screen rule below still turns it into a full-width bottom sheet. */
+.appointment-drawer {
+  width: min(760px, calc(100vw - 40px));
 }
 .navigation-dialog {
   margin: 0;

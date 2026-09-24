@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 const apiUrl = (process.env.API_URL || "http://localhost:4000").replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["10.0.0.250"],
+
   async rewrites() {
     return [
       {

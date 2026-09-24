@@ -32,6 +32,9 @@ function fn(file, name, context) {
 
   assert.ok(text);
 
+  /* Exported declarations transpile to CommonJS assignments. */
+  context.exports = context.exports || {};
+
   vm.createContext(context);
 
   vm.runInContext(
@@ -79,7 +82,7 @@ function bookingHarness({
       },
     ],
 
-    createForm: {
+    form: {
       customerId: selected,
       serviceId: "service",
       appointmentDate: "2026-10-05",
@@ -99,7 +102,7 @@ function bookingHarness({
 
     setSubmitting() {},
 
-    showNotice: (kind) =>
+    onNotice: (kind) =>
       notices.push(kind),
 
     saveCustomer: async () => {
@@ -114,20 +117,25 @@ function bookingHarness({
       };
     },
 
-    setCustomers: (update) => {
-      ctx.customers = update(
-        ctx.customers
-      );
+    onCustomerCreated: (customer) => {
+      ctx.customers = [
+        ...ctx.customers.filter(
+          (item) =>
+            item.id !== customer.id
+        ),
+
+        customer,
+      ];
     },
 
-    selectCreateCustomer: (customer) => {
-      ctx.createForm = {
-        ...ctx.createForm,
+    selectCustomer: (customer) => {
+      ctx.form = {
+        ...ctx.form,
         customerId: customer.id,
       };
     },
 
-    sendAppointmentUpdate: async () => {
+    onSubmit: async () => {
       books += 1;
 
       if (conflict) {
@@ -139,8 +147,8 @@ function bookingHarness({
       };
     },
 
-    setCreateForm: (value) => {
-      ctx.createForm = value;
+    setForm: (value) => {
+      ctx.form = value;
     },
 
     setCustomerName() {},
@@ -149,13 +157,13 @@ function bookingHarness({
 
     emptyForm: {},
 
-    loadAppointments: async () => {},
+    onCreated: async () => {},
 
     Error,
   };
 
   const save = fn(
-    "app/appointments/page.tsx",
+    "components/appointments/AppointmentComposer.tsx",
     "handleCreateAppointment",
     ctx
   );
@@ -225,7 +233,7 @@ test(
     );
 
     assert.equal(
-      harness.ctx.createForm.customerId,
+      harness.ctx.form.customerId,
       "new"
     );
 
@@ -389,7 +397,7 @@ test(
     };
 
     const matches = fn(
-      "app/appointments/page.tsx",
+      "lib/appointment-customers.ts",
       "findCustomerMatches",
       ctx
     );
@@ -439,7 +447,7 @@ test(
     };
 
     const matches = fn(
-      "app/appointments/page.tsx",
+      "lib/appointment-customers.ts",
       "findCustomerMatches",
       ctx
     );
