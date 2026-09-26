@@ -19,6 +19,19 @@ const compact = source
   .replace(/\s+/g, " ")
   .trim();
 
+/* Derived history helpers live beside the page in lib/customer-insights.ts. */
+const insights = fs
+  .readFileSync(
+    path.join(
+      process.cwd(),
+      "lib",
+      "customer-insights.ts"
+    ),
+    "utf8"
+  )
+  .replace(/\s+/g, " ")
+  .trim();
+
 test("customer CRM defaults to active records and supports archived and all filters", () => {
   assert.match(
     compact,
@@ -35,9 +48,20 @@ test("customer CRM defaults to active records and supports archived and all filt
     /customerFilter === "archived"/
   );
 
+  /* Filter controls render from one list; "all" applies no status exclusion. */
   assert.match(
     compact,
-    /customerFilter === "all"/
+    /\[ "active", "archived", "all", \] as const \)\.map\(\(filter\) =>/
+  );
+
+  assert.match(
+    compact,
+    /aria-pressed=\{ customerFilter === filter \}/
+  );
+
+  assert.match(
+    compact,
+    /all: customers\.length/
   );
 });
 
@@ -88,24 +112,39 @@ test("customer appointment history is linked by customer id and newest first", (
 
   assert.match(
     compact,
+    /import \{[^}]*compareAppointmentsNewestFirst[^}]*\} from "@\/lib\/customer-insights"/
+  );
+
+  assert.match(
+    insights,
     /return secondKey\.localeCompare\( firstKey \)/
   );
 });
 
 test("customer CRM exposes appointment count recent appointment and history", () => {
   assert.match(
-    compact,
+    insights,
     /history\.length/
   );
 
   assert.match(
     compact,
+    /appointmentCountLabel\( summary\.count \)/
+  );
+
+  assert.match(
+    insights,
     /const mostRecent = history\[0\]/
   );
 
   assert.match(
+    insights,
+    /count: history\.length/
+  );
+
+  assert.match(
     compact,
-    /toggleHistory/
+    /onOpen=\{\(\) => openCustomerDetails\( customer\.id \) \}/
   );
 
   assert.match(

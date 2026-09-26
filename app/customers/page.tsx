@@ -6,26 +6,27 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Archive,
+  CalendarClock,
   CalendarDays,
-  ChevronDown,
   ChevronRight,
-  CircleUserRound,
   Mail,
+  NotebookPen,
   Pencil,
   Phone,
   Plus,
   RotateCcw,
   Search,
-  UserCheck,
   Users,
   X,
 } from "lucide-react";
 
 import { DialogSurface } from "@/components/ui/dialog-surface";
 import { PageHeader } from "@/components/ui/page-header";
+import { useConfirmation } from "@/components/ui/use-confirmation";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   activeBusinessHeaders,
@@ -34,13 +35,19 @@ import {
   saveCustomer,
   type CustomerRecord,
 } from "@/lib/customer-mutations";
+import {
+  businessNowKey,
+  compareAppointmentsNewestFirst,
+  formatAppointmentDate,
+  formatAppointmentTime,
+  isUpcomingAppointment,
+  summarizeCustomerHistory,
+  type CustomerAppointment,
+  type CustomerHistorySummary,
+} from "@/lib/customer-insights";
 import { supabase } from "@/lib/supabase";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -63,14 +70,13 @@ type CustomerFilter =
   | "archived"
   | "all";
 
-type CustomerAppointment = {
-  id: string;
-  customer_id: string | null;
-  service: string | null;
-  appointment_date: string | null;
-  appointment_time: string | null;
-  status: string | null;
-  notes: string | null;
+const FILTER_LABELS: Record<
+  CustomerFilter,
+  string
+> = {
+  active: "Active",
+  archived: "Archived",
+  all: "All",
 };
 
 function sortCustomers(
@@ -94,110 +100,7 @@ function sortCustomers(
   );
 }
 
-function compareAppointmentsNewestFirst(
-  first: CustomerAppointment,
-  second: CustomerAppointment
-) {
-  const firstKey = `${
-    first.appointment_date || ""
-  }T${first.appointment_time || ""}`;
-
-  const secondKey = `${
-    second.appointment_date || ""
-  }T${second.appointment_time || ""}`;
-
-  return secondKey.localeCompare(
-    firstKey
-  );
-}
-
-function formatAppointmentDate(
-  value: string | null
-) {
-  if (!value) {
-    return "Date unavailable";
-  }
-
-  const parts = value.split("-");
-
-  if (parts.length !== 3) {
-    return value;
-  }
-
-  const year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
-
-  if (
-    !Number.isInteger(year) ||
-    !Number.isInteger(month) ||
-    !Number.isInteger(day)
-  ) {
-    return value;
-  }
-
-  const date = new Date(
-    year,
-    month - 1,
-    day
-  );
-
-  if (
-    Number.isNaN(date.getTime())
-  ) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat(
-    "en-US",
-    {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }
-  ).format(date);
-}
-
-function formatAppointmentTime(
-  value: string | null
-) {
-  if (!value) {
-    return "Time unavailable";
-  }
-
-  const match = value.match(
-    /^(\d{1,2}):(\d{2})/
-  );
-
-  if (!match) {
-    return value;
-  }
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-
-  if (
-    !Number.isInteger(hours) ||
-    !Number.isInteger(minutes) ||
-    hours < 0 ||
-    hours > 23 ||
-    minutes < 0 ||
-    minutes > 59
-  ) {
-    return value;
-  }
-
-  const suffix =
-    hours >= 12 ? "PM" : "AM";
-
-  const displayHour =
-    hours % 12 || 12;
-
-  return `${displayHour}:${String(
-    minutes
-  ).padStart(2, "0")} ${suffix}`;
-}
-
+/* Matches the Appointments page so a status reads the same everywhere. */
 function statusClasses(
   status: string | null
 ) {
@@ -205,17 +108,14 @@ function statusClasses(
     case "Confirmed":
       return "border-green-200 bg-green-50 text-green-700";
 
-    case "Booked":
+    case "Completed":
       return "border-blue-200 bg-blue-50 text-blue-700";
 
-    case "Completed":
-      return "border-gray-200 bg-gray-100 text-gray-700";
-
     case "Cancelled":
-      return "border-red-200 bg-red-50 text-red-700";
+      return "border-gray-200 bg-gray-100 text-gray-600";
 
     default:
-      return "border-gray-200 bg-gray-100 text-gray-600";
+      return "border-amber-200 bg-amber-50 text-amber-700";
   }
 }
 
@@ -233,8 +133,36 @@ function initials(
     .join("");
 }
 
+function appointmentCountLabel(
+  count: number
+) {
+  return `${count} ${
+    count === 1
+      ? "appointment"
+      : "appointments"
+  }`;
+}
+
+function shortDate(
+  value: string | null
+) {
+  return formatAppointmentDate(
+    value,
+    {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }
+  );
+}
+
+const EMPTY_SUMMARY: CustomerHistorySummary =
+  summarizeCustomerHistory([], null);
+
 export default function CustomersPage() {
   const router = useRouter();
+  const { confirm, confirmation } =
+    useConfirmation();
 
   const [
     customers,
@@ -261,6 +189,12 @@ export default function CustomersPage() {
   const [
     userId,
     setUserId,
+  ] = useState<string | null>(null);
+
+  /* Business-local "now"; drives upcoming vs past without UTC parsing. */
+  const [
+    nowKey,
+    setNowKey,
   ] = useState<string | null>(null);
 
   const [
@@ -317,8 +251,8 @@ export default function CustomersPage() {
     );
 
   const [
-    historyCustomerId,
-    setHistoryCustomerId,
+    selectedCustomerId,
+    setSelectedCustomerId,
   ] = useState<string | null>(
     null
   );
@@ -331,9 +265,8 @@ export default function CustomersPage() {
   const saveInFlight =
     useRef(false);
 
-  useEffect(() => {
-    void initializePage();
-  }, []);
+  const actionInFlight =
+    useRef(false);
 
   const activeCount = useMemo(
     () =>
@@ -398,6 +331,39 @@ export default function CustomersPage() {
       return map;
     }, [appointments]);
 
+  const summaryMap =
+    useMemo(() => {
+      const map = new Map<
+        string,
+        CustomerHistorySummary
+      >();
+
+      for (const [
+        customerId,
+        history,
+      ] of appointmentMap) {
+        map.set(
+          customerId,
+          summarizeCustomerHistory(
+            history,
+            nowKey
+          )
+        );
+      }
+
+      return map;
+    }, [appointmentMap, nowKey]);
+
+  const upcomingCount = useMemo(
+    () =>
+      customers.filter(
+        (customer) =>
+          summaryMap.get(customer.id)
+            ?.upcoming
+      ).length,
+    [customers, summaryMap]
+  );
+
   const visibleCustomers =
     useMemo(() => {
       const normalizedSearch =
@@ -447,6 +413,24 @@ export default function CustomersPage() {
       searchQuery,
     ]);
 
+  const filterCounts: Record<
+    CustomerFilter,
+    number
+  > = {
+    active: activeCount,
+    archived: archivedCount,
+    all: customers.length,
+  };
+
+  const selectedCustomer =
+    selectedCustomerId
+      ? customers.find(
+          (customer) =>
+            customer.id ===
+            selectedCustomerId
+        ) || null
+      : null;
+
   async function getAuthenticatedContext() {
     const {
       data: { session },
@@ -494,12 +478,13 @@ export default function CustomersPage() {
       userId: session.user.id,
       businessId:
         data.business.id,
+      timezone:
+        data.business.timezone,
     };
   }
 
+  /* `loading` starts true; a business switch remounts this page. */
   async function initializePage() {
-    setLoading(true);
-
     const context =
       await getAuthenticatedContext();
 
@@ -511,6 +496,11 @@ export default function CustomersPage() {
     setUserId(context.userId);
     setBusinessId(
       context.businessId
+    );
+    setNowKey(
+      businessNowKey(
+        context.timezone
+      )
     );
 
     await Promise.all([
@@ -585,6 +575,7 @@ export default function CustomersPage() {
       return;
     }
 
+    /* Read-only: the CRM never updates or deletes appointments. */
     const { data, error } =
       await supabase
         .from("appointments")
@@ -628,6 +619,11 @@ export default function CustomersPage() {
       )
     );
   }
+
+  useEffect(() => {
+    void initializePage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function resetEditor() {
     setEditingId(null);
@@ -760,19 +756,16 @@ export default function CustomersPage() {
     setEditorOpen(true);
   }
 
-  function cancelEdit() {
-    closeEditor();
-  }
-
-  function toggleHistory(
+  function openCustomerDetails(
     customerId: string
   ) {
-    setHistoryCustomerId(
-      (current) =>
-        current === customerId
-          ? null
-          : customerId
+    setSelectedCustomerId(
+      customerId
     );
+  }
+
+  function closeCustomerDetails() {
+    setSelectedCustomerId(null);
   }
 
   async function toggleCustomerActive(
@@ -781,6 +774,7 @@ export default function CustomersPage() {
     if (
       !businessId ||
       customerActionId ||
+      actionInFlight.current ||
       saveInFlight.current
     ) {
       return;
@@ -790,15 +784,28 @@ export default function CustomersPage() {
       !customer.is_active;
 
     const confirmed =
-      window.confirm(
+      await confirm(
         nextActive
-          ? `Reactivate ${customer.full_name}?`
-          : `Archive ${customer.full_name}? Their appointment history will be preserved.`
+          ? `Reactivate ${customer.full_name}? They can be selected for new appointments again.`
+          : `Archive ${customer.full_name}? Their appointment history will be preserved and you can reactivate them later.`,
+        {
+          destructive:
+            !nextActive,
+        }
       );
 
     if (!confirmed) {
       return;
     }
+
+    if (
+      actionInFlight.current ||
+      saveInFlight.current
+    ) {
+      return;
+    }
+
+    actionInFlight.current = true;
 
     setCustomerActionId(
       customer.id
@@ -879,19 +886,28 @@ export default function CustomersPage() {
           : "Unable to update customer status."
       );
     } finally {
+      actionInFlight.current = false;
+
       setCustomerActionId(
         null
       );
     }
   }
 
+  const selectedHistory =
+    selectedCustomer
+      ? appointmentMap.get(
+          selectedCustomer.id
+        ) || []
+      : [];
+
   return (
     <AppLayout>
-      <div className="space-y-6" data-page="customers">
+      <div className="space-y-5" data-page="customers">
         <PageHeader
           eyebrow="People & relationships"
           title={<>Customers</>}
-          description={<>Manage customer information and review appointment history.</>}
+          description={<>Contact details, notes, and appointment history for every client.</>}
         >
           <Button
             type="button"
@@ -908,554 +924,326 @@ export default function CustomersPage() {
           !editorOpen && (
             <div
               role="status"
-              className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm"
+              className="customer-feedback"
             >
-              {feedback}
+              <p className="min-w-0 flex-1">
+                {feedback}
+              </p>
+
+              <button
+                type="button"
+                aria-label="Dismiss message"
+                onClick={() =>
+                  setFeedback("")
+                }
+                className="customer-icon-button"
+              >
+                <X className="size-4" />
+              </button>
             </div>
           )}
 
-        <div className="record-summary">
-          <Card className="border-gray-200 shadow-none">
-            <CardContent className="flex items-center justify-between p-5">
-              <div>
-                <p className="text-xs font-medium text-gray-500">
-                  Total customers
-                </p>
+        <dl
+          className="customer-summary"
+          aria-label="Customer summary"
+        >
+          <div>
+            <dt>Total customers</dt>
+            <dd>{customers.length}</dd>
+          </div>
 
-                <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-950">
-                  {customers.length}
-                </p>
-              </div>
+          <div>
+            <dt>Active</dt>
+            <dd>{activeCount}</dd>
+          </div>
 
-              <div className="flex size-10 items-center justify-center rounded-xl bg-gray-100 text-gray-600">
-                <Users className="size-5" />
-              </div>
-            </CardContent>
-          </Card>
+          <div>
+            <dt>Archived</dt>
+            <dd>{archivedCount}</dd>
+          </div>
 
-          <Card className="border-gray-200 shadow-none">
-            <CardContent className="flex items-center justify-between p-5">
-              <div>
-                <p className="text-xs font-medium text-gray-500">
-                  Active customers
-                </p>
+          <div>
+            <dt>With upcoming appointment</dt>
+            <dd>
+              {loading ||
+              nowKey
+                ? upcomingCount
+                : "—"}
+            </dd>
+          </div>
+        </dl>
 
-                <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-950">
-                  {activeCount}
-                </p>
-              </div>
+        <section
+          aria-label="Customer directory"
+          className="customer-directory-panel"
+        >
+          <div className="customer-toolbar">
+            <div className="customer-search">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-gray-400"
+              />
 
-              <div className="flex size-10 items-center justify-center rounded-xl bg-green-50 text-green-700">
-                <UserCheck className="size-5" />
-              </div>
-            </CardContent>
-          </Card>
+              <Input
+                type="search"
+                aria-label="Search customers"
+                placeholder="Search name, phone, or email"
+                autoComplete="off"
+                enterKeyHint="search"
+                value={
+                  searchQuery
+                }
+                onChange={(
+                  event
+                ) =>
+                  setSearchQuery(
+                    event.target
+                      .value
+                  )
+                }
+                className="h-11 pl-10 pr-12"
+              />
 
-          <Card className="border-gray-200 shadow-none">
-            <CardContent className="flex items-center justify-between p-5">
-              <div>
-                <p className="text-xs font-medium text-gray-500">
-                  Archived
-                </p>
-
-                <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-950">
-                  {archivedCount}
-                </p>
-              </div>
-
-              <div className="flex size-10 items-center justify-center rounded-xl bg-gray-100 text-gray-500">
-                <Archive className="size-5" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card className="overflow-hidden border-gray-200 shadow-none">
-          <CardContent className="p-0">
-            <div className="border-b border-gray-200 p-4 sm:p-5">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="relative w-full lg:max-w-md">
-                  <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
-
-                  <Input
-                    type="search"
-                    aria-label="Search customers"
-                    placeholder="Search name, phone, or email"
-                    value={
-                      searchQuery
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setSearchQuery(
-                        event.target
-                          .value
-                      )
-                    }
-                    className="pl-10"
-                  />
-                </div>
-
-                <div
-                  className="grid grid-cols-3 rounded-xl border border-gray-200 bg-gray-50 p-1 sm:flex"
-                  aria-label="Customer status filter"
+              {searchQuery && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() =>
+                    setSearchQuery("")
+                  }
+                  className="customer-icon-button absolute right-0 top-0"
                 >
-                  <button
-                    type="button"
-                    aria-pressed={
-                      customerFilter ===
-                      "active"
-                    }
-                    onClick={() =>
-                      setCustomerFilter(
-                        "active"
-                      )
-                    }
-                    className={`min-h-11 rounded-lg px-3 text-sm font-medium transition ${
-                      customerFilter ===
-                      "active"
-                        ? "bg-white text-gray-950 shadow-sm"
-                        : "text-gray-500 hover:text-gray-900"
-                    }`}
-                  >
-                    Active{" "}
-                    <span className="text-gray-400">
-                      {activeCount}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    aria-pressed={
-                      customerFilter ===
-                      "archived"
-                    }
-                    onClick={() =>
-                      setCustomerFilter(
-                        "archived"
-                      )
-                    }
-                    className={`min-h-11 rounded-lg px-3 text-sm font-medium transition ${
-                      customerFilter ===
-                      "archived"
-                        ? "bg-white text-gray-950 shadow-sm"
-                        : "text-gray-500 hover:text-gray-900"
-                    }`}
-                  >
-                    Archived{" "}
-                    <span className="text-gray-400">
-                      {archivedCount}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    aria-pressed={
-                      customerFilter ===
-                      "all"
-                    }
-                    onClick={() =>
-                      setCustomerFilter(
-                        "all"
-                      )
-                    }
-                    className={`min-h-11 rounded-lg px-3 text-sm font-medium transition ${
-                      customerFilter ===
-                      "all"
-                        ? "bg-white text-gray-950 shadow-sm"
-                        : "text-gray-500 hover:text-gray-900"
-                    }`}
-                  >
-                    All{" "}
-                    <span className="text-gray-400">
-                      {
-                        customers.length
-                      }
-                    </span>
-                  </button>
-                </div>
-              </div>
+                  <X className="size-4" />
+                </button>
+              )}
             </div>
 
-            {loading ? (
-              <div className="p-8 text-center">
-                <p className="text-sm text-gray-500">
-                  Loading customers...
-                </p>
+            <div
+              className="customer-filter"
+              role="group"
+              aria-label="Customer status filter"
+            >
+              {(
+                [
+                  "active",
+                  "archived",
+                  "all",
+                ] as const
+              ).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  aria-pressed={
+                    customerFilter ===
+                    filter
+                  }
+                  onClick={() =>
+                    setCustomerFilter(
+                      filter
+                    )
+                  }
+                >
+                  {FILTER_LABELS[filter]}
+                  <span className="customer-filter-count">
+                    {filterCounts[filter]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!loading &&
+            customers.length > 0 && (
+              <p
+                className="customer-result-count"
+                aria-live="polite"
+              >
+                {visibleCustomers.length ===
+                customers.length
+                  ? `${customers.length} customers`
+                  : `Showing ${visibleCustomers.length} of ${customers.length} customers`}
+              </p>
+            )}
+
+          {loading ? (
+            <div
+              className="customer-empty"
+              role="status"
+            >
+              <p className="text-sm text-gray-500">
+                Loading customers...
+              </p>
+            </div>
+          ) : customers.length ===
+            0 ? (
+            <div className="customer-empty">
+              <div className="mx-auto flex size-11 items-center justify-center rounded-xl bg-green-50 text-green-700">
+                <Users className="size-5" />
               </div>
-            ) : customers.length ===
-              0 ? (
-              <div className="px-6 py-14 text-center">
-                <div className="mx-auto flex size-11 items-center justify-center rounded-xl bg-green-50 text-green-700">
-                  <Users className="size-5" />
-                </div>
 
-                <p className="mt-4 font-semibold text-gray-950">
-                  No customers yet
-                </p>
+              <p className="mt-4 font-semibold text-gray-950">
+                No customers yet
+              </p>
 
-                <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-gray-500">
-                  Customer records will
-                  appear here when they
-                  are created.
-                </p>
+              <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-gray-500">
+                Add your first customer,
+                or they will appear here
+                as appointments are
+                booked.
+              </p>
 
+              <Button
+                type="button"
+                onClick={
+                  openNewCustomer
+                }
+                className="mt-5 gap-2"
+              >
+                <Plus className="size-4" />
+                Add customer
+              </Button>
+            </div>
+          ) : visibleCustomers.length ===
+            0 ? (
+            <div className="customer-empty">
+              <Search className="mx-auto size-6 text-gray-400" />
+
+              <p className="mt-4 font-semibold text-gray-950">
+                {searchQuery.trim()
+                  ? "No matching customers"
+                  : `No ${FILTER_LABELS[
+                      customerFilter
+                    ].toLowerCase()} customers`}
+              </p>
+
+              <p className="mt-1 text-sm text-gray-500">
+                Try another search or
+                status filter.
+              </p>
+
+              {searchQuery && (
                 <Button
                   type="button"
-                  onClick={
-                    openNewCustomer
+                  variant="outline"
+                  onClick={() =>
+                    setSearchQuery("")
                   }
-                  className="mt-5 gap-2"
+                  className="mt-5"
                 >
-                  <Plus className="size-4" />
-                  Add customer
+                  Clear search
                 </Button>
+              )}
+            </div>
+          ) : (
+            <div className="customer-directory">
+              <div
+                className="customer-directory-heading"
+                aria-hidden="true"
+              >
+                <span>Customer</span>
+                <span className="cd-contact">
+                  Contact
+                </span>
+                <span className="cd-count">
+                  Appts
+                </span>
+                <span className="cd-next">
+                  Next appointment
+                </span>
+                <span className="cd-last">
+                  Last appointment
+                </span>
+                <span className="cd-timing">
+                  Appointments
+                </span>
+                <span />
               </div>
-            ) : visibleCustomers.length ===
-              0 ? (
-              <div className="px-6 py-14 text-center">
-                <Search className="mx-auto size-6 text-gray-400" />
 
-                <p className="mt-4 font-semibold text-gray-950">
-                  No matching customers
-                </p>
-
-                <p className="mt-1 text-sm text-gray-500">
-                  Try another search or
-                  status filter.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="hidden min-w-0 md:block">
-                  <div className="grid customer-row customer-row-heading gap-4 border-b border-gray-200 bg-gray-50/70 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    <span>
-                      Customer
-                    </span>
-                    <span>
-                      Phone
-                    </span>
-                    <span>
-                      Email
-                    </span>
-                    <span>
-                      Visits
-                    </span>
-                    <span>
-                      Last appointment
-                    </span>
-                    <span className="sr-only">
-                      Actions
-                    </span>
-                  </div>
-
-                  {visibleCustomers.map(
-                    (customer) => {
-                      const actionInProgress =
-                        customerActionId ===
-                        customer.id;
-
-                      const history =
-                        appointmentMap.get(
-                          customer.id
-                        ) || [];
-
-                      const historyOpen =
-                        historyCustomerId ===
-                        customer.id;
-
-                      const mostRecent =
-                        history[0];
-
-                      return (
-                        <div
-                          key={
+              <ul>
+                {visibleCustomers.map(
+                  (customer) => (
+                    <li
+                      key={
+                        customer.id
+                      }
+                    >
+                      <CustomerRow
+                        customer={
+                          customer
+                        }
+                        summary={
+                          summaryMap.get(
                             customer.id
-                          }
-                          className="border-b border-gray-100 last:border-b-0"
-                        >
-                          <div className="grid min-h-[76px] customer-row items-center gap-4 px-5 py-3">
-                            <div className="flex min-w-0 items-center gap-3">
-                              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-green-50 text-xs font-semibold text-green-700">
-                                {initials(
-                                  customer.full_name
-                                ) ||
-                                  "C"}
-                              </div>
-
-                              <div className="min-w-0">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    toggleHistory(
-                                      customer.id
-                                    )
-                                  }
-                                  className="block max-w-full truncate text-left text-sm font-semibold text-gray-950 hover:text-green-700"
-                                >
-                                  {
-                                    customer.full_name
-                                  }
-                                </button>
-
-                                <div className="mt-1 flex items-center gap-2">
-                                  <span
-                                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                                      customer.is_active
-                                        ? "bg-green-50 text-green-700"
-                                        : "bg-gray-100 text-gray-600"
-                                    }`}
-                                  >
-                                    {customer.is_active
-                                      ? "Active"
-                                      : "Archived"}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <p className="truncate text-sm text-gray-600">
-                              {customer.phone ||
-                                "Not provided"}
-                            </p>
-
-                            <p className="truncate text-sm text-gray-600">
-                              {customer.email ||
-                                "Not provided"}
-                            </p>
-
-                            <p className="text-sm font-medium text-gray-700">
-                              {
-                                history.length
-                              }
-                            </p>
-
-                            <div className="min-w-0">
-                              {mostRecent ? (
-                                <>
-                                  <p className="truncate text-sm font-medium text-gray-700">
-                                    {formatAppointmentDate(
-                                      mostRecent.appointment_date
-                                    )}
-                                  </p>
-
-                                  <p className="mt-0.5 text-xs text-gray-500">
-                                    {formatAppointmentTime(
-                                      mostRecent.appointment_time
-                                    )}
-                                  </p>
-                                </>
-                              ) : (
-                                <p className="text-sm text-gray-400">
-                                  No appointments
-                                </p>
-                              )}
-                            </div>
-
-                            <button
-                              type="button"
-                              aria-label={`${
-                                historyOpen
-                                  ? "Hide"
-                                  : "View"
-                              } ${customer.full_name} details`}
-                              aria-expanded={
-                                historyOpen
-                              }
-                              onClick={() =>
-                                toggleHistory(
-                                  customer.id
-                                )
-                              }
-                              className="flex size-11 items-center justify-center rounded-xl text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
-                            >
-                              {historyOpen ? (
-                                <ChevronDown className="size-4" />
-                              ) : (
-                                <ChevronRight className="size-4" />
-                              )}
-                            </button>
-                          </div>
-
-                          {historyOpen && (
-                            <CustomerDetails
-                              customer={
-                                customer
-                              }
-                              history={
-                                history
-                              }
-                              actionInProgress={
-                                actionInProgress
-                              }
-                              saving={
-                                saving
-                              }
-                              customerActionId={
-                                customerActionId
-                              }
-                              onEdit={() =>
-                                editCustomer(
-                                  customer
-                                )
-                              }
-                              onToggleActive={() =>
-                                void toggleCustomerActive(
-                                  customer
-                                )
-                              }
-                            />
-                          )}
-                        </div>
-                      );
-                    }
-                  )}
-                </div>
-
-                <div className="divide-y divide-gray-100 md:hidden">
-                  {visibleCustomers.map(
-                    (customer) => {
-                      const actionInProgress =
-                        customerActionId ===
-                        customer.id;
-
-                      const history =
-                        appointmentMap.get(
+                          ) ||
+                          EMPTY_SUMMARY
+                        }
+                        timingKnown={Boolean(
+                          nowKey
+                        )}
+                        selected={
+                          selectedCustomerId ===
                           customer.id
-                        ) || [];
-
-                      const historyOpen =
-                        historyCustomerId ===
-                        customer.id;
-
-                      const mostRecent =
-                        history[0];
-
-                      return (
-                        <div
-                          key={
+                        }
+                        onOpen={() =>
+                          openCustomerDetails(
                             customer.id
-                          }
-                          className="p-4"
-                        >
-                          <button
-                            type="button"
-                            aria-expanded={
-                              historyOpen
-                            }
-                            onClick={() =>
-                              toggleHistory(
-                                customer.id
-                              )
-                            }
-                            className="flex min-h-11 w-full items-start gap-3 text-left"
-                          >
-                            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-green-50 text-xs font-semibold text-green-700">
-                              {initials(
-                                customer.full_name
-                              ) ||
-                                "C"}
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="truncate font-semibold text-gray-950">
-                                    {
-                                      customer.full_name
-                                    }
-                                  </p>
-
-                                  <p className="mt-1 truncate text-sm text-gray-500">
-                                    {customer.phone ||
-                                      customer.email ||
-                                      "No contact details"}
-                                  </p>
-                                </div>
-
-                                {historyOpen ? (
-                                  <ChevronDown className="mt-1 size-4 shrink-0 text-gray-400" />
-                                ) : (
-                                  <ChevronRight className="mt-1 size-4 shrink-0 text-gray-400" />
-                                )}
-                              </div>
-
-                              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                                <span
-                                  className={`rounded-full px-2 py-1 font-medium ${
-                                    customer.is_active
-                                      ? "bg-green-50 text-green-700"
-                                      : "bg-gray-100 text-gray-600"
-                                  }`}
-                                >
-                                  {customer.is_active
-                                    ? "Active"
-                                    : "Archived"}
-                                </span>
-
-                                <span>
-                                  {
-                                    history.length
-                                  }{" "}
-                                  {history.length ===
-                                  1
-                                    ? "appointment"
-                                    : "appointments"}
-                                </span>
-
-                                {mostRecent && (
-                                  <span>
-                                    Last{" "}
-                                    {formatAppointmentDate(
-                                      mostRecent.appointment_date
-                                    )}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </button>
-
-                          {historyOpen && (
-                            <div className="-mx-4 mt-4">
-                              <CustomerDetails
-                                customer={
-                                  customer
-                                }
-                                history={
-                                  history
-                                }
-                                actionInProgress={
-                                  actionInProgress
-                                }
-                                saving={
-                                  saving
-                                }
-                                customerActionId={
-                                  customerActionId
-                                }
-                                onEdit={() =>
-                                  editCustomer(
-                                    customer
-                                  )
-                                }
-                                onToggleActive={() =>
-                                  void toggleCustomerActive(
-                                    customer
-                                  )
-                                }
-                              />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-                  )}
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+                          )
+                        }
+                      />
+                    </li>
+                  )
+                )}
+              </ul>
+            </div>
+          )}
+        </section>
       </div>
+
+      {selectedCustomer && (
+        <DialogSurface
+          aria-labelledby="customer-details-title"
+          className="customer-drawer"
+          onClose={
+            closeCustomerDetails
+          }
+        >
+          <CustomerDetails
+            customer={
+              selectedCustomer
+            }
+            history={
+              selectedHistory
+            }
+            summary={
+              summaryMap.get(
+                selectedCustomer.id
+              ) || EMPTY_SUMMARY
+            }
+            nowKey={nowKey}
+            actionInProgress={
+              customerActionId ===
+              selectedCustomer.id
+            }
+            saving={saving}
+            customerActionId={
+              customerActionId
+            }
+            onClose={
+              closeCustomerDetails
+            }
+            onEdit={() =>
+              editCustomer(
+                selectedCustomer
+              )
+            }
+            onToggleActive={() =>
+              void toggleCustomerActive(
+                selectedCustomer
+              )
+            }
+          />
+        </DialogSurface>
+      )}
 
       {editorOpen && (
         <DialogSurface
@@ -1464,24 +1252,24 @@ export default function CustomersPage() {
             if (!saving) closeEditor();
           }}
         >
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-5 sm:px-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-600">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 sm:px-6">
+              <div className="min-w-0">
+                <p className="eyebrow">
                   Customer record
                 </p>
 
                 <h2
                   id="customer-editor-title"
-                  className="mt-1 text-xl font-semibold tracking-tight text-gray-950"
+                  className="mt-1 text-lg font-semibold tracking-tight text-gray-950"
                 >
                   {editingId
                     ? "Edit customer"
                     : "Add customer"}
                 </h2>
 
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-0.5 text-sm text-gray-500">
                   {editingId
-                    ? "Update customer contact information and notes."
+                    ? "Update contact details and notes. Appointment history is unchanged."
                     : "Create a customer record for future appointments."}
                 </p>
               </div>
@@ -1515,7 +1303,11 @@ export default function CustomersPage() {
                   </span>
 
                   <Input
+                    name="full_name"
                     placeholder="Customer name"
+                    autoComplete="off"
+                    autoCapitalize="words"
+                    enterKeyHint="next"
                     value={
                       fullName
                     }
@@ -1532,55 +1324,86 @@ export default function CustomersPage() {
                   />
                 </label>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-2">
-                    <span className="text-sm font-medium text-gray-800">
-                      Phone
-                    </span>
+                <div className="customer-editor-group">
+                  <p className="customer-editor-group-title">
+                    Contact
+                  </p>
 
-                    <Input
-                      type="tel"
-                      placeholder="Phone number"
-                      value={phone}
-                      onChange={(
-                        event
-                      ) =>
-                        setPhone(
-                          event.target
-                            .value
-                        )
-                      }
-                    />
-                  </label>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block space-y-2">
+                      <span className="flex items-baseline justify-between gap-2 text-sm font-medium text-gray-800">
+                        Phone
+                        <span className="text-xs font-normal text-gray-500">
+                          Optional
+                        </span>
+                      </span>
 
-                  <label className="block space-y-2">
-                    <span className="text-sm font-medium text-gray-800">
-                      Email
-                    </span>
+                      <Input
+                        type="tel"
+                        name="phone"
+                        placeholder="Phone number"
+                        autoComplete="off"
+                        enterKeyHint="next"
+                        value={phone}
+                        onChange={(
+                          event
+                        ) =>
+                          setPhone(
+                            event.target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
 
-                    <Input
-                      type="email"
-                      placeholder="Email address"
-                      value={email}
-                      onChange={(
-                        event
-                      ) =>
-                        setEmail(
-                          event.target
-                            .value
-                        )
-                      }
-                    />
-                  </label>
+                    <label className="block space-y-2">
+                      <span className="flex items-baseline justify-between gap-2 text-sm font-medium text-gray-800">
+                        Email
+                        <span className="text-xs font-normal text-gray-500">
+                          Optional
+                        </span>
+                      </span>
+
+                      <Input
+                        type="email"
+                        name="email"
+                        placeholder="Email address"
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        enterKeyHint="next"
+                        value={email}
+                        onChange={(
+                          event
+                        ) =>
+                          setEmail(
+                            event.target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  <p className="text-xs leading-5 text-gray-500">
+                    Each phone number can
+                    belong to only one
+                    customer in this
+                    business, including
+                    archived customers.
+                  </p>
                 </div>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-gray-800">
+                  <span className="flex items-baseline justify-between gap-2 text-sm font-medium text-gray-800">
                     Notes
+                    <span className="text-xs font-normal text-gray-500">
+                      Optional
+                    </span>
                   </span>
 
                   <Textarea
-                    placeholder="Customer notes"
+                    name="notes"
+                    placeholder="Preferences, allergies, or anything your team should know"
                     value={notes}
                     onChange={(
                       event
@@ -1597,7 +1420,7 @@ export default function CustomersPage() {
                 {feedback && (
                   <p
                     role="status"
-                    className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-700"
+                    className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700"
                   >
                     {feedback}
                   </p>
@@ -1615,9 +1438,7 @@ export default function CustomersPage() {
                     )
                   }
                   onClick={
-                    editingId
-                      ? cancelEdit
-                      : closeEditor
+                    closeEditor
                   }
                 >
                   Cancel
@@ -1644,176 +1465,563 @@ export default function CustomersPage() {
             </form>
         </DialogSurface>
       )}
+
+      {confirmation}
     </AppLayout>
+  );
+}
+
+function CustomerAvatar({
+  customer,
+  large = false,
+}: {
+  customer: CustomerRecord;
+  large?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`customer-avatar ${
+        large
+          ? "customer-avatar-large"
+          : ""
+      }`}
+      data-archived={
+        !customer.is_active ||
+        undefined
+      }
+    >
+      {initials(
+        customer.full_name
+      ) || "C"}
+    </span>
+  );
+}
+
+function AppointmentMoment({
+  appointment,
+  empty,
+  tone,
+}: {
+  appointment: CustomerAppointment | null;
+  empty: string;
+  tone?: "upcoming";
+}) {
+  if (!appointment) {
+    return (
+      <span className="block text-sm text-gray-400">
+        {empty}
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <span
+        className={`block truncate text-sm font-medium ${
+          tone === "upcoming"
+            ? "text-green-800"
+            : "text-gray-800"
+        }`}
+      >
+        {shortDate(
+          appointment.appointment_date
+        )}
+        {" · "}
+        {formatAppointmentTime(
+          appointment.appointment_time
+        )}
+      </span>
+
+      <span className="block truncate text-xs text-gray-500">
+        {appointment.service ||
+          "Service unavailable"}
+      </span>
+    </>
+  );
+}
+
+function CustomerRow({
+  customer,
+  summary,
+  timingKnown,
+  selected,
+  onOpen,
+}: {
+  customer: CustomerRecord;
+  summary: CustomerHistorySummary;
+  timingKnown: boolean;
+  selected: boolean;
+  onOpen: () => void;
+}) {
+  const contactLine =
+    customer.phone ||
+    customer.email ||
+    "No contact details";
+
+  return (
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      data-selected={
+        selected || undefined
+      }
+      onClick={onOpen}
+      className="customer-directory-row"
+    >
+      <span className="cd-identity">
+        <CustomerAvatar
+          customer={customer}
+        />
+
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-semibold text-gray-950">
+              {customer.full_name}
+            </span>
+
+            {!customer.is_active && (
+              <span className="customer-archived-pill">
+                Archived
+              </span>
+            )}
+          </span>
+
+          <span className="cd-meta cd-meta-contact">
+            {contactLine}
+          </span>
+
+          <span className="cd-meta cd-meta-count">
+            {appointmentCountLabel(
+              summary.count
+            )}
+            {summary.upcoming && (
+              <>
+                {" · "}
+                <span className="text-green-800">
+                  Next{" "}
+                  {shortDate(
+                    summary.upcoming
+                      .appointment_date
+                  )}
+                </span>
+              </>
+            )}
+          </span>
+        </span>
+      </span>
+
+      <span className="cd-contact">
+        <span className="block truncate text-sm text-gray-700">
+          {customer.phone || (
+            <span className="text-gray-400">
+              No phone
+            </span>
+          )}
+        </span>
+
+        <span className="block truncate text-xs text-gray-500">
+          {customer.email ||
+            "No email"}
+        </span>
+      </span>
+
+      <span className="cd-count">
+        <span className="text-sm font-semibold tabular-nums text-gray-800">
+          {summary.count}
+        </span>
+        <span className="sr-only">
+          {" "}
+          {summary.count === 1
+            ? "appointment"
+            : "appointments"}
+        </span>
+      </span>
+
+      <span className="cd-next">
+        <span className="sr-only">
+          Next appointment:{" "}
+        </span>
+        <AppointmentMoment
+          appointment={
+            summary.upcoming
+          }
+          empty={
+            timingKnown
+              ? "None scheduled"
+              : "Unavailable"
+          }
+          tone="upcoming"
+        />
+      </span>
+
+      <span className="cd-last">
+        <span className="sr-only">
+          Last appointment:{" "}
+        </span>
+        <AppointmentMoment
+          appointment={
+            summary.lastPast
+          }
+          empty={
+            timingKnown
+              ? "No past visits"
+              : "Unavailable"
+          }
+        />
+      </span>
+
+      <span className="cd-timing">
+        {summary.upcoming ? (
+          <>
+            <span className="customer-upcoming-label">
+              Next
+            </span>
+            <AppointmentMoment
+              appointment={
+                summary.upcoming
+              }
+              empty=""
+              tone="upcoming"
+            />
+          </>
+        ) : summary.lastPast ? (
+          <>
+            <span className="customer-muted-label">
+              Last
+            </span>
+            <AppointmentMoment
+              appointment={
+                summary.lastPast
+              }
+              empty=""
+            />
+          </>
+        ) : (
+          <span className="block text-sm text-gray-400">
+            {timingKnown ||
+            !summary.count
+              ? "No appointments"
+              : appointmentCountLabel(
+                  summary.count
+                )}
+          </span>
+        )}
+      </span>
+
+      <ChevronRight
+        aria-hidden="true"
+        className="cd-chevron size-4 text-gray-400"
+      />
+    </button>
   );
 }
 
 function CustomerDetails({
   customer,
   history,
+  summary,
+  nowKey,
   actionInProgress,
   saving,
   customerActionId,
+  onClose,
   onEdit,
   onToggleActive,
 }: {
   customer: CustomerRecord;
   history: CustomerAppointment[];
+  summary: CustomerHistorySummary;
+  nowKey: string | null;
   actionInProgress: boolean;
   saving: boolean;
   customerActionId: string | null;
+  onClose: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
 }) {
+  const busy =
+    saving ||
+    Boolean(customerActionId);
+
   return (
-    <div className="border-t border-gray-100 bg-gray-50/60 px-5 py-5">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <div>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Customer details
-              </p>
+    <div className="customer-drawer-layout">
+      <header className="customer-drawer-header">
+        <div className="flex min-w-0 items-center gap-3">
+          <CustomerAvatar
+            customer={customer}
+            large
+          />
 
-              <h3 className="mt-1 font-semibold text-gray-950">
-                {customer.full_name}
-              </h3>
-            </div>
-
-            <span
-              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                customer.is_active
-                  ? "bg-green-100 text-green-700"
-                  : "bg-gray-200 text-gray-600"
-              }`}
+          <div className="min-w-0">
+            <h2
+              id="customer-details-title"
+              className="truncate text-lg font-semibold tracking-tight text-gray-950"
             >
-              {customer.is_active
-                ? "Active"
-                : "Archived"}
-            </span>
-          </div>
+              {customer.full_name}
+            </h2>
 
-          <div className="mt-4 space-y-3">
-            <div className="flex items-start gap-3">
-              <Phone className="mt-0.5 size-4 shrink-0 text-gray-400" />
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+              <span
+                className={
+                  customer.is_active
+                    ? "customer-active-pill"
+                    : "customer-archived-pill"
+                }
+              >
+                {customer.is_active
+                  ? "Active"
+                  : "Archived"}
+              </span>
 
-              <div className="min-w-0">
-                <p className="text-xs text-gray-500">
-                  Phone
-                </p>
-
-                <p className="mt-0.5 break-words text-sm font-medium text-gray-800">
-                  {customer.phone ||
-                    "Not provided"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <Mail className="mt-0.5 size-4 shrink-0 text-gray-400" />
-
-              <div className="min-w-0">
-                <p className="text-xs text-gray-500">
-                  Email
-                </p>
-
-                <p className="mt-0.5 break-words text-sm font-medium text-gray-800">
-                  {customer.email ||
-                    "Not provided"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <CalendarDays className="mt-0.5 size-4 shrink-0 text-gray-400" />
-
-              <div>
-                <p className="text-xs text-gray-500">
-                  Appointment history
-                </p>
-
-                <p className="mt-0.5 text-sm font-medium text-gray-800">
-                  {history.length}{" "}
-                  {history.length === 1
-                    ? "appointment"
-                    : "appointments"}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {customer.notes && (
-            <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
-              <p className="text-xs font-medium text-gray-500">
-                Notes
-              </p>
-
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-gray-700">
-                {customer.notes}
-              </p>
-            </div>
-          )}
-
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={
-                saving ||
-                Boolean(
-                  customerActionId
-                )
-              }
-              onClick={onEdit}
-              className="gap-2"
-            >
-              <Pencil className="size-4" />
-              Edit customer
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              disabled={
-                saving ||
-                Boolean(
-                  customerActionId
-                )
-              }
-              onClick={
-                onToggleActive
-              }
-              className="gap-2"
-            >
-              {customer.is_active ? (
-                <Archive className="size-4" />
-              ) : (
-                <RotateCcw className="size-4" />
-              )}
-
-              {actionInProgress
-                ? "Updating..."
-                : customer.is_active
-                  ? "Archive"
-                  : "Reactivate"}
-            </Button>
+              <span>
+                {appointmentCountLabel(
+                  summary.count
+                )}
+              </span>
+            </p>
           </div>
         </div>
 
-        <div>
+        <button
+          type="button"
+          aria-label="Close customer details"
+          onClick={onClose}
+          className="customer-icon-button shrink-0"
+        >
+          <X className="size-5" />
+        </button>
+      </header>
+
+      <div className="customer-drawer-body">
+        <section aria-labelledby="customer-contact-heading">
+          <h3
+            id="customer-contact-heading"
+            className="customer-section-title"
+          >
+            Contact
+          </h3>
+
+          <div className="customer-contact-list">
+            {customer.phone ? (
+              <a
+                href={`tel:${customer.phone}`}
+                className="customer-contact-link"
+              >
+                <Phone
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-gray-500"
+                />
+                <span className="min-w-0 truncate">
+                  {customer.phone}
+                </span>
+                <span className="sr-only">
+                  (call)
+                </span>
+              </a>
+            ) : (
+              <p className="customer-contact-link text-gray-400">
+                <Phone
+                  aria-hidden="true"
+                  className="size-4 shrink-0"
+                />
+                No phone on file
+              </p>
+            )}
+
+            {customer.email ? (
+              <a
+                href={`mailto:${customer.email}`}
+                className="customer-contact-link"
+              >
+                <Mail
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-gray-500"
+                />
+                <span className="min-w-0 truncate">
+                  {customer.email}
+                </span>
+                <span className="sr-only">
+                  (email)
+                </span>
+              </a>
+            ) : (
+              <p className="customer-contact-link text-gray-400">
+                <Mail
+                  aria-hidden="true"
+                  className="size-4 shrink-0"
+                />
+                No email on file
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section aria-labelledby="customer-overview-heading">
+          <h3
+            id="customer-overview-heading"
+            className="customer-section-title"
+          >
+            Overview
+          </h3>
+
+          <dl className="customer-overview">
+            <div data-tone={
+              summary.upcoming
+                ? "upcoming"
+                : undefined
+            }>
+              <dt>
+                <CalendarClock
+                  aria-hidden="true"
+                  className="size-3.5"
+                />
+                Next appointment
+              </dt>
+              <dd>
+                <AppointmentMoment
+                  appointment={
+                    summary.upcoming
+                  }
+                  empty={
+                    nowKey
+                      ? "None scheduled"
+                      : "Unavailable"
+                  }
+                  tone="upcoming"
+                />
+              </dd>
+            </div>
+
+            <div>
+              <dt>
+                <CalendarDays
+                  aria-hidden="true"
+                  className="size-3.5"
+                />
+                Last appointment
+              </dt>
+              <dd>
+                <AppointmentMoment
+                  appointment={
+                    summary.lastPast
+                  }
+                  empty={
+                    nowKey
+                      ? "No past visits"
+                      : "Unavailable"
+                  }
+                />
+              </dd>
+            </div>
+
+            <div>
+              <dt>Appointments</dt>
+              <dd>
+                <span className="text-lg font-semibold tabular-nums text-gray-950">
+                  {summary.count}
+                </span>
+              </dd>
+            </div>
+
+            <div>
+              <dt>Completed · Cancelled</dt>
+              <dd>
+                <span className="text-lg font-semibold tabular-nums text-gray-950">
+                  {summary.completedCount}
+                  <span className="px-1.5 text-gray-300">
+                    ·
+                  </span>
+                  {summary.cancelledCount}
+                </span>
+              </dd>
+            </div>
+          </dl>
+
+          {summary.services.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs font-medium text-gray-500">
+                Services booked
+                <span className="font-normal">
+                  {" "}
+                  (excluding cancelled)
+                </span>
+              </p>
+
+              <ul className="mt-2 flex flex-wrap gap-1.5">
+                {summary.services.map(
+                  (service) => (
+                    <li
+                      key={service.name}
+                      className="customer-service-chip"
+                    >
+                      <span className="truncate">
+                        {service.name}
+                      </span>
+                      <span className="tabular-nums text-gray-500">
+                        ×{service.count}
+                      </span>
+                    </li>
+                  )
+                )}
+              </ul>
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="customer-notes-heading">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Appointment history
+            <h3
+              id="customer-notes-heading"
+              className="customer-section-title"
+            >
+              Notes
+            </h3>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={onEdit}
+              className="-my-2 -mr-2 gap-1.5 text-green-800"
+            >
+              <NotebookPen className="size-3.5" />
+              {customer.notes
+                ? "Edit notes"
+                : "Add note"}
+            </Button>
+          </div>
+
+          {customer.notes ? (
+            <p className="customer-notes">
+              {customer.notes}
             </p>
+          ) : (
+            <p className="mt-2 text-sm text-gray-400">
+              No notes saved for this
+              customer.
+            </p>
+          )}
+        </section>
+
+        <section aria-labelledby="customer-history-heading">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3
+              id="customer-history-heading"
+              className="customer-section-title"
+            >
+              Appointment history
+            </h3>
 
             <p className="text-xs text-gray-500">
-              {history.length} total
+              Newest first
             </p>
           </div>
 
           {history.length === 0 ? (
-            <div className="mt-3 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 text-center">
-              <CircleUserRound className="mx-auto size-5 text-gray-400" />
+            <div className="mt-3 rounded-xl border border-dashed border-gray-300 px-5 py-7 text-center">
+              <CalendarDays className="mx-auto size-5 text-gray-400" />
 
               <p className="mt-2 text-sm text-gray-500">
                 No linked appointments
@@ -1821,59 +2029,162 @@ function CustomerDetails({
               </p>
             </div>
           ) : (
-            <div className="mt-3 space-y-2">
+            <ol className="customer-history">
               {history.map(
-                (
-                  appointment
-                ) => (
-                  <div
-                    key={
-                      appointment.id
-                    }
-                    className="rounded-xl border border-gray-200 bg-white p-4"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-900">
-                          {appointment.service ||
-                            "Service unavailable"}
-                        </p>
+                (appointment) => {
+                  const upcoming =
+                    isUpcomingAppointment(
+                      appointment,
+                      nowKey
+                    );
 
-                        <p className="mt-1 text-sm text-gray-500">
+                  return (
+                    <li
+                      key={
+                        appointment.id
+                      }
+                      data-upcoming={
+                        upcoming ||
+                        undefined
+                      }
+                    >
+                      <div
+                        className="customer-history-date"
+                        aria-hidden="true"
+                      >
+                        <span>
                           {formatAppointmentDate(
-                            appointment.appointment_date
+                            appointment.appointment_date,
+                            {
+                              month:
+                                "short",
+                            }
+                          )}
+                        </span>
+                        <strong>
+                          {formatAppointmentDate(
+                            appointment.appointment_date,
+                            {
+                              day: "numeric",
+                            }
+                          )}
+                        </strong>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
+                          <p className="min-w-0 text-sm font-semibold text-gray-900">
+                            {appointment.service ||
+                              "Service unavailable"}
+                          </p>
+
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            {upcoming && (
+                              <span className="customer-active-pill">
+                                Upcoming
+                              </span>
+                            )}
+
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClasses(
+                                appointment.status
+                              )}`}
+                            >
+                              {appointment.status ||
+                                "Unknown"}
+                            </span>
+                          </span>
+                        </div>
+
+                        <p className="mt-0.5 text-sm text-gray-500">
+                          {formatAppointmentDate(
+                            appointment.appointment_date,
+                            {
+                              weekday:
+                                "short",
+                              month:
+                                "short",
+                              day: "numeric",
+                              year: "numeric",
+                            }
                           )}{" "}
                           at{" "}
                           {formatAppointmentTime(
                             appointment.appointment_time
                           )}
                         </p>
+
+                        {appointment.notes && (
+                          <p className="mt-2 whitespace-pre-wrap border-t border-gray-100 pt-2 text-sm leading-6 text-gray-600">
+                            {
+                              appointment.notes
+                            }
+                          </p>
+                        )}
                       </div>
-
-                      <span
-                        className={`w-fit shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${statusClasses(
-                          appointment.status
-                        )}`}
-                      >
-                        {appointment.status ||
-                          "Unknown"}
-                      </span>
-                    </div>
-
-                    {appointment.notes && (
-                      <p className="mt-3 whitespace-pre-wrap border-t border-gray-100 pt-3 text-sm leading-6 text-gray-500">
-                        {
-                          appointment.notes
-                        }
-                      </p>
-                    )}
-                  </div>
-                )
+                    </li>
+                  );
+                }
               )}
-            </div>
+            </ol>
           )}
-        </div>
+
+          <p className="mt-3 text-xs leading-5 text-gray-500">
+            History is read-only here.
+            To reschedule or update a
+            visit, use{" "}
+            <Link
+              href="/appointments"
+              className="font-medium text-green-800 underline underline-offset-2"
+            >
+              Appointments
+            </Link>
+            .
+          </p>
+        </section>
       </div>
+
+      <footer className="customer-drawer-footer">
+        <p className="text-xs leading-5 text-gray-500">
+          {customer.is_active
+            ? "Archiving hides this customer from new bookings. Appointment history is preserved."
+            : "Archived customers keep their history but can't be booked until reactivated."}
+        </p>
+
+        <div className="flex flex-wrap gap-2 sm:flex-nowrap">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={
+              onToggleActive
+            }
+            className="flex-1 gap-2 sm:flex-none"
+          >
+            {customer.is_active ? (
+              <Archive className="size-4" />
+            ) : (
+              <RotateCcw className="size-4" />
+            )}
+
+            {actionInProgress
+              ? "Updating..."
+              : customer.is_active
+                ? "Archive customer"
+                : "Reactivate customer"}
+          </Button>
+
+          <Button
+            type="button"
+            disabled={busy}
+            onClick={onEdit}
+            className="flex-1 gap-2 sm:flex-none"
+          >
+            <Pencil className="size-4" />
+            Edit customer
+          </Button>
+        </div>
+      </footer>
     </div>
   );
 }
