@@ -12,11 +12,13 @@ import { Badge, IconButton, styles as ui } from "../components/ui";
 import { PreviewDialog } from "../components/PreviewDialog";
 import { demoDay } from "../data/demoToday";
 import { TodayScreen } from "../features/today/TodayScreen";
+import { useBusiness } from "../features/business/BusinessContext";
 import { theme as t } from "../theme/tokens";
 import type { Preview } from "../types/today";
 import { Sidebar } from "./Sidebar";
 
 export function AppShell() {
+  const { business } = useBusiness();
   const { width, height, fontScale } = useWindowDimensions();
   const persistent = width >= t.layout.sidebarBreakpoint && fontScale < 1.5;
   const wide =
@@ -52,7 +54,7 @@ export function AppShell() {
       <View style={s.shell}>
         {persistent && (
           <View style={s.sidebar}>
-            <Sidebar onSelect={select} />
+            <Sidebar onSelect={select} businessName={business.name} timezone={business.timezone} />
           </View>
         )}
         <View style={s.workspace}>
@@ -101,7 +103,7 @@ export function AppShell() {
                 onPress={() => setMenuOpen(false)}
               />
             </View>
-            <Sidebar onSelect={select} />
+            <Sidebar onSelect={select} businessName={business.name} timezone={business.timezone} />
           </SafeAreaView>
         )}
       </Modal>

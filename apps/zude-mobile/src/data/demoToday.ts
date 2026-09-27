@@ -1,4 +1,4 @@
-import type { Appointment, AttentionItem, AvailableSlot } from "../types/today";
+import type { AttentionItem, AvailableSlot } from "../types/today";
 
 // Local fixture only. All time values are minutes after midnight on this demo day.
 // Capacity belongs to the business; appointments deliberately have no staff assignment.
@@ -13,72 +13,6 @@ export const demoDay = {
   initials: "AM",
   clockedInAt: "8:52 AM",
 };
-export const appointments: readonly Appointment[] = [
-  {
-    id: "a1",
-    customer: "Nina Patel",
-    service: "Signature haircut",
-    start: 540,
-    duration: 45,
-    status: "Completed",
-  },
-  {
-    id: "a2",
-    customer: "Oliver Chen",
-    service: "Cut & finish",
-    start: 600,
-    duration: 45,
-    status: "In progress",
-  },
-  {
-    id: "a3",
-    customer: "Maya Thompson",
-    service: "Signature haircut",
-    start: 630,
-    duration: 45,
-    status: "Checked in",
-  },
-  {
-    id: "a4",
-    customer: "James Wilson",
-    service: "Beard trim",
-    start: 660,
-    duration: 30,
-    status: "Confirmed",
-  },
-  {
-    id: "a5",
-    customer: "Sofia Martinez",
-    service: "Color consultation",
-    start: 690,
-    duration: 30,
-    status: "Unconfirmed",
-  },
-  {
-    id: "a6",
-    customer: "Ethan Brooks",
-    service: "Cut & finish",
-    start: 780,
-    duration: 45,
-    status: "Confirmed",
-  },
-  {
-    id: "a7",
-    customer: "Isabel Kim",
-    service: "Signature haircut",
-    start: 840,
-    duration: 45,
-    status: "Confirmed",
-  },
-  {
-    id: "a8",
-    customer: "Leo Anderson",
-    service: "Beard trim",
-    start: 930,
-    duration: 30,
-    status: "Confirmed",
-  },
-];
 export const availableSlots: readonly AvailableSlot[] = [
   { id: "s1", start: 705, duration: 30 },
   { id: "s2", start: 750, duration: 30 },

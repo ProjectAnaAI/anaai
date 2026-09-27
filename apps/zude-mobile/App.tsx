@@ -1,13 +1,13 @@
 import {
-  SafeAreaProvider,
   initialWindowMetrics,
+  SafeAreaProvider,
 } from "react-native-safe-area-context";
-import { AppShell } from "./src/navigation/AppShell";
+import { AuthGate } from "./src/features/auth/AuthGate";
 
 export default function App() {
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-      <AppShell />
+      <AuthGate />
     </SafeAreaProvider>
   );
 }

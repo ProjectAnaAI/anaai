@@ -1,6 +1,5 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Icon, type IconName, styles as ui } from "../components/ui";
-import { demoDay } from "../data/demoToday";
 import { theme as t } from "../theme/tokens";
 
 type NavItem = { label: string; icon: IconName };
@@ -39,7 +38,15 @@ const groups: { title: string; items: NavItem[] }[] = [
     ],
   },
 ];
-export function Sidebar({ onSelect }: { onSelect: (label: string) => void }) {
+export function Sidebar({
+  onSelect,
+  businessName,
+  timezone,
+}: {
+  onSelect: (label: string) => void;
+  businessName: string;
+  timezone: string;
+}) {
   function item({ label, icon }: NavItem) {
     const active = label === "Today";
     return (
@@ -71,8 +78,8 @@ export function Sidebar({ onSelect }: { onSelect: (label: string) => void }) {
         <Text style={s.brand}>
           ZUDE<Text style={s.brandDot}>.</Text>
         </Text>
-        <Text style={s.business}>{demoDay.business}</Text>
-        <Text style={s.location}>{demoDay.location}</Text>
+        <Text style={s.business}>{businessName}</Text>
+        <Text style={s.location}>{timezone}</Text>
       </View>
       <ScrollView
         showsVerticalScrollIndicator={false}

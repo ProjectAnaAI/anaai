@@ -1,37 +1,43 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, Icon, Section, styles as ui } from "../../components/ui";
-import { appointments, formatTime } from "../../data/demoToday";
+import { formatDuration, formatTime } from "./todayData";
 import { theme as t } from "../../theme/tokens";
 import type { Appointment, Preview } from "../../types/today";
 
 export function AppointmentList({
+  appointments,
   compact,
   focused,
+  now,
   onPreview,
 }: {
+  appointments: readonly Appointment[];
   compact: boolean;
   focused: boolean;
+  now: number | null;
   onPreview: (preview: Preview) => void;
 }) {
-  const upcoming = appointments.filter((a) => a.status !== "Completed");
+  const upcoming = appointments.filter(
+    (a) =>
+      (a.status === "Booked" || a.status === "Confirmed") &&
+      (a.start === null || now === null || a.start >= now),
+  );
   const [expanded, setExpanded] = useState(false);
   const visibleAppointments =
     focused && !expanded ? upcoming.slice(0, 3) : upcoming;
   function open(appointment: Appointment) {
     onPreview({
       title: appointment.customer,
-      detail: `${appointment.service} · ${formatTime(appointment.start)} · ${appointment.duration} minutes. Status: ${appointment.status}. Appointment details and editing will be available in a future milestone.`,
+      detail: `${appointment.service} · ${formatTime(appointment.start)} · ${formatDuration(appointment.duration)}. Status: ${appointment.status}. Appointment details and editing will be available in a future milestone.`,
     });
   }
   return (
     <Section
       title="Up Next"
-      subtitle={
-        focused ? "Now & arriving soon" : "Your next arrivals, at a glance"
-      }
+      subtitle="Today’s booked and confirmed appointments"
       trailing={
-        focused ? (
+        focused && upcoming.length > 3 ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={
@@ -64,6 +70,11 @@ export function AppointmentList({
           <Text style={[s.columnLabel, s.status]}>STATUS</Text>
         </View>
       )}
+      {upcoming.length === 0 && (
+        <View style={s.row}>
+          <Text style={[ui.meta, ui.grow]}>No remaining appointments today.</Text>
+        </View>
+      )}
       {visibleAppointments.map((a) => (
         <Pressable
           key={a.id}
@@ -72,18 +83,17 @@ export function AppointmentList({
           onPress={() => open(a)}
           style={({ pressed }) => [
             s.row,
-            a.status === "In progress" && s.liveRow,
             pressed && ui.pressed,
           ]}
         >
           <View style={[s.time, compact && s.compactTime]}>
-            <Text style={s.timeText}>{formatTime(a.start).split(" ")[0]}</Text>
-            <Text style={ui.meta}>{formatTime(a.start).split(" ")[1]}</Text>
+            <Text style={s.timeText}>{a.start === null ? "—" : formatTime(a.start).split(" ")[0]}</Text>
+            <Text style={ui.meta}>{a.start === null ? "No time" : formatTime(a.start).split(" ")[1]}</Text>
           </View>
           <View style={ui.grow}>
             <Text style={ui.strong}>{a.customer}</Text>
             <Text style={ui.meta}>
-              {a.service} · {a.duration} min
+              {a.service} · {formatDuration(a.duration)}
             </Text>
             {compact && (
               <View style={s.inlineBadge}>
@@ -106,7 +116,7 @@ function AppointmentBadge({ appointment }: { appointment: Appointment }) {
   return (
     <Badge
       label={appointment.status}
-      tone={appointment.status === "Unconfirmed" ? "warning" : "success"}
+      tone={appointment.status === "Confirmed" ? "success" : "neutral"}
     />
   );
 }
@@ -143,12 +153,6 @@ const s = StyleSheet.create({
     borderTopWidth: t.border,
     borderTopColor: t.colors.border,
     minHeight: 64,
-  },
-  liveRow: {
-    backgroundColor: "#F5FBF8",
-    borderLeftWidth: 3,
-    borderLeftColor: t.colors.emeraldBright,
-    paddingLeft: 13,
   },
   inlineBadge: { marginTop: t.space.sm },
   expand: {

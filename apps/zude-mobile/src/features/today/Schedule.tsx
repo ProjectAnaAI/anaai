@@ -1,9 +1,22 @@
 import { StyleSheet, Text, View } from "react-native";
 import { Icon, styles as ui } from "../../components/ui";
-import { appointments, demoDay, formatTime } from "../../data/demoToday";
+import type { Appointment } from "../../types/today";
+import { formatDuration, formatTime } from "./todayData";
 import { theme as t } from "../../theme/tokens";
 
-export function Schedule() {
+export function Schedule({ appointments, now, status }: {
+  appointments: readonly Appointment[];
+  now: number | null;
+  status: string;
+}) {
+  const nowIndex = now === null ? -1 : appointments.findIndex((a) => a.start !== null && a.start > now);
+  const indicator = now !== null && status === "success" ? (
+    <View style={s.now}>
+      <View style={s.nowDot} />
+      <Text style={s.nowText}>{formatTime(now)} · Now</Text>
+      <View style={s.nowLine} />
+    </View>
+  ) : null;
   return (
     <View style={s.panel}>
       <View style={s.heading}>
@@ -14,24 +27,17 @@ export function Schedule() {
           </Text>
         </View>
         <Text style={ui.meta}>
-          {appointments.length} appointments · Business-wide
+          {status === "success" ? `${appointments.length} appointments · Business-wide` : status === "loading" ? "Loading appointments…" : "Appointments unavailable"}
         </Text>
       </View>
       <View style={s.timeline}>
         {appointments.map((a, index) => (
           <View key={a.id}>
-            {a.start > demoDay.now &&
-              (index === 0 || appointments[index - 1].start <= demoDay.now) && (
-                <View style={s.now}>
-                  <View style={s.nowDot} />
-                  <Text style={s.nowText}>{formatTime(demoDay.now)} · Now</Text>
-                  <View style={s.nowLine} />
-                </View>
-              )}
+            {index === nowIndex && indicator}
             <View
               style={s.entry}
               accessible
-              accessibilityLabel={`${formatTime(a.start)}, ${a.customer}, ${a.service}, ${a.duration} minutes, ${a.status}`}
+              accessibilityLabel={`${formatTime(a.start)}, ${a.customer}, ${a.service}, ${formatDuration(a.duration)}, ${a.status}`}
             >
               <View style={s.timeColumn}>
                 <Text style={ui.meta}>{formatTime(a.start)}</Text>
@@ -39,8 +45,8 @@ export function Schedule() {
               <View
                 style={[
                   s.event,
-                  a.status === "In progress" && s.current,
-                  a.status === "Completed" && s.completed,
+                  a.status === "Confirmed" && s.confirmed,
+                  (a.status === "Completed" || a.status === "Cancelled") && s.completed,
                 ]}
               >
                 <Text
@@ -49,17 +55,19 @@ export function Schedule() {
                   {a.customer}
                 </Text>
                 <Text style={ui.meta}>
-                  {a.service}
-                  {a.status === "In progress" ? " · In progress" : ""}
+                  {a.service} · {formatDuration(a.duration)}
+                </Text>
+                <Text style={ui.meta}>
+                  {a.status}
                 </Text>
               </View>
             </View>
           </View>
         ))}
-      </View>
-      <View style={s.close}>
-        <Icon name="moon" size={15} />
-        <Text style={ui.meta}>Open {demoDay.open}</Text>
+        {nowIndex === -1 && indicator}
+        {status === "success" && appointments.length === 0 && (
+          <Text style={[ui.meta, s.empty]}>No appointments scheduled today.</Text>
+        )}
       </View>
     </View>
   );
@@ -88,7 +96,7 @@ const s = StyleSheet.create({
     borderLeftColor: t.colors.border,
     gap: 2,
   },
-  current: {
+  confirmed: {
     backgroundColor: t.colors.emeraldSoft,
     borderLeftColor: t.colors.emeraldBright,
     borderTopRightRadius: t.radius.sm,
@@ -111,11 +119,5 @@ const s = StyleSheet.create({
   },
   nowText: { color: t.colors.emerald, fontSize: 11, fontWeight: "600" },
   nowLine: { flex: 1, height: 1, backgroundColor: t.colors.emerald },
-  close: {
-    flexDirection: "row",
-    gap: t.space.sm,
-    padding: t.space.lg,
-    borderTopWidth: t.border,
-    borderTopColor: t.colors.border,
-  },
+  empty: { paddingBottom: t.space.lg },
 });

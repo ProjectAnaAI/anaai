@@ -1,15 +1,10 @@
-export type AppointmentStatus =
-  | "In progress"
-  | "Checked in"
-  | "Confirmed"
-  | "Unconfirmed"
-  | "Completed";
+export type AppointmentStatus = "Booked" | "Confirmed" | "Completed" | "Cancelled";
 export type Appointment = {
   id: string;
   customer: string;
   service: string;
-  start: number;
-  duration: number;
+  start: number | null;
+  duration: number | null;
   status: AppointmentStatus;
 };
 export type AvailableSlot = { id: string; start: number; duration: number };

@@ -8,14 +8,9 @@ import {
   View,
 } from "react-native";
 import { Button, Icon, Section, styles as ui } from "../../components/ui";
-import {
-  appointments,
-  attentionItems,
-  availableSlots,
-  demoDay,
-  formatTime,
-  voiceDemo,
-} from "../../data/demoToday";
+import { voiceDemo } from "../../data/demoToday";
+import { formatTime } from "./todayData";
+import { useTodayAppointments } from "./useTodayAppointments";
 import { theme as t } from "../../theme/tokens";
 import type { Preview } from "../../types/today";
 import { AppointmentList } from "./AppointmentList";
@@ -32,6 +27,7 @@ export function TodayScreen({
   currentUser?: ReactNode;
   onPreview: (preview: Preview) => void;
 }) {
+  const { business, clock, appointments, status, errorMessage, retry } = useTodayAppointments();
   const { width: windowWidth } = useWindowDimensions();
 
   const sidebarWidth =
@@ -55,12 +51,10 @@ export function TodayScreen({
     ? availableColumnsWidth * t.layout.railFraction
     : undefined;
 
-  function booking(time?: string) {
+  function booking() {
     onPreview({
-      title: time ? `New appointment · ${time}` : "New appointment",
-      detail: `${
-        time ? `${time} is a sample business-wide opening. ` : ""
-      }The booking flow will be added in a future milestone. Service selection, customer details, and appointment creation are not connected in this preview.`,
+      title: "New appointment",
+      detail: "The booking flow will be added in a future milestone. Service selection, customer details, and appointment creation are not connected in this preview.",
     });
   }
 
@@ -79,7 +73,7 @@ export function TodayScreen({
             </Text>
           </View>
           <Text style={s.context}>
-            {demoDay.date} · {demoDay.business}
+            {clock?.label ?? "Date unavailable"} · {business.name}
           </Text>
         </View>
 
@@ -92,14 +86,11 @@ export function TodayScreen({
         <View style={s.pulseDot} />
 
         <Text style={[ui.body, ui.grow]}>
-          <Text style={s.emphasis}>The day is underway.</Text>{" "}
-          {appointments.filter((a) => a.status === "In progress").length} in
-          progress ·{" "}
-          {appointments.filter((a) => a.status === "Checked in").length}{" "}
-          customer checked in
+          {status === "loading" ? "Loading today’s appointments…" : status === "error"
+            ? "Appointments unavailable" : `${appointments.length} appointments today`}
         </Text>
 
-        <Text style={ui.meta}>{formatTime(demoDay.now)}</Text>
+        <Text style={ui.meta}>{clock ? formatTime(clock.minutes) : "Time unavailable"}</Text>
       </View>
 
       <View
@@ -120,68 +111,32 @@ export function TodayScreen({
             },
           ]}
         >
-          <AppointmentList
-            compact={compact}
-            focused={wide}
-            onPreview={onPreview}
-          />
+          {status === "success" ? (
+            <AppointmentList
+              key={`${business.id}:${clock?.date}`}
+              appointments={appointments}
+              compact={compact}
+              focused={wide}
+              now={clock?.minutes ?? null}
+              onPreview={onPreview}
+            />
+          ) : (
+            <Section title="Up Next">
+              <View style={s.notice}>
+                <Text style={ui.body} accessibilityLiveRegion="polite">
+                  {status === "loading" ? "Loading today’s appointments…" : errorMessage}
+                </Text>
+                {status === "error" && <Button label="Retry" onPress={retry} secondary />}
+              </View>
+            </Section>
+          )}
 
-          <Section
-            title="Next Available"
-            trailing={<Text style={ui.meta}>30 min</Text>}
-          >
-            <View style={s.slots}>
-              {availableSlots.map((slot) => (
-                <Pressable
-                  key={slot.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Preview booking at ${formatTime(
-                    slot.start,
-                  )}, ${slot.duration} minutes`}
-                  onPress={() => booking(formatTime(slot.start))}
-                  style={({ pressed }) => [
-                    s.slot,
-                    pressed && ui.pressed,
-                  ]}
-                >
-                  <Text style={s.slotTime}>{formatTime(slot.start)}</Text>
-                  <Icon name="plus" color={t.colors.emerald} size={15} />
-                </Pressable>
-              ))}
-            </View>
+          <Section title="Next Available">
+            <Text style={[ui.meta, s.notice]}>Availability is not connected yet.</Text>
           </Section>
 
-          <Section
-            title="Needs Attention"
-            trailing={
-              <Text style={ui.meta}>{attentionItems.length} to review</Text>
-            }
-          >
-            {attentionItems.map((item) => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${item.action}: ${item.title}`}
-                key={item.id}
-                onPress={() =>
-                  onPreview({ title: item.title, detail: item.preview })
-                }
-                style={({ pressed }) => [
-                  s.attention,
-                  pressed && ui.pressed,
-                ]}
-              >
-                <View style={s.attentionIcon}>
-                  <Icon name="alert-circle" color={t.colors.amber} />
-                </View>
-
-                <View style={ui.grow}>
-                  <Text style={ui.strong}>{item.title}</Text>
-                  <Text style={ui.meta}>{item.detail}</Text>
-                </View>
-
-                <Icon name="chevron-right" size={16} />
-              </Pressable>
-            ))}
+          <Section title="Needs Attention">
+            <Text style={[ui.meta, s.notice]}>Operational alerts are not connected yet.</Text>
           </Section>
 
           <Pressable
@@ -220,7 +175,7 @@ export function TodayScreen({
               : undefined,
           ]}
         >
-          <Schedule />
+          <Schedule appointments={appointments} now={clock?.minutes ?? null} status={status} />
         </View>
       </View>
     </ScrollView>
@@ -301,50 +256,7 @@ const s = StyleSheet.create({
     alignSelf: "stretch",
   },
 
-  slots: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: t.space.sm,
-    paddingHorizontal: t.space.lg,
-    paddingBottom: t.space.lg,
-  },
-
-  slot: {
-    flexGrow: 1,
-    flexBasis: 96,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: t.border,
-    borderColor: t.colors.border,
-    borderRadius: t.radius.sm,
-    padding: t.space.sm,
-    gap: t.space.xs,
-    minHeight: t.layout.touch,
-  },
-
-  slotTime: {
-    fontSize: t.font.body,
-    flexShrink: 1,
-    fontWeight: "600",
-    color: t.colors.text,
-    fontVariant: ["tabular-nums"],
-  },
-
-  attention: {
-    flexDirection: "row",
-    gap: t.space.md,
-    paddingHorizontal: t.space.lg,
-    paddingVertical: t.space.sm,
-    minHeight: t.layout.touch,
-    alignItems: "center",
-    borderTopWidth: t.border,
-    borderTopColor: t.colors.border,
-  },
-
-  attentionIcon: {
-    paddingTop: 2,
-  },
+  notice: { padding: t.space.lg, paddingTop: 0, gap: t.space.md },
 
   voice: {
     flexDirection: "row",
