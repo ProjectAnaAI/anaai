@@ -28,7 +28,14 @@ function apiUrl(path: string) {
   }
 }
 
-export async function apiGet<T>(path: string, options: { businessId?: string; signal?: AbortSignal } = {}): Promise<T> {
+type Options = { businessId?: string; signal?: AbortSignal; expectedUserId?: string };
+export function apiGet<T>(path: string, options: Options = {}): Promise<T> {
+  return apiRequest<T>(path, options);
+}
+export function apiMutate<T>(body: Record<string, unknown>, options: Options & { method: "POST" | "PATCH"; requestKey: string }): Promise<T> {
+  return apiRequest<T>("/api/appointments", { ...options, body });
+}
+async function apiRequest<T>(path: string, options: Options & { method?: "POST" | "PATCH"; requestKey?: string; body?: Record<string, unknown> }): Promise<T> {
   checkCancelled(options.signal);
   const url = apiUrl(path);
   try {
@@ -38,10 +45,15 @@ export async function apiGet<T>(path: string, options: { businessId?: string; si
     if (error || !session?.access_token) {
       throw new ZudeApiError(401, "UNAUTHORIZED", "Please sign in again.");
     }
+    if (options.expectedUserId && session.user.id !== options.expectedUserId) {
+      throw new ZudeApiError(401, "SESSION_CHANGED", "Your account session changed. Please sign in again.");
+    }
     const response = await fetch(url, {
-      method: "GET",
+      method: options.method || "GET",
+      ...(options.body ? { body: JSON.stringify(options.body) } : {}),
       headers: {
         Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json", "Idempotency-Key": options.requestKey! } : {}),
         Authorization: `Bearer ${session.access_token}`,
         ...(options.businessId ? { "x-anaai-business-id": options.businessId } : {}),
       },

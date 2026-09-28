@@ -142,3 +142,19 @@ test('native domain access has no direct Supabase business/appointment reads', (
     assert.doesNotMatch(source, /supabase|\.from\s*\(|\.rpc\s*\(/);
   }
 });
+
+test('native mutation uses existing endpoint, authenticated tenant header and idempotency key', async () => {
+  const h = transport(); const body={appointmentId:'target',status:'Confirmed'};
+  await h.apiMutate(body,{businessId:'a',method:'PATCH',requestKey:'request-key'});
+  const {url,init}=h.calls[0]; assert.equal(url,'https://zude.invalid/api/appointments');
+  assert.equal(init.method,'PATCH');assert.equal(init.headers['Idempotency-Key'],'request-key');
+  assert.equal(init.headers['Content-Type'],'application/json');assert.deepEqual(JSON.parse(init.body),body);
+  assert.equal(init.headers['x-anaai-business-id'],'a');
+});
+test('native mutation preserves safe slot-conflict code, hides provider body', async () => {
+  const h=transport({status:409,payload:{success:false,code:'SLOT_CONFLICT',error:'private-provider-detail'}});
+  await assert.rejects(h.apiMutate({},{businessId:'a',method:'POST',requestKey:'key'}),e=>e.code==='SLOT_CONFLICT' && !e.message.includes('private-provider-detail'));
+});
+test('mutation refuses an account switch while preparing its persisted request key, before sending',async()=>{
+  const h=transport();await assert.rejects(h.apiMutate({status:'Confirmed'},{method:'PATCH',requestKey:'key',businessId:'a',expectedUserId:'previous-user'}),e=>e.code==='SESSION_CHANGED');assert.equal(h.calls.length,0);
+});

@@ -40,21 +40,23 @@ const groups: { title: string; items: NavItem[] }[] = [
 ];
 export function Sidebar({
   onSelect,
+  activeLabel,
   businessName,
   timezone,
 }: {
+  activeLabel: string;
   onSelect: (label: string) => void;
   businessName: string;
   timezone: string;
 }) {
   function item({ label, icon }: NavItem) {
-    const active = label === "Today";
+    const active = label === activeLabel;
     return (
       <Pressable
         key={label}
         accessibilityRole="button"
         accessibilityState={{ selected: active }}
-        accessibilityLabel={active ? label : `${label}, coming soon`}
+        accessibilityLabel={["Today", "Appointments"].includes(label) ? label : `${label}, coming soon`}
         onPress={() => onSelect(label)}
         style={({ pressed }) => [
           s.item,

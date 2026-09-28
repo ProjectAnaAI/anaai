@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import type { ReactNode } from "react";
 import {
   Pressable,
@@ -52,10 +53,7 @@ export function TodayScreen({
     : undefined;
 
   function booking() {
-    onPreview({
-      title: "New appointment",
-      detail: "The booking flow will be added in a future milestone. Service selection, customer details, and appointment creation are not connected in this preview.",
-    });
+    router.replace({ pathname: "/appointments", params: { compose: "new" } });
   }
 
   return (

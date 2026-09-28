@@ -2,6 +2,7 @@ import express, { type ErrorRequestHandler } from "express";
 
 import * as ai from "./handlers/ai";
 import * as appointments from "./handlers/appointments";
+import * as appointmentReads from "./handlers/appointment-reads";
 import * as businesses from "./handlers/businesses";
 import * as todayAppointments from "./handlers/today-appointments";
 import * as currentBusiness from "./handlers/current-business";
@@ -33,6 +34,10 @@ export function createApp() {
 
   api.post("/appointments", webHandler(appointments.POST));
   api.patch("/appointments", webHandler(appointments.PATCH));
+  api.get("/appointments/day", webHandler(appointmentReads.DAY));
+  api.get("/appointments/availability", webHandler(appointmentReads.AVAILABILITY));
+  api.get("/customers", webHandler(appointmentReads.CUSTOMERS));
+  api.get("/services", webHandler(appointmentReads.SERVICES));
   api.get("/appointments", webHandler(todayAppointments.GET));
   api.get("/businesses", webHandler(businesses.GET));
 

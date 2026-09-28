@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Slot, router, usePathname } from "expo-router";
+import { WorkspaceContext } from "./WorkspaceContext";
 import {
   Modal,
   StyleSheet,
@@ -11,14 +13,14 @@ import { StatusBar } from "expo-status-bar";
 import { Badge, IconButton, styles as ui } from "../components/ui";
 import { PreviewDialog } from "../components/PreviewDialog";
 import { demoDay } from "../data/demoToday";
-import { TodayScreen } from "../features/today/TodayScreen";
 import { useBusiness } from "../features/business/BusinessContext";
 import { theme as t } from "../theme/tokens";
 import type { Preview } from "../types/today";
 import { Sidebar } from "./Sidebar";
 
 export function AppShell() {
-  const { business } = useBusiness();
+  const { business, userId } = useBusiness();
+  const active = usePathname() === "/appointments" ? "Appointments" : "Today";
   const { width, height, fontScale } = useWindowDimensions();
   const persistent = width >= t.layout.sidebarBreakpoint && fontScale < 1.5;
   const wide =
@@ -28,13 +30,16 @@ export function AppShell() {
   const [preview, setPreview] = useState<Preview | null>(null);
   function select(label: string) {
     setMenuOpen(false);
-    if (label === "Today") return;
+    if (label === "Today" || label === "Appointments") {
+      router.replace(label === "Today" ? "/" : "/appointments");
+      return;
+    }
     setPreview({
       title: label,
       detail:
         label === "Lock"
           ? "Lock is a navigation placeholder. In a future milestone it will return to PIN entry without clocking you out. No lock or authentication is active in this demo."
-          : `${label} is planned for a future milestone. Today is the only implemented workspace. This demo does not connect to live business data.`,
+          : `${label} is planned for a future milestone. Today and Appointments are available now.`,
     });
   }
   const currentUser = (
@@ -54,7 +59,7 @@ export function AppShell() {
       <View style={s.shell}>
         {persistent && (
           <View style={s.sidebar}>
-            <Sidebar onSelect={select} businessName={business.name} timezone={business.timezone} />
+            <Sidebar activeLabel={active} onSelect={select} businessName={business.name} timezone={business.timezone} />
           </View>
         )}
         <View style={s.workspace}>
@@ -73,12 +78,9 @@ export function AppShell() {
               {currentUser}
             </View>
           )}
-          <TodayScreen
-            wide={wide}
-            compact={compact}
-            currentUser={wide ? currentUser : undefined}
-            onPreview={setPreview}
-          />
+          <WorkspaceContext.Provider value={{ wide, compact, currentUser: wide ? currentUser : undefined, onPreview: setPreview }}>
+            <Slot key={`${userId}:${business.id}`} />
+          </WorkspaceContext.Provider>
         </View>
       </View>
       <Modal
@@ -103,7 +105,7 @@ export function AppShell() {
                 onPress={() => setMenuOpen(false)}
               />
             </View>
-            <Sidebar onSelect={select} businessName={business.name} timezone={business.timezone} />
+            <Sidebar activeLabel={active} onSelect={select} businessName={business.name} timezone={business.timezone} />
           </SafeAreaView>
         )}
       </Modal>

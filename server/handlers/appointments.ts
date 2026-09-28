@@ -157,6 +157,7 @@ async function handle(
     if (!context.success) {
       return Response.json(
         {
+          code: context.code,
           error:
             context.status >= 500
               ? "Unable to load appointment context."
@@ -526,6 +527,7 @@ async function handle(
       return Response.json(
         {
           success: false,
+          code: failure ? data.code : "UNVERIFIED_ACTION",
           error: message,
         },
         {
