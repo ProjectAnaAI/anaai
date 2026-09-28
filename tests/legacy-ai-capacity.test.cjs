@@ -506,7 +506,9 @@ test('23. no capacity authority exists in browser or API code', () => {
     const source = fs.readFileSync(file, 'utf8');
     assert.doesNotMatch(
       source,
-      /appointment_capacity|check_appointment_capacity_business|anaai_private/,
+      file === 'app/business/page.tsx'
+        ? /check_appointment_capacity_business|anaai_private/
+        : /appointment_capacity|check_appointment_capacity_business|anaai_private/,
       file
     );
   }

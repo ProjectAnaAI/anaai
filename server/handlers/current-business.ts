@@ -1,27 +1,12 @@
 import { resolveBusinessContext } from "@/lib/business-context";
+import { bearerToken } from "../read-api";
 
 export async function GET(request: Request) {
   try {
-    const authorization = request.headers.get("authorization");
-
-    if (!authorization?.startsWith("Bearer ")) {
-      return Response.json(
-        {
-          success: false,
-          error: "Missing authorization token.",
-        },
-        { status: 401 }
-      );
-    }
-
-    const accessToken = authorization.slice("Bearer ".length).trim();
-
+    const accessToken = bearerToken(request);
     if (!accessToken) {
       return Response.json(
-        {
-          success: false,
-          error: "Missing authorization token.",
-        },
+        { success: false, error: "Missing authorization token." },
         { status: 401 }
       );
     }
@@ -54,8 +39,8 @@ export async function GET(request: Request) {
         role: result.context.role,
       },
     });
-  } catch (error: unknown) {
-    console.error("AnaAI current business error:", error);
+  } catch {
+    console.error("Current business request failed.");
 
     return Response.json(
       {

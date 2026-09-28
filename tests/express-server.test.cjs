@@ -173,6 +173,8 @@ test('health check responds and Express fingerprinting is disabled', async () =>
 test('every authenticated endpoint is mounted and rejects missing credentials', async () => {
   const base = await api();
   const cases = [
+    ['GET', '/api/businesses', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
+    ['GET', '/api/appointments?date=2026-09-27', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
     ['GET', '/api/current-business', { success: false, error: 'Missing authorization token.' }],
     ['POST', '/api/onboarding', { error: 'Please log in again.' }],
     ['POST', '/api/appointments', { error: 'Please log in again.' }],

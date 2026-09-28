@@ -2,11 +2,14 @@ import express, { type ErrorRequestHandler } from "express";
 
 import * as ai from "./handlers/ai";
 import * as appointments from "./handlers/appointments";
+import * as businesses from "./handlers/businesses";
+import * as todayAppointments from "./handlers/today-appointments";
 import * as currentBusiness from "./handlers/current-business";
 import * as onboarding from "./handlers/onboarding";
 import * as voice from "./handlers/voice";
 import * as voiceTrial from "./handlers/voice-trial";
 import { webHandler } from "./http";
+import { apiCors } from "./cors";
 
 export function createApp() {
   const app = express();
@@ -21,6 +24,7 @@ export function createApp() {
   });
 
   const api = express.Router();
+  api.use(apiCors());
 
   // Keep the raw body: handlers parse JSON or Twilio form data themselves.
   api.use(express.raw({ type: () => true, limit: "1mb" }));
@@ -29,6 +33,8 @@ export function createApp() {
 
   api.post("/appointments", webHandler(appointments.POST));
   api.patch("/appointments", webHandler(appointments.PATCH));
+  api.get("/appointments", webHandler(todayAppointments.GET));
+  api.get("/businesses", webHandler(businesses.GET));
 
   api.get("/current-business", webHandler(currentBusiness.GET));
 

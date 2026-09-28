@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppState } from "react-native";
-import { supabase } from "../../lib/supabase";
+import { getTodayAppointments } from "../../lib/today-api";
 import type { Appointment } from "../../types/today";
 import { useBusiness } from "../business/BusinessContext";
 import { businessClock, mapAppointment } from "./todayData";
@@ -38,19 +38,11 @@ export function useTodayAppointments() {
     async function load() {
       setResult({ key, status: "loading", appointments: [] });
       try {
-        const { data, error } = await supabase
-          .from("appointments")
-          .select("id, customer_name, service, appointment_time, status, duration_minutes")
-          .eq("business_id", business.id)
-          .eq("appointment_date", date!)
-          .order("appointment_time", { ascending: true })
-          .abortSignal(controller.signal);
-        if (error) throw error;
+        const data = await getTodayAppointments(business.id, date!, controller.signal);
         const appointments = (data ?? []).map(mapAppointment);
         if (!cancelled) setResult({ key, status: "success", appointments });
-      } catch (error) {
+      } catch {
         if (cancelled) return;
-        console.error("ZUDE Today appointments read failed:", error);
         setResult({ key, status: "error", appointments: [] });
       }
     }

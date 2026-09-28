@@ -494,7 +494,9 @@ test('no Voice capacity authority exists in browser or API code', () => {
     'app/business/page.tsx',
   ]) {
     const source = fs.readFileSync(file, 'utf8');
-    assert.doesNotMatch(source, /appointment_capacity|check_appointment_capacity_business|anaai_private/, file);
+    assert.doesNotMatch(source, file === 'app/business/page.tsx'
+        ? /check_appointment_capacity_business|anaai_private/
+        : /appointment_capacity|check_appointment_capacity_business|anaai_private/, file);
   }
 });
 

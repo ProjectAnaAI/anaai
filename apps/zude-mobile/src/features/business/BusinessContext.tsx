@@ -6,16 +6,8 @@ import {
   useEffect,
   useState,
 } from "react";
-import { supabase } from "../../lib/supabase";
-
-export type BusinessRole = "owner" | "manager" | "staff";
-
-export type Business = {
-  id: string;
-  name: string;
-  timezone: string;
-  role: BusinessRole;
-};
+import { getBusinesses, rememberedBusiness, type Business } from "../../lib/today-api";
+export type { Business, BusinessRole } from "../../lib/today-api";
 
 type BusinessContextValue = {
   userId: string;
@@ -42,10 +34,6 @@ function storageKey(userId: string) {
   return `zude:business:${userId}`;
 }
 
-function isBusinessRole(role: string): role is BusinessRole {
-  return role === "owner" || role === "manager" || role === "staff";
-}
-
 export function BusinessProvider({
   children,
   loading,
@@ -66,124 +54,43 @@ export function BusinessProvider({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     async function load() {
       setState({ status: "loading" });
 
       try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-
+        const { userId, businesses } = await getBusinesses(controller.signal);
         if (cancelled) return;
-
-        if (userError || !user) {
-          setState({
-            status: "error",
-            message: "Your session could not be verified. Please sign in again.",
-          });
-          return;
-        }
-
-        const { data: memberships, error: membershipError } = await supabase
-          .from("business_members")
-          .select("business_id, role")
-          .eq("user_id", user.id);
-
-        if (cancelled) return;
-
-        if (membershipError) {
-          throw new Error(membershipError.message);
-        }
-
-        const validMemberships = (memberships ?? []).filter(
-          (
-            membership,
-          ): membership is {
-            business_id: string;
-            role: BusinessRole;
-          } =>
-            typeof membership.business_id === "string" &&
-            typeof membership.role === "string" &&
-            isBusinessRole(membership.role),
-        );
-
-        if (validMemberships.length === 0) {
+        if (businesses.length === 0) {
           setState({ status: "no-membership" });
           return;
         }
 
-        const membershipByBusiness = new Map(
-          validMemberships.map((membership) => [
-            membership.business_id,
-            membership.role,
-          ]),
-        );
-
-        const businessIds = [...membershipByBusiness.keys()];
-
-        const { data: businessRows, error: businessError } = await supabase
-          .from("businesses")
-          .select("id, name, timezone")
-          .in("id", businessIds)
-          .order("name");
-
-        if (cancelled) return;
-
-        if (businessError) {
-          throw new Error(businessError.message);
-        }
-
-        const businesses: Business[] = (businessRows ?? [])
-          .map((business) => {
-            const role = membershipByBusiness.get(business.id);
-
-            if (!role) return null;
-
-            return {
-              id: business.id,
-              name: business.name,
-              timezone: business.timezone,
-              role,
-            };
-          })
-          .filter((business): business is Business => business !== null);
-
-        if (businesses.length === 0) {
-          setState({
-            status: "error",
-            message: "No accessible business could be loaded.",
-          });
-          return;
-        }
-
         if (businesses.length === 1) {
-          await AsyncStorage.setItem(storageKey(user.id), businesses[0].id);
+          await AsyncStorage.setItem(storageKey(userId), businesses[0].id);
 
           if (cancelled) return;
 
           setState({
             status: "ready",
-            userId: user.id,
+            userId,
             businesses,
             business: businesses[0],
           });
           return;
         }
 
-        const storedBusinessId = await AsyncStorage.getItem(storageKey(user.id));
+        const storedBusinessId = await AsyncStorage.getItem(storageKey(userId));
 
         if (cancelled) return;
 
-        const storedBusiness = businesses.find(
-          (business) => business.id === storedBusinessId,
-        );
+        const storedBusiness = rememberedBusiness(businesses, storedBusinessId);
 
         if (storedBusiness) {
           setState({
             status: "ready",
-            userId: user.id,
+            userId,
             businesses,
             business: storedBusiness,
           });
@@ -192,13 +99,11 @@ export function BusinessProvider({
 
         setState({
           status: "selection",
-          userId: user.id,
+          userId,
           businesses,
         });
-      } catch (loadError) {
+      } catch {
         if (cancelled) return;
-
-        console.error("ZUDE business context error:", loadError);
 
         setState({
           status: "error",
@@ -211,6 +116,7 @@ export function BusinessProvider({
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 

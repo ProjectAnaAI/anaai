@@ -54,7 +54,7 @@ export function AuthGate() {
   }
 
   return (
-    <BusinessGate>
+    <BusinessGate key={session.user.id}>
       <AppShell />
     </BusinessGate>
   );

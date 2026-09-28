@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 export type BusinessRole = "owner" | "manager" | "staff";
 
@@ -10,32 +10,43 @@ export type BusinessContext = {
   role: BusinessRole;
 };
 
+export type BusinessContextFailure = {
+  success: false;
+  status: number;
+  error: string;
+  code:
+    | "CONFIGURATION_ERROR"
+    | "UNAUTHORIZED"
+    | "NO_BUSINESS_MEMBERSHIP"
+    | "BUSINESS_SELECTION_REQUIRED"
+    | "BUSINESS_ACCESS_DENIED"
+    | "BUSINESS_NOT_FOUND"
+    | "DATABASE_ERROR";
+};
+
+export function isBusinessRole(role: string): role is BusinessRole {
+  return role === "owner" || role === "manager" || role === "staff";
+}
+
 type ResolveBusinessContextResult =
   | {
       success: true;
       context: BusinessContext;
+      db: SupabaseClient;
     }
-  | {
-      success: false;
-      status: number;
-      error: string;
-      code:
-        | "CONFIGURATION_ERROR"
-        | "UNAUTHORIZED"
-        | "NO_BUSINESS_MEMBERSHIP"
-        | "BUSINESS_SELECTION_REQUIRED"
-        | "BUSINESS_ACCESS_DENIED"
-        | "BUSINESS_NOT_FOUND"
-        | "DATABASE_ERROR";
-    };
+  | BusinessContextFailure;
 
-export async function resolveBusinessContext({
-  accessToken,
-  requestedBusinessId,
-}: {
-  accessToken: string;
-  requestedBusinessId?: string | null;
-}): Promise<ResolveBusinessContextResult> {
+// Server-only identity boundary shared by existing mutations and new read APIs.
+// Never accept a user ID or role supplied by a client.
+export async function authenticateBusinessMemberships(accessToken: string): Promise<
+  | {
+      success: true;
+      userId: string;
+      memberships: { business_id: string; role: string }[];
+      db: SupabaseClient;
+    }
+  | BusinessContextFailure
+> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -75,7 +86,7 @@ export async function resolveBusinessContext({
   } = await supabase.auth.getUser(accessToken);
 
   if (userError || !user) {
-    console.error("AnaAI business context authentication error:", userError);
+    console.error("Business context authentication failed.");
 
     return {
       success: false,
@@ -91,7 +102,7 @@ export async function resolveBusinessContext({
     .eq("user_id", user.id);
 
   if (membershipError) {
-    console.error("AnaAI business membership lookup error:", membershipError);
+    console.error("Business membership lookup failed.");
 
     return {
       success: false,
@@ -100,6 +111,20 @@ export async function resolveBusinessContext({
       code: "DATABASE_ERROR",
     };
   }
+
+  return { success: true, userId: user.id, memberships: memberships ?? [], db: supabase };
+}
+
+export async function resolveBusinessContext({
+  accessToken,
+  requestedBusinessId,
+}: {
+  accessToken: string;
+  requestedBusinessId?: string | null;
+}): Promise<ResolveBusinessContextResult> {
+  const authenticated = await authenticateBusinessMemberships(accessToken);
+  if (!authenticated.success) return authenticated;
+  const { memberships, userId, db: supabase } = authenticated;
 
   if (!memberships || memberships.length === 0) {
     return {
@@ -159,7 +184,7 @@ export async function resolveBusinessContext({
     .maybeSingle();
 
   if (businessError) {
-    console.error("AnaAI business lookup error:", businessError);
+    console.error("Business lookup failed.");
 
     return {
       success: false,
@@ -180,7 +205,7 @@ export async function resolveBusinessContext({
 
   const role = selectedMembership.role;
 
-  if (role !== "owner" && role !== "manager" && role !== "staff") {
+  if (!isBusinessRole(role)) {
     return {
       success: false,
       status: 403,
@@ -191,8 +216,9 @@ export async function resolveBusinessContext({
 
   return {
     success: true,
+    db: supabase,
     context: {
-      userId: user.id,
+      userId,
       businessId: business.id,
       businessName: business.name,
       timezone: business.timezone,

@@ -678,7 +678,16 @@ test('create still stamps auth.uid() and inserts Booked only', () => {
 test('capacity authority stays in the database, never in the browser', () => {
   for (const file of ['app/appointments/page.tsx', 'app/business/page.tsx']) {
     const source = fs.readFileSync(file, 'utf8');
-    assert.doesNotMatch(source, /appointment_capacity/);
+    // Settings may configure capacity, but may never run the capacity checker.
+    assert.doesNotMatch(source, /check_appointment_capacity_business|anaai_private/);
+    if (file !== 'app/business/page.tsx') {
+      assert.doesNotMatch(source, /appointment_capacity/);
+    } else {
+      // Configuration cannot inspect occupancy or mutate appointments directly.
+      assert.doesNotMatch(source, /\.from\(\s*["']appointments["']/);
+      assert.doesNotMatch(source, /\.rpc\s*\(/);
+      assert.doesNotMatch(source, /from ["'].*(?:appointment-calendar|appointment-actions|voice-booking)/);
+    }
   }
   assert.doesNotMatch(route, /appointment_capacity|capacity/i);
 });

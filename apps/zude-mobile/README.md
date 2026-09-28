@@ -1,6 +1,16 @@
-# ZUDE native · Milestone 01
+# ZUDE native
 
-A native Expo Go UI foundation. Today is the only implemented workspace. All data is a local fixture, fixed at September 26, 2026, 10:20 AM; the clock does not tick. No authentication, network calls, booking mutations, staff scheduling, or time-clock behavior is implemented.
+The existing Expo application uses Supabase Auth and the ZUDE Express API for business selection and real, read-only Today appointments. Today is the only implemented workspace. Booking, device/PIN authentication, and time-clock behavior are not implemented. Some shell identity/status elements remain legacy previews and do not represent employee attendance.
+
+## ZUDE API connection
+
+Set `EXPO_PUBLIC_ZUDE_API_URL` in the launch/build environment to the API origin (for example, `https://api.example.com`), without an `/api` suffix, credentials, query, or fragment. This milestone does not modify environment files. Keep the existing public Supabase Auth configuration. The API may be reached directly or through the existing Next.js `/api` proxy.
+
+For an iPad on a development LAN, use a reachable computer hostname/address and the API port, not the iPad’s `localhost`. HTTP is allowed only in development builds; production requires HTTPS. Start the existing Express application separately. Reload the native app after changing public configuration. No PostgreSQL or service-role credentials belong in the native environment.
+
+The app sends its current Supabase bearer token to `GET /api/businesses`, then uses the authorized selection for `GET /api/appointments?date=YYYY-MM-DD`. The backend verifies identity and membership on each request. A remembered business ID never grants access. Missing configuration or unavailable API produces an error state; there is no direct-table fallback.
+
+See [the milestone contract and validation notes](../../docs/milestone-01-native-today.md).
 
 ## Run on iPad
 
@@ -15,14 +25,15 @@ Use the same Wi-Fi network on the computer and iPad, then scan the QR code with 
 
 - `src/theme/tokens.ts`: shared color, type, spacing, border, radius, and layout tokens.
 - `src/components/`: native controls, sections, badges, and informational preview dialog.
-- `src/data/demoToday.ts`: isolated demo day, appointments, openings, and attention items.
+- `src/lib/api.ts` and `today-api.ts`: authenticated API transport and Today read contracts.
+- `src/data/demoToday.ts`: legacy preview fixtures; not the Today appointment data source.
 - `src/types/today.ts`: domain and preview types, without a fake service layer.
 - `src/navigation/`: responsive shell and future information architecture. No screen navigation is implemented, so no router dependency is needed yet. Adopt Expo Router when adding actual routes.
 - `src/features/today/`: operational workspace, appointments, and chronological schedule.
 
-At 900 points the sidebar becomes persistent. In landscape from 1024 points, the workspace uses a 65% main column and 35% schedule rail, with the employee identity consolidated into the Today header. Up Next initially shows the nearest three appointments; View all expands the remaining appointments. Compact availability buttons and attention rows sit directly below. Smaller widths use a full-screen navigation menu and inline schedule. Larger accessibility text also triggers simpler layouts. All actions show explicitly labeled read-only previews. Lock is only a placeholder and never changes the mock clock status.
+At 900 points the sidebar becomes persistent. In landscape from 1024 points, the workspace uses a 65% main column and 35% schedule rail, with the employee identity consolidated into the Today header. Up Next initially shows the nearest three appointments; View all expands the remaining appointments. Compact availability buttons and attention rows sit directly below. Smaller widths use a full-screen navigation menu and inline schedule. Larger accessibility text also triggers simpler layouts. Unimplemented actions show preview dialogs. Lock is still a placeholder; it does not change authentication or attendance.
 
-## Validation
+## Historical UI foundation validation
 
 Run from this directory:
 
@@ -46,6 +57,6 @@ Remaining tooling warnings: npm reports 10 moderate vulnerabilities, deprecates 
 - Check scrolling, safe areas, keyboard-independent touch controls, and larger text.
 - Open and dismiss navigation, every preview, and booking time selections.
 - With VoiceOver, review button names, selected Today state, and modal focus.
-- Confirm Today stays active, preview dialogs clearly identify the local mock behavior, and no action changes records.
+- Confirm Today shows the selected business’s real appointments, unimplemented actions remain previews, and no action changes records.
 
 The application icon and launch assets remain the original Expo scaffold assets; this milestone brands the in-app shell as ZUDE.
