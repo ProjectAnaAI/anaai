@@ -44,7 +44,7 @@ export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = fa
   </View>;
 }
 const s = StyleSheet.create({
-  sidebar: { flex: 1, backgroundColor: t.colors.shell },
+  sidebar: { flex: 1, backgroundColor: "#0F1419" },
   brand: { minHeight: 64, alignItems: "center", justifyContent: "center", paddingVertical: t.space.md, gap: t.space.sm },
   business: { color: t.colors.shellMuted, fontSize: 10, lineHeight: 14, textAlign: "center" },
   items: { paddingHorizontal: t.space.xs, paddingBottom: t.space.lg, gap: t.space.sm },
