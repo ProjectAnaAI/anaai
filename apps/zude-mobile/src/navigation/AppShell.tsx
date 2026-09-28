@@ -1,173 +1,60 @@
 import { useState } from "react";
 import { Slot, router, usePathname } from "expo-router";
-import { WorkspaceContext } from "./WorkspaceContext";
-import {
-  Modal,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { Modal, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { Badge, IconButton, styles as ui } from "../components/ui";
-import { PreviewDialog } from "../components/PreviewDialog";
-import { demoDay } from "../data/demoToday";
+import { IconButton } from "../components/ui";
+import { Brand } from "../components/workspace";
 import { useBusiness } from "../features/business/BusinessContext";
 import { theme as t } from "../theme/tokens";
-import type { Preview } from "../types/today";
+import { workspaceLayout } from "../theme/layout";
+import { WorkspaceContext } from "./WorkspaceContext";
 import { Sidebar } from "./Sidebar";
 
 export function AppShell() {
   const { business, userId } = useBusiness();
   const active = usePathname() === "/appointments" ? "Appointments" : "Today";
   const { width, height, fontScale } = useWindowDimensions();
-  const persistent = width >= t.layout.sidebarBreakpoint && fontScale < 1.5;
-  const wide =
-    width >= t.layout.railBreakpoint && width > height && fontScale < 1.3;
-  const compact = width < 650 || fontScale >= 1.3;
+  const { persistent } = workspaceLayout(width, height, fontScale);
+  const [menuGroup, setMenuGroup] = useState("Operations");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  function select(label: string) {
-    setMenuOpen(false);
-    if (label === "Today" || label === "Appointments") {
-      router.replace(label === "Today" ? "/" : "/appointments");
-      return;
-    }
-    setPreview({
-      title: label,
-      detail:
-        label === "Lock"
-          ? "Lock is a navigation placeholder. In a future milestone it will return to PIN entry without clocking you out. No lock or authentication is active in this demo."
-          : `${label} is planned for a future milestone. Today and Appointments are available now.`,
-    });
+  const [navigationLocked, setNavigationLocked] = useState(false);
+  function openMenu(group = "Operations") { setMenuGroup(group); setMenuOpen(true); }
+  function select(route: "/" | "/appointments") {
+    if (navigationLocked) return;
+    setMenuOpen(false); router.replace(route);
   }
-  const currentUser = (
-    <View style={s.user}>
-      <View style={s.avatar}>
-        <Text style={s.initials}>{demoDay.initials}</Text>
-      </View>
-      <View style={s.userDetails}>
-        <Text style={s.userName}>{demoDay.user}</Text>
-        <Badge label="Clocked in" tone="success" />
+  return <SafeAreaView style={s.safe}>
+    <StatusBar style="dark" />
+    <View style={s.shell}>
+      {persistent && <View style={s.sidebar}><Sidebar activeLabel={active} onSelect={select} role={business.role} businessName={business.name} disabled={navigationLocked} onExpand={openMenu} /></View>}
+      <View style={s.workspace}>
+        {!persistent && <View style={s.topbar}>
+          <IconButton label="Open navigation" icon="menu" disabled={navigationLocked} onPress={() => openMenu()} />
+          <Brand compact /><Text style={s.context}>Workspace</Text>
+        </View>}
+        <WorkspaceContext.Provider value={{ navigationLocked, setNavigationLocked }}>
+          <Slot key={`${userId}:${business.id}`} />
+        </WorkspaceContext.Provider>
       </View>
     </View>
-  );
-  return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar style="dark" />
-      <View style={s.shell}>
-        {persistent && (
-          <View style={s.sidebar}>
-            <Sidebar activeLabel={active} onSelect={select} businessName={business.name} timezone={business.timezone} />
-          </View>
-        )}
-        <View style={s.workspace}>
-          {!wide && (
-            <View style={[s.topbar, compact && s.compactTopbar]}>
-              <View style={ui.row}>
-                {!persistent && (
-                  <IconButton
-                    label="Open navigation"
-                    icon="menu"
-                    onPress={() => setMenuOpen(true)}
-                  />
-                )}
-                {!persistent && <Text style={s.wordmark}>ZUDE</Text>}
-              </View>
-              {currentUser}
-            </View>
-          )}
-          <WorkspaceContext.Provider value={{ wide, compact, currentUser: wide ? currentUser : undefined, onPreview: setPreview }}>
-            <Slot key={`${userId}:${business.id}`} />
-          </WorkspaceContext.Provider>
-        </View>
-      </View>
-      <Modal
-        visible={preview !== null || (menuOpen && !persistent)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setMenuOpen(false);
-          setPreview(null);
-        }}
-      >
-        {preview ? (
-          <PreviewDialog preview={preview} onClose={() => setPreview(null)} />
-        ) : (
-          <SafeAreaView style={s.menuSafe}>
-            <View style={s.menuHeader}>
-              <Text style={s.menuTitle}>Navigation</Text>
-              <IconButton
-                dark
-                label="Close navigation"
-                icon="x"
-                onPress={() => setMenuOpen(false)}
-              />
-            </View>
-            <Sidebar activeLabel={active} onSelect={select} businessName={business.name} timezone={business.timezone} />
-          </SafeAreaView>
-        )}
-      </Modal>
-    </SafeAreaView>
-  );
+    <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+      <View style={s.menuBackdrop}><SafeAreaView style={s.menu}>
+        <View style={s.menuHeading}><Text style={s.menuText}>{business.name}</Text><IconButton label="Close navigation" icon="x" dark onPress={() => setMenuOpen(false)} /></View>
+        <Sidebar expanded initialGroup={menuGroup} activeLabel={active} onSelect={select} role={business.role} businessName={business.name} disabled={navigationLocked} onExpand={openMenu} />
+      </SafeAreaView></View>
+    </Modal>
+  </SafeAreaView>;
 }
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: t.colors.workspace },
   shell: { flex: 1, flexDirection: "row" },
   sidebar: { width: t.layout.sidebar },
   workspace: { flex: 1, minWidth: 0 },
-  topbar: {
-    minHeight: 56,
-    paddingHorizontal: t.space.xl,
-    paddingVertical: t.space.sm,
-    backgroundColor: t.colors.surface,
-    borderBottomWidth: t.border,
-    borderBottomColor: t.colors.border,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: t.space.md,
-    flexWrap: "wrap",
-  },
-  compactTopbar: { paddingHorizontal: t.space.lg },
-  wordmark: {
-    color: t.colors.brand,
-    fontSize: 20,
-    fontWeight: "800",
-    letterSpacing: 1.5,
-  },
-  user: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: t.space.md,
-  },
-  userDetails: { gap: t.space.xs },
-  avatar: {
-    width: 34,
-    height: 34,
-    backgroundColor: t.colors.neutral,
-    borderRadius: t.radius.sm,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  initials: { color: t.colors.muted, fontSize: 11, fontWeight: "600" },
-  userName: {
-    color: t.colors.text,
-    fontSize: t.font.caption,
-    fontWeight: "600",
-  },
-  menuSafe: { flex: 1, backgroundColor: t.colors.shell },
-  menuHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: t.space.xl,
-  },
-  menuTitle: {
-    color: t.colors.shellText,
-    fontSize: t.font.body,
-    fontWeight: "600",
-  },
+  topbar: { minHeight: 56, paddingHorizontal: t.space.md, flexDirection: "row", alignItems: "center", gap: t.space.md, backgroundColor: t.colors.surface, borderBottomWidth: t.border, borderColor: t.colors.border },
+  context: { color: t.colors.muted, fontSize: t.font.caption },
+  menuBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)" },
+  menu: { flex: 1, width: "100%", maxWidth: 400, backgroundColor: t.colors.shell },
+  menuHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: t.space.lg },
+  menuText: { color: t.colors.shellText, fontSize: t.font.body, flex: 1 },
 });

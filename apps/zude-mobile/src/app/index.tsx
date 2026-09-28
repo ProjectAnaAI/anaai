@@ -1,3 +1,1 @@
-import { TodayScreen } from "../features/today/TodayScreen";
-import { useWorkspace } from "../navigation/WorkspaceContext";
-export default function TodayRoute() { return <TodayScreen {...useWorkspace()} />; }
+export { TodayScreen as default } from "../features/today/TodayScreen";

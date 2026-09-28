@@ -1,5 +1,5 @@
-import type { ComponentProps, ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useState, type ComponentProps, type ReactNode } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { theme as t } from "../theme/tokens";
 
@@ -20,29 +20,50 @@ export function Button({
   onPress,
   icon,
   secondary = false,
+  brand = false,
+  destructive = false,
+  disabled = false,
+  busy = false,
+  selected,
 }: {
   label: string;
   onPress: () => void;
   icon?: IconName;
   secondary?: boolean;
+  brand?: boolean;
+  destructive?: boolean;
+  disabled?: boolean;
+  busy?: boolean;
+  selected?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || busy, busy, selected }}
+      disabled={disabled || busy}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
+        brand && styles.brandButton,
         secondary && styles.secondary,
+        destructive && (secondary ? styles.destructiveSecondary : styles.destructive),
+        selected && styles.selected,
+        focused && styles.focused,
+        (disabled || busy) && styles.disabled,
         pressed && styles.pressed,
       ]}
     >
-      {icon && (
+      {busy && <ActivityIndicator color={secondary ? t.colors.emerald : t.colors.surface} />}
+      {icon && !busy && (
         <Icon
           name={icon}
-          color={secondary ? t.colors.text : t.colors.surface}
+          color={brand ? t.colors.brandInk : secondary ? (destructive ? t.colors.destructive : t.colors.text) : t.colors.surface}
         />
       )}
-      <Text style={[styles.buttonText, secondary && { color: t.colors.text }]}>
+      <Text style={[styles.buttonText, brand && { color: t.colors.brandInk }, secondary && { color: destructive ? t.colors.destructive : t.colors.text }]}>
         {label}
       </Text>
     </Pressable>
@@ -53,18 +74,25 @@ export function IconButton({
   icon,
   onPress,
   dark = false,
+  disabled = false,
 }: {
   label: string;
   icon: IconName;
   onPress: () => void;
   dark?: boolean;
+  disabled?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <Pressable
+      disabled={disabled}
+      accessibilityState={{ disabled }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.iconButton, focused && styles.focused, disabled && styles.disabled, pressed && styles.pressed]}
     >
       <Icon
         name={icon}
@@ -77,9 +105,11 @@ export function IconButton({
 export function Badge({
   label,
   tone = "neutral",
+  compact = false,
 }: {
   label: string;
   tone?: "success" | "warning" | "neutral";
+  compact?: boolean;
 }) {
   const color =
     tone === "success"
@@ -94,9 +124,9 @@ export function Badge({
         ? t.colors.amberSoft
         : t.colors.neutral;
   return (
-    <View style={[styles.badge, { backgroundColor }]}>
-      <View style={[styles.dot, { backgroundColor: color }]} />
-      <Text style={[styles.badgeText, { color }]}>{label}</Text>
+    <View style={[styles.badge, compact && { paddingVertical: 3 }, { backgroundColor }]}>
+      {!compact && <View style={[styles.dot, { backgroundColor: color }]} />}
+      <Text style={[styles.badgeText, compact && { fontSize: 10 }, { color }]}>{label}</Text>
     </View>
   );
 }
@@ -144,7 +174,9 @@ export const styles = StyleSheet.create({
   },
   meta: { fontSize: t.font.caption, color: t.colors.muted, lineHeight: 19 },
   button: {
-    minHeight: t.layout.touch,
+    minHeight: t.control.height,
+    borderWidth: 1,
+    borderColor: "transparent",
     paddingHorizontal: t.space.lg,
     paddingVertical: t.space.md,
     borderRadius: t.radius.sm,
@@ -154,7 +186,13 @@ export const styles = StyleSheet.create({
     justifyContent: "center",
     gap: t.space.sm,
   },
-  secondary: { backgroundColor: t.colors.neutral },
+  brandButton: { backgroundColor: t.colors.brand },
+  secondary: { backgroundColor: t.colors.surface, borderColor: t.colors.border },
+  destructive: { backgroundColor: t.colors.destructive, borderColor: t.colors.destructive },
+  destructiveSecondary: { backgroundColor: t.colors.surface, borderColor: t.colors.border },
+  selected: { backgroundColor: t.colors.emeraldSoft, borderColor: t.colors.emerald },
+  focused: { borderColor: t.colors.focus, borderWidth: 2 },
+  disabled: { opacity: 0.45 },
   buttonText: {
     fontSize: t.font.body,
     fontWeight: "600",
@@ -162,6 +200,9 @@ export const styles = StyleSheet.create({
     flexShrink: 1,
   },
   iconButton: {
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+    borderColor: "transparent",
     minWidth: t.layout.touch,
     minHeight: t.layout.touch,
     alignItems: "center",

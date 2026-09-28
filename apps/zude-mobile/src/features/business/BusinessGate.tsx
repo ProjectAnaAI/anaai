@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Brand } from "../../components/workspace";
 import { theme as t } from "../../theme/tokens";
 import { BusinessProvider, type Business } from "./BusinessContext";
 
@@ -12,7 +13,7 @@ function StateFrame({
 }) {
   return (
     <View style={s.page}>
-      <Text style={s.wordmark}>ZUDE</Text>
+      <Brand />
 
       <View style={s.card}>
         <Text accessibilityRole="header" style={s.title}>
@@ -33,7 +34,7 @@ function BusinessSelection({
 }) {
   return (
     <View style={s.page}>
-      <Text style={s.wordmark}>ZUDE</Text>
+      <Brand />
 
       <View style={s.card}>
         <Text accessibilityRole="header" style={s.title}>

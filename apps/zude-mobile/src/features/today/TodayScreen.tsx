@@ -1,265 +1,51 @@
+import { useState } from "react";
 import { router } from "expo-router";
-import type { ReactNode } from "react";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
-import { Button, Icon, Section, styles as ui } from "../../components/ui";
-import { voiceDemo } from "../../data/demoToday";
-import { formatTime } from "./todayData";
+import { StyleSheet, Text, View } from "react-native";
+import { Button, IconButton, styles as ui } from "../../components/ui";
+import { Feedback, Field, SplitWorkspace, WorkspaceHeader, workspaceStyles as ws } from "../../components/workspace";
 import { useTodayAppointments } from "./useTodayAppointments";
-import { theme as t } from "../../theme/tokens";
-import type { Preview } from "../../types/today";
-import { AppointmentList } from "./AppointmentList";
+import type { Appointment } from "../../types/today";
+import { AppointmentList, todayRailStyles } from "./AppointmentList";
 import { Schedule } from "./Schedule";
+import { theme as t } from "../../theme/tokens";
 
-export function TodayScreen({
-  wide,
-  compact,
-  currentUser,
-  onPreview,
-}: {
-  wide: boolean;
-  compact: boolean;
-  currentUser?: ReactNode;
-  onPreview: (preview: Preview) => void;
-}) {
+export function TodayScreen() {
   const { business, clock, appointments, status, errorMessage, retry } = useTodayAppointments();
-  const { width: windowWidth } = useWindowDimensions();
-
-  const sidebarWidth =
-    windowWidth >= t.layout.sidebarBreakpoint ? t.layout.sidebar : 0;
-
-  const workspaceWidth = Math.max(0, windowWidth - sidebarWidth);
-
-  const contentWidth = Math.min(
-    t.layout.maxContent,
-    Math.max(0, workspaceWidth - t.space.lg * 2),
-  );
-
-  const columnsGap = t.space.lg;
-  const availableColumnsWidth = Math.max(0, contentWidth - columnsGap);
-
-  const mainWidth = wide
-    ? availableColumnsWidth * t.layout.mainFraction
-    : undefined;
-
-  const railWidth = wide
-    ? availableColumnsWidth * t.layout.railFraction
-    : undefined;
-
-  function booking() {
-    router.replace({ pathname: "/appointments", params: { compose: "new" } });
+  const [search, setSearch] = useState("");
+  const rows = appointments.filter((a) => `${a.customer} ${a.service}`.toLowerCase().includes(search.toLowerCase()));
+  function open(appointment: Appointment) {
+    router.replace({ pathname: "/appointments", params: { date: clock?.date, appointment: appointment.id } });
   }
-
-  return (
-    <ScrollView
-      style={s.scroll}
-      contentContainerStyle={s.content}
-      horizontal={false}
-      showsHorizontalScrollIndicator={false}
-    >
-      <View style={[s.header, compact && s.stacked]}>
-        <View style={ui.grow}>
-          <View style={ui.wrap}>
-            <Text accessibilityRole="header" style={s.title}>
-              Today
-            </Text>
-          </View>
-          <Text style={s.context}>
-            {clock?.label ?? "Date unavailable"} · {business.name}
-          </Text>
-        </View>
-
-        {currentUser}
-
-        <Button label="New Appointment" icon="plus" onPress={() => booking()} />
+  return <View style={ws.page}>
+    <WorkspaceHeader operational title="Today" business={business.name} subtitle={clock?.label ?? "Date unavailable"}
+      search={<Field label="Search today's appointments" search placeholder="Search appointments…" style={{ backgroundColor: t.colors.workspace }} value={search} onChangeText={setSearch} />}
+      action={<Button brand label="New Appointment" icon="plus-circle" onPress={() => router.replace({ pathname: "/appointments", params: { compose: "new" } })} />} />
+    <SplitWorkspace operational main={<>
+      <View style={s.timelineHeading}>
+        <Text accessibilityRole="header" style={s.timelineTitle}>Day Timeline</Text>
+        <Text numberOfLines={1} style={s.businessTag}>{business.name}</Text>
+        <View style={ui.grow} />
+        <IconButton label="Refresh today" icon="refresh-cw" onPress={retry} />
       </View>
-
-      <View style={s.pulse}>
-        <View style={s.pulseDot} />
-
-        <Text style={[ui.body, ui.grow]}>
-          {status === "loading" ? "Loading today’s appointments…" : status === "error"
-            ? "Appointments unavailable" : `${appointments.length} appointments today`}
-        </Text>
-
-        <Text style={ui.meta}>{clock ? formatTime(clock.minutes) : "Time unavailable"}</Text>
+      {status === "loading" && <Feedback kind="loading" title="Loading today’s appointments" />}
+      {status === "error" && <Feedback kind="error" title="Appointments unavailable" detail={errorMessage} retry={retry} />}
+      {status === "success" && <>
+        <Schedule operational appointments={rows} now={clock?.minutes ?? null} status={status} onSelect={open} />
+        {!rows.length && <Feedback title={search ? "No matching appointments" : "A clear day ahead"} detail={search ? "Try another customer or service name." : "No appointments are scheduled for this day."} />}
+      </>}
+    </>} rail={<>
+      {status === "success" ? <AppointmentList appointments={appointments} now={clock?.minutes ?? null} onSelect={open} />
+        : <Feedback title="Up next" detail={status === "loading" ? "Loading the day’s schedule…" : "Available when the schedule is loaded."} kind={status === "loading" ? "loading" : "empty"} />}
+      <View style={todayRailStyles.section}>
+        <Text accessibilityRole="header" style={todayRailStyles.title}>Next available times</Text>
+        <Text style={ui.meta}>Choose a service in New Appointment to see available times for your date.</Text>
       </View>
-
-      <View
-        style={[
-          s.columns,
-          !wide && s.stacked,
-          wide && { width: contentWidth },
-        ]}
-      >
-        <View
-          style={[
-            s.main,
-            wide && {
-              width: mainWidth,
-              flexBasis: mainWidth,
-              flexGrow: 0,
-              flexShrink: 1,
-            },
-          ]}
-        >
-          {status === "success" ? (
-            <AppointmentList
-              key={`${business.id}:${clock?.date}`}
-              appointments={appointments}
-              compact={compact}
-              focused={wide}
-              now={clock?.minutes ?? null}
-              onPreview={onPreview}
-            />
-          ) : (
-            <Section title="Up Next">
-              <View style={s.notice}>
-                <Text style={ui.body} accessibilityLiveRegion="polite">
-                  {status === "loading" ? "Loading today’s appointments…" : errorMessage}
-                </Text>
-                {status === "error" && <Button label="Retry" onPress={retry} secondary />}
-              </View>
-            </Section>
-          )}
-
-          <Section title="Next Available">
-            <Text style={[ui.meta, s.notice]}>Availability is not connected yet.</Text>
-          </Section>
-
-          <Section title="Needs Attention">
-            <Text style={[ui.meta, s.notice]}>Operational alerts are not connected yet.</Text>
-          </Section>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="AnaAI Voice Assistant, coming soon"
-            onPress={() =>
-              onPreview({
-                title: voiceDemo.title,
-                detail:
-                  "Voice functionality is not enabled. This space will eventually surface useful call summaries and follow-ups for your business.",
-              })
-            }
-            style={({ pressed }) => [s.voice, pressed && ui.pressed]}
-          >
-            <Icon name="mic" />
-
-            <View style={ui.grow}>
-              <Text style={ui.strong}>{voiceDemo.title}</Text>
-              <Text style={ui.meta}>{voiceDemo.detail}</Text>
-            </View>
-
-            <Icon name="chevron-right" />
-          </Pressable>
-        </View>
-
-        <View
-          style={[
-            wide
-              ? {
-                  width: railWidth,
-                  flexBasis: railWidth,
-                  flexGrow: 0,
-                  flexShrink: 1,
-                  minWidth: 0,
-                }
-              : undefined,
-          ]}
-        >
-          <Schedule appointments={appointments} now={clock?.minutes ?? null} status={status} />
-        </View>
-      </View>
-    </ScrollView>
-  );
+    </>} />
+  </View>;
 }
 
 const s = StyleSheet.create({
-  scroll: {
-    flex: 1,
-    width: "100%",
-  },
-
-  content: {
-    padding: t.space.lg,
-    gap: t.space.lg,
-    maxWidth: t.layout.maxContent,
-    width: "100%",
-    alignSelf: "center",
-  },
-
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: t.space.lg,
-  },
-
-  title: {
-    fontSize: t.font.title,
-    fontWeight: "700",
-    letterSpacing: -0.7,
-    color: t.colors.text,
-  },
-
-  context: {
-    color: t.colors.muted,
-    fontSize: t.font.body,
-    lineHeight: 21,
-    marginTop: t.space.xs,
-  },
-
-  stacked: {
-    flexDirection: "column",
-    alignItems: "stretch",
-  },
-
-  pulse: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: t.space.sm,
-    paddingBottom: t.space.sm,
-    borderBottomWidth: t.border,
-    borderBottomColor: t.colors.border,
-  },
-
-  pulseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: t.colors.emeraldBright,
-  },
-
-  emphasis: {
-    fontWeight: "600",
-  },
-
-  columns: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: t.space.lg,
-    minWidth: 0,
-    maxWidth: "100%",
-  },
-
-  main: {
-    minWidth: 0,
-    gap: t.space.lg,
-    alignSelf: "stretch",
-  },
-
-  notice: { padding: t.space.lg, paddingTop: 0, gap: t.space.md },
-
-  voice: {
-    flexDirection: "row",
-    gap: t.space.md,
-    alignItems: "center",
-    paddingVertical: t.space.sm,
-  },
+  timelineHeading: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: t.space.sm, minHeight: t.control.height, marginBottom: t.space.sm },
+  timelineTitle: { color: t.colors.timelineText, fontSize: t.font.section, fontWeight: "700" },
+  businessTag: { maxWidth: 160, color: t.colors.text, backgroundColor: t.colors.neutral, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 2, fontSize: 10 },
 });

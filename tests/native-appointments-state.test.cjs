@@ -70,7 +70,7 @@ test('resource error, explicit day refresh and foreground refresh hide obsolete 
   h.foreground();assert.ok(h.render('day').loading);assert.equal(h.requests.length,3);
 });
 const jsx={jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'Fragment'};
-function nodes(node){if(!node||typeof node!=='object')return[];if(Array.isArray(node))return node.flatMap(nodes);return[node,...nodes(node.props?.children)]}
+function nodes(node){if(!node||typeof node!=='object')return[];if(Array.isArray(node))return node.flatMap(nodes);return[node,...['children','main','rail','footer','action','trailing','search'].flatMap(key=>nodes(node.props?.[key]))]}
 function composerHarness(options={}) {
   const driver=hooks(),calls=[],saved=[],viewed=[];let failure=null,refreshes=0;
   const controls={Action:'Action',DateControls:'DateControls',Notice:'Notice',s:{}};
@@ -78,7 +78,11 @@ function composerHarness(options={}) {
   const result={id:'a',customer_id:'c',service_id:'s',customer_name:'Customer',service:'Cut',appointment_date:'2026-09-28',appointment_time:'09:00:00',status:'Booked'};
   const {AppointmentComposer}=load(base+'AppointmentComposer.tsx',{
     react:driver.react,'react/jsx-runtime':jsx,'react-native':Object.fromEntries(['ActivityIndicator','KeyboardAvoidingView','Modal','Pressable','ScrollView','Text','TextInput','View'].map(x=>[x,x]).concat([['Platform',{OS:'ios'}]])),
-    'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},'../../lib/appointments-api':{},
+    'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:0})},'../../lib/appointments-api':{},
+    '../../components/datePresentation':load('apps/zude-mobile/src/components/datePresentation.ts'),
+    '../../components/workspace':{Field:'Field',Feedback:'Feedback',SplitWorkspace:'SplitWorkspace',WorkspaceHeader:'WorkspaceHeader'},
+    '../../components/ui':{Icon:'Icon',Badge:'Badge'},'../../theme/tokens':{theme:{space:{xxl:32},colors:{emerald:'green'}}},
+    './ComposerSection':{ComposerSection:'ComposerSection'},'./AppointmentSummary':{AppointmentSummary:'AppointmentSummary'},
     '../business/BusinessContext':{useBusiness:()=>({business:{id:'b',name:'Business',timezone:'UTC'},userId:'u'})},
     './requestKeys':{performAction:async(...args)=>{calls.push(args);if(failure)throw failure;return result}},'./state':state,'./controls':controls,
     './useResource':{useResource(key){return {data:!key?undefined:key.includes(':customers:')?{customers:[customer],nextOffset:null}:key.includes(':services')?[service]:{slots:options.code?[]:['09:00:00'],code:options.code||'AVAILABLE'},loading:!!options.loading,error:options.error,refresh(){refreshes++}}}},
@@ -109,7 +113,7 @@ for(const [code,pattern] of [['CLOSED',/closed/],['NO_AVAILABILITY',/No availabl
 test('reschedule keeps customer/service and sends only reviewed date/time to existing mutation',async()=>{
   const appointment={id:'target',customer_id:'c',service_id:'s',customer_name:'Customer',service:'Cut',notes:'Existing note',appointment_date:'2026-09-28',status:'Booked'};
   const h=composerHarness({appointment});let tree=h.render();assert.ok(!nodes(tree).some(n=>n.type==='Action' && n.props.label==='Change customer'));
-  nodes(tree).find(n=>n.type==='DateControls').props.onChange('2026-09-29');h.render();h.action('9:00 AM').onPress();h.render();h.action('Save Reschedule').onPress();await flush();
+  h.action('Change date').onPress();tree=h.render();nodes(tree).find(n=>n.type==='DateControls').props.onChange('2026-09-29');h.render();h.action('9:00 AM').onPress();h.render();h.action('Save Reschedule').onPress();await flush();
   const body=h.calls[0][2];assert.equal(body.appointmentId,'target');assert.equal(body.customerId,'c');assert.equal(body.serviceId,'s');assert.equal(body.appointmentDate,'2026-09-29');assert.equal(body.notes,'Existing note');
 });
 test('composer renders loading/error data states without enabling an unverified booking',()=>{

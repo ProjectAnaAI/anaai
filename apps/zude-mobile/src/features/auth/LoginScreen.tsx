@@ -1,16 +1,8 @@
 import { useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Icon } from "../../components/ui";
+import { Button, IconButton, styles as ui } from "../../components/ui";
+import { Brand, Field } from "../../components/workspace";
 import { supabase } from "../../lib/supabase";
 import { theme as t } from "../../theme/tokens";
 
@@ -54,250 +46,37 @@ export function LoginScreen() {
     }
   }
 
-  return (
-    <SafeAreaView style={s.safe}>
-      <KeyboardAvoidingView
-        style={s.keyboard}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <View style={s.page}>
-          <View style={s.brand}>
-            <Text style={s.wordmark}>ZUDE</Text>
-            <Text style={s.brandDetail}>Business operations</Text>
+  return <SafeAreaView style={s.safe}>
+    <KeyboardAvoidingView style={s.safe} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.page}>
+        <Brand />
+        <View style={s.form}>
+          <Text accessibilityRole="header" style={s.title}>Welcome back</Text>
+          <Text style={ui.body}>Sign in to open your business workspace.</Text>
+          <Text style={ui.strong}>Email address</Text>
+          <Field label="Email address" autoCapitalize="none" autoComplete="email" autoCorrect={false}
+            editable={!busy} keyboardType="email-address" onChangeText={setEmail} placeholder="you@yourbusiness.com"
+            returnKeyType="next" value={email} />
+          <Text style={ui.strong}>Password</Text>
+          <View style={ui.row}>
+            <Field label="Password" autoCapitalize="none" autoComplete="current-password" editable={!busy}
+              onChangeText={setPassword} onSubmitEditing={() => void signIn()} returnKeyType="go"
+              secureTextEntry={!visible} value={password} style={ui.grow} />
+            <IconButton label={visible ? "Hide password" : "Show password"} icon={visible ? "eye-off" : "eye"}
+              disabled={busy} onPress={() => setVisible((value) => !value)} />
           </View>
-
-          <View style={s.card}>
-            <View style={s.heading}>
-              <Text accessibilityRole="header" style={s.title}>
-                Welcome back
-              </Text>
-              <Text style={s.description}>
-                Sign in to open your business workspace.
-              </Text>
-            </View>
-
-            <View style={s.fields}>
-              <View style={s.field}>
-                <Text style={s.label}>Email address</Text>
-                <TextInput
-                  accessibilityLabel="Email address"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  autoCorrect={false}
-                  editable={!busy}
-                  keyboardType="email-address"
-                  onChangeText={setEmail}
-                  placeholder="you@yourbusiness.com"
-                  placeholderTextColor={t.colors.muted}
-                  returnKeyType="next"
-                  style={s.input}
-                  value={email}
-                />
-              </View>
-
-              <View style={s.field}>
-                <Text style={s.label}>Password</Text>
-
-                <View style={s.passwordField}>
-                  <TextInput
-                    accessibilityLabel="Password"
-                    autoCapitalize="none"
-                    autoComplete="current-password"
-                    editable={!busy}
-                    onChangeText={setPassword}
-                    onSubmitEditing={() => void signIn()}
-                    returnKeyType="go"
-                    secureTextEntry={!visible}
-                    style={s.passwordInput}
-                    value={password}
-                  />
-
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      visible ? "Hide password" : "Show password"
-                    }
-                    disabled={busy}
-                    hitSlop={8}
-                    onPress={() => setVisible((value) => !value)}
-                    style={({ pressed }) => [
-                      s.visibilityButton,
-                      pressed && s.pressed,
-                    ]}
-                  >
-                    <Icon name={visible ? "eye-off" : "eye"} size={19} />
-                  </Pressable>
-                </View>
-              </View>
-
-              {error ? (
-                <Text accessibilityRole="alert" style={s.error}>
-                  {error}
-                </Text>
-              ) : null}
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: busy }}
-                disabled={busy}
-                onPress={() => void signIn()}
-                style={({ pressed }) => [
-                  s.button,
-                  pressed && !busy && s.pressed,
-                  busy && s.buttonDisabled,
-                ]}
-              >
-                {busy ? (
-                  <ActivityIndicator color={t.colors.surface} />
-                ) : (
-                  <>
-                    <Text style={s.buttonText}>Sign in</Text>
-                    <Icon
-                      name="arrow-right"
-                      color={t.colors.surface}
-                      size={17}
-                    />
-                  </>
-                )}
-              </Pressable>
-            </View>
-          </View>
-
-          <Text style={s.footer}>
-            Secure access to your ZUDE business workspace.
-          </Text>
+          {!!error && <Text accessibilityRole="alert" style={s.error}>{error}</Text>}
+          <Button label="Sign in" busy={busy} disabled={busy} icon="arrow-right" onPress={() => void signIn()} />
         </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  );
+        <Text style={ui.meta}>Secure access to your ZUDE business workspace.</Text>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  </SafeAreaView>;
 }
-
 const s = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: t.colors.workspace,
-  },
-  keyboard: {
-    flex: 1,
-  },
-  page: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: t.space.xl,
-    gap: t.space.xl,
-  },
-  brand: {
-    alignItems: "center",
-    gap: t.space.xs,
-  },
-  wordmark: {
-    color: t.colors.brand,
-    fontSize: t.font.brand,
-    fontWeight: "800",
-    letterSpacing: 2,
-  },
-  brandDetail: {
-    color: t.colors.muted,
-    fontSize: t.font.caption,
-  },
-  card: {
-    width: "100%",
-    maxWidth: 440,
-    backgroundColor: t.colors.surface,
-    borderWidth: t.border,
-    borderColor: t.colors.border,
-    borderRadius: t.radius.md,
-    padding: t.space.xl,
-    gap: t.space.xl,
-  },
-  heading: {
-    gap: t.space.sm,
-  },
-  title: {
-    color: t.colors.text,
-    fontSize: 26,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-  },
-  description: {
-    color: t.colors.muted,
-    fontSize: t.font.body,
-    lineHeight: 21,
-  },
-  fields: {
-    gap: t.space.lg,
-  },
-  field: {
-    gap: t.space.sm,
-  },
-  label: {
-    color: t.colors.text,
-    fontSize: t.font.body,
-    fontWeight: "600",
-  },
-  input: {
-    minHeight: t.layout.touch,
-    borderWidth: t.border,
-    borderColor: t.colors.border,
-    borderRadius: t.radius.sm,
-    backgroundColor: t.colors.surface,
-    paddingHorizontal: t.space.md,
-    color: t.colors.text,
-    fontSize: t.font.body,
-  },
-  passwordField: {
-    minHeight: t.layout.touch,
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: t.border,
-    borderColor: t.colors.border,
-    borderRadius: t.radius.sm,
-    backgroundColor: t.colors.surface,
-  },
-  passwordInput: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: t.layout.touch,
-    paddingHorizontal: t.space.md,
-    color: t.colors.text,
-    fontSize: t.font.body,
-  },
-  visibilityButton: {
-    width: t.layout.touch,
-    minHeight: t.layout.touch,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  button: {
-    minHeight: t.layout.touch,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: t.space.sm,
-    borderRadius: t.radius.sm,
-    backgroundColor: t.colors.emerald,
-    paddingHorizontal: t.space.lg,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: t.colors.surface,
-    fontSize: t.font.body,
-    fontWeight: "600",
-  },
-  error: {
-    color: "#B42318",
-    fontSize: t.font.caption,
-    lineHeight: 19,
-  },
-  footer: {
-    color: t.colors.muted,
-    fontSize: t.font.caption,
-    textAlign: "center",
-  },
-  pressed: {
-    opacity: 0.65,
-  },
+  safe: { flex: 1, backgroundColor: t.colors.workspace },
+  page: { flexGrow: 1, justifyContent: "center", alignItems: "center", padding: t.space.xl, gap: t.space.xl },
+  form: { width: "100%", maxWidth: 440, padding: t.space.xl, gap: t.space.lg, backgroundColor: t.colors.surface, borderWidth: t.border, borderColor: t.colors.border, borderRadius: t.radius.md },
+  title: { color: t.colors.text, fontSize: t.font.title, fontWeight: "700", letterSpacing: -0.7 },
+  error: { color: t.colors.destructive, fontSize: t.font.body, lineHeight: 21 },
 });

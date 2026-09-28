@@ -1,6 +1,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { Brand } from "../../components/workspace";
 import { BusinessGate } from "../business/BusinessGate";
 import { supabase } from "../../lib/supabase";
 import { AppShell } from "../../navigation/AppShell";
@@ -43,7 +44,7 @@ export function AuthGate() {
   if (!ready) {
     return (
       <View style={s.loading}>
-        <Text style={s.wordmark}>ZUDE</Text>
+        <Brand />
         <ActivityIndicator color={t.colors.emerald} />
       </View>
     );
