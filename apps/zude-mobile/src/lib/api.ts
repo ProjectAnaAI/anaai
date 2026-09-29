@@ -35,6 +35,11 @@ export function apiGet<T>(path: string, options: Options = {}): Promise<T> {
 export function apiMutate<T>(body: Record<string, unknown>, options: Options & { method: "POST" | "PATCH"; requestKey: string }): Promise<T> {
   return apiRequest<T>("/api/appointments", { ...options, body });
 }
+// Customer/service records. Their write paths have no idempotency contract, so
+// callers guard duplicate submits and never retry automatically.
+export function apiWrite<T>(path: string, body: Record<string, unknown>, options: Options & { method: "POST" | "PATCH" }): Promise<T> {
+  return apiRequest<T>(path, { ...options, body });
+}
 async function apiRequest<T>(path: string, options: Options & { method?: "POST" | "PATCH"; requestKey?: string; body?: Record<string, unknown> }): Promise<T> {
   checkCancelled(options.signal);
   const url = apiUrl(path);
@@ -53,7 +58,8 @@ async function apiRequest<T>(path: string, options: Options & { method?: "POST" 
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
       headers: {
         Accept: "application/json",
-        ...(options.body ? { "Content-Type": "application/json", "Idempotency-Key": options.requestKey! } : {}),
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.requestKey ? { "Idempotency-Key": options.requestKey } : {}),
         Authorization: `Bearer ${session.access_token}`,
         ...(options.businessId ? { "x-anaai-business-id": options.businessId } : {}),
       },

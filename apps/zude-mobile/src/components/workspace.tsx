@@ -81,6 +81,28 @@ export function SplitWorkspace({ main, rail, footer, focusRailOnStack, operation
     </View>}
   </View>;
 }
+// Record workspaces (Customers, Services). Landscape iPad: list and detail side
+// by side with independent scrolling. Stacked (phone, portrait, large text):
+// progressive navigation — the list, or the selected detail with Back.
+export function MasterDetail({ master, detail, showDetail, fixed, onBack, backLabel }: {
+  master: ReactNode; detail: ReactNode; showDetail: boolean; fixed: { side: "master" | "detail"; width: number };
+  onBack: () => void; backLabel: string;
+}) {
+  const { width, height, fontScale } = useWindowDimensions();
+  const layout = workspaceLayout(width, height, fontScale);
+  if (!layout.split) return <View style={s.fill}>
+    {showDetail ? <>
+      <View style={s.back}><Button label={backLabel} icon="chevron-left" secondary onPress={onBack} /></View>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.detailContent}>{detail}</ScrollView>
+    </> : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.masterContent}>{master}</ScrollView>}
+  </View>;
+  return <View style={s.columns}>
+    <ScrollView style={[s.masterPane, fixed.side === "master" ? { width: fixed.width, flexGrow: 0 } : s.fill]}
+      keyboardShouldPersistTaps="handled" contentContainerStyle={s.masterContent}>{master}</ScrollView>
+    <ScrollView style={[s.detailPane, fixed.side === "detail" ? { width: fixed.width, flexGrow: 0 } : s.fill]}
+      keyboardShouldPersistTaps="handled" contentContainerStyle={s.detailContent}>{detail}</ScrollView>
+  </View>;
+}
 export function Feedback({ title, detail, kind = "empty", retry, dark = false }: {
   title: string; detail?: string; kind?: "empty" | "error" | "loading"; retry?: () => void; dark?: boolean;
 }) {
@@ -130,6 +152,11 @@ const s = StyleSheet.create({
   stackedContent: { flexGrow: 1 },
   stackedRail: { backgroundColor: t.colors.rail, paddingHorizontal: t.space.xl, paddingBottom: t.space.lg, borderTopWidth: t.border, borderColor: t.colors.border },
   footer: { padding: t.space.lg, gap: t.space.sm, borderTopWidth: t.border, borderColor: t.colors.border, backgroundColor: t.colors.surface },
+  masterPane: { backgroundColor: t.colors.surface, borderRightWidth: t.border, borderColor: t.colors.border },
+  masterContent: { paddingHorizontal: t.space.lg, paddingBottom: t.space.xl, minWidth: 0 },
+  detailPane: { backgroundColor: t.colors.workspace },
+  detailContent: { paddingHorizontal: t.space.xl, paddingBottom: t.space.xl, minWidth: 0 },
+  back: { paddingHorizontal: t.space.lg, paddingTop: t.space.md, alignItems: "flex-start" },
   paneTitle: { flexDirection: "row", alignItems: "center", gap: t.space.sm, paddingVertical: t.space.lg },
   eyebrow: { color: t.colors.muted, fontSize: 11, fontWeight: "700", letterSpacing: 1.1, textTransform: "uppercase" },
   feedback: { paddingVertical: t.space.xxl, gap: t.space.md, alignItems: "center" },

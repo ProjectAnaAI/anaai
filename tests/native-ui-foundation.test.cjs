@@ -21,8 +21,8 @@ test('touch target foundation never falls below 44pt',()=>{
  assert.ok(tokens.theme.layout.touch>=44);assert.ok(tokens.theme.control.height>=44);assert.ok(tokens.theme.control.row>=44);
 });
 for(const role of ['owner','manager','staff'])test(`${role}: only implemented destinations navigate`,()=>{
- const items=visibleNavigation(role).flatMap(g=>g.items).filter(i=>i.state==='AVAILABLE_NATIVE');assert.equal(JSON.stringify(items.map(i=>i.label)),'["Today","Appointments"]');
- assert.ok(items.every(i=>['/','/appointments'].includes(i.route)));
+ const items=visibleNavigation(role).flatMap(g=>g.items).filter(i=>i.state==='AVAILABLE_NATIVE');assert.equal(JSON.stringify(items.map(i=>i.label)),'["Today","Appointments","Customers","Services"]');
+ assert.ok(items.every(i=>['/','/appointments','/customers','/services'].includes(i.route)));
 });
 test('navigation architecture retains future IA without fake routes or front-end authorization grants',()=>{
  assert.equal(JSON.stringify(navigationGroups.map(g=>g.title)),'["Operations","My Work","Manage","Ana AI","Business","System"]');
@@ -61,7 +61,10 @@ test('calendar date presentation is readable, preserves year and does not shift 
 });
 test('catalog represents real web capabilities and phase-two limits without inventing routes',()=>{
  const items=navigationGroups.flatMap(g=>g.items);
- for(const label of ['Customers','Services','Analytics','Business & Availability','Settings']){
+ for(const label of ['Customers','Services']){
+  const item=items.find(i=>i.label===label);assert.equal(item.state,'AVAILABLE_NATIVE');assert.equal(item.route,'/'+label.toLowerCase());assert.equal(item.webRoute,'/'+label.toLowerCase());
+ }
+ for(const label of ['Analytics','Business & Availability','Settings']){
   const item=items.find(i=>i.label===label);assert.equal(item.state,'EXISTING_WEB_CAPABILITY');assert.ok(item.webRoute);assert.equal(item.route,undefined);
  }
  for(const label of ['Voice Assistant','Calls','Knowledge'])assert.equal(items.find(i=>i.label===label).state,'PHASE_2');

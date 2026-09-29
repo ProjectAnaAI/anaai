@@ -8,21 +8,30 @@ import { Brand } from "../components/workspace";
 import { useBusiness } from "../features/business/BusinessContext";
 import { theme as t } from "../theme/tokens";
 import { workspaceLayout } from "../theme/layout";
+import type { Customer } from "../lib/appointments-api";
+import { appointmentHandoff } from "./handoff";
+import { activeNavigationLabel, type NativeRoute } from "./items";
 import { WorkspaceContext } from "./WorkspaceContext";
 import { Sidebar } from "./Sidebar";
 
 export function AppShell() {
   const { business, userId } = useBusiness();
-  const active = usePathname() === "/appointments" ? "Appointments" : "Today";
+  const active = activeNavigationLabel(usePathname());
   const { width, height, fontScale } = useWindowDimensions();
   const { persistent } = workspaceLayout(width, height, fontScale);
   const [menuGroup, setMenuGroup] = useState("Operations");
   const [menuOpen, setMenuOpen] = useState(false);
   const [navigationLocked, setNavigationLocked] = useState(false);
   function openMenu(group = "Operations") { setMenuGroup(group); setMenuOpen(true); }
-  function select(route: "/" | "/appointments") {
+  const [handoff] = useState(appointmentHandoff);
+  function select(route: NativeRoute) {
     if (navigationLocked) return;
     setMenuOpen(false); router.replace(route);
+  }
+  function startAppointment(customer: Customer) {
+    if (navigationLocked) return;
+    const token = handoff.start(business.id, customer);
+    router.replace({ pathname: "/appointments", params: { compose: "new", customer: token } });
   }
   return <SafeAreaView style={s.safe}>
     <StatusBar style="dark" />
@@ -33,7 +42,7 @@ export function AppShell() {
           <IconButton label="Open navigation" icon="menu" disabled={navigationLocked} onPress={() => openMenu()} />
           <Brand compact /><Text style={s.context}>Workspace</Text>
         </View>}
-        <WorkspaceContext.Provider value={{ navigationLocked, setNavigationLocked }}>
+        <WorkspaceContext.Provider value={{ navigationLocked, setNavigationLocked, startAppointment, appointmentCustomer: handoff.customer }}>
           <Slot key={`${userId}:${business.id}`} />
         </WorkspaceContext.Provider>
       </View>

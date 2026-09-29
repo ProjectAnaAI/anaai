@@ -1,16 +1,17 @@
 import type { BusinessRole } from "../lib/today-api";
 import type { IconName } from "../components/ui";
 export type CapabilityState = "AVAILABLE_NATIVE" | "EXISTING_WEB_CAPABILITY" | "PLANNED_NATIVE" | "ROLE_RESTRICTED" | "PHASE_2";
+export type NativeRoute = "/" | "/appointments" | "/customers" | "/services";
 type Destination =
-  | { state: "AVAILABLE_NATIVE"; route: "/" | "/appointments"; webRoute?: string }
+  | { state: "AVAILABLE_NATIVE"; route: NativeRoute; webRoute?: string }
   | { state: Exclude<CapabilityState, "AVAILABLE_NATIVE">; route?: never; webRoute?: string };
 export type NavItem = Destination & { label: string; icon: IconName; roles?: readonly BusinessRole[] };
 export const navigationGroups: { title: string; icon: IconName; items: NavItem[] }[] = [
   { title: "Operations", icon: "grid", items: [
     { label: "Today", icon: "calendar", state: "AVAILABLE_NATIVE", route: "/", webRoute: "/dashboard" },
     { label: "Appointments", icon: "calendar", state: "AVAILABLE_NATIVE", route: "/appointments", webRoute: "/appointments" },
-    { label: "Customers", icon: "users", state: "EXISTING_WEB_CAPABILITY", webRoute: "/customers" },
-    { label: "Services", icon: "scissors", state: "EXISTING_WEB_CAPABILITY", webRoute: "/services" },
+    { label: "Customers", icon: "users", state: "AVAILABLE_NATIVE", route: "/customers", webRoute: "/customers" },
+    { label: "Services", icon: "scissors", state: "AVAILABLE_NATIVE", route: "/services", webRoute: "/services" },
   ] },
   { title: "My Work", icon: "clock", items: [
     { label: "Time Clock", icon: "clock", state: "PLANNED_NATIVE" },
@@ -35,6 +36,9 @@ export const navigationGroups: { title: string; icon: IconName; items: NavItem[]
   ] },
   { title: "System", icon: "lock", items: [{ label: "Lock", icon: "lock", state: "PLANNED_NATIVE" }] },
 ];
+export function activeNavigationLabel(pathname: string) {
+  return pathname === "/appointments" ? "Appointments" : pathname === "/customers" ? "Customers" : pathname === "/services" ? "Services" : "Today";
+}
 export function capabilityLabel(state: CapabilityState) {
   return state === "AVAILABLE_NATIVE" ? "" : state === "EXISTING_WEB_CAPABILITY" ? "Web" : state === "PHASE_2" ? "Phase 2" : "Later";
 }

@@ -18,14 +18,16 @@ import { useResource } from "./useResource";
 
 export function AppointmentsScreen() {
   const { business, userId } = useBusiness();
-  const { setNavigationLocked } = useWorkspace();
-  const params = useLocalSearchParams<{ compose?: string; date?: string; appointment?: string }>();
+  const { setNavigationLocked, appointmentCustomer } = useWorkspace();
+  const params = useLocalSearchParams<{ compose?: string; date?: string; appointment?: string; customer?: string }>();
   const [now, setNow] = useState(() => new Date());
   const clock = businessClock(business.timezone, now);
   const [date, setDate] = useState(() => params.date && validDate(params.date) ? params.date : clock?.date || "");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(params.appointment || null);
   const [composer, setComposer] = useState<"new" | Appointment | null>(params.compose === "new" ? "new" : null);
+  // Customers → New Appointment: the same composer, with the customer preselected.
+  const [composeCustomer, setComposeCustomer] = useState(() => params.compose === "new" ? appointmentCustomer(business.id, params.customer) : null);
   const [busy, setBusy] = useState(false);
   const [cancelPrompt, setCancelPrompt] = useState(false);
   const [message, setMessage] = useState("");
@@ -38,7 +40,7 @@ export function AppointmentsScreen() {
     return () => { alive.current = false; clearInterval(timer); };
   }, []);
   useEffect(() => {
-    if (params.compose === "new") router.setParams({ compose: undefined });
+    if (params.compose === "new") router.setParams({ compose: undefined, customer: undefined });
   }, [params.compose]);
   const day = useResource(validDate(date) ? `${userId}:${business.id}:${date}` : null,
     (signal) => getDay(business.id, date, signal));
@@ -61,8 +63,9 @@ export function AppointmentsScreen() {
   if (!clock) return <View style={s.content}><Notice message="The business timezone is unavailable. Review business settings." /></View>;
   const rows = day.data?.filter((a) => `${a.customer_name || ""} ${a.service || ""}`.toLowerCase().includes(search.toLowerCase())) || [];
   if (composer) return <AppointmentComposer initialDate={validDate(date) ? date : clock.date} today={clock.date}
-    appointment={composer === "new" ? undefined : composer} onClose={() => setComposer(null)}
-    onLockChange={setNavigationLocked} onSaved={saved} onView={(appointment) => { saved(appointment); setComposer(null); }} />;
+    appointment={composer === "new" ? undefined : composer} initialCustomer={composer === "new" ? composeCustomer : null}
+    onClose={() => { setComposer(null); setComposeCustomer(null); }}
+    onLockChange={setNavigationLocked} onSaved={saved} onView={(appointment) => { saved(appointment); setComposer(null); setComposeCustomer(null); }} />;
   return <View style={ws.page}>
     <WorkspaceHeader operational title="Appointments" business={business.name} subtitle={dateLabel(date)}
       search={<Field label="Search this day's appointments" search placeholder="Search this day" value={search} onChangeText={setSearch} />}

@@ -6,7 +6,9 @@ import * as appointmentReads from "./handlers/appointment-reads";
 import * as businesses from "./handlers/businesses";
 import * as todayAppointments from "./handlers/today-appointments";
 import * as currentBusiness from "./handlers/current-business";
+import * as customers from "./handlers/customers";
 import * as onboarding from "./handlers/onboarding";
+import * as services from "./handlers/services";
 import * as voice from "./handlers/voice";
 import * as voiceTrial from "./handlers/voice-trial";
 import { webHandler } from "./http";
@@ -38,6 +40,14 @@ export function createApp() {
   api.get("/appointments/availability", webHandler(appointmentReads.AVAILABILITY));
   api.get("/customers", webHandler(appointmentReads.CUSTOMERS));
   api.get("/services", webHandler(appointmentReads.SERVICES));
+  // Native CRM and catalog. Fixed paths are registered before :id.
+  api.get("/customers/directory", webHandler(customers.DIRECTORY));
+  api.get("/customers/:id", webHandler(customers.DETAIL));
+  api.post("/customers", webHandler(customers.CREATE));
+  api.patch("/customers/:id", webHandler(customers.UPDATE));
+  api.get("/services/catalog", webHandler(services.CATALOG));
+  api.post("/services", webHandler(services.CREATE));
+  api.patch("/services/:id", webHandler(services.UPDATE));
   api.get("/appointments", webHandler(todayAppointments.GET));
   api.get("/businesses", webHandler(businesses.GET));
 

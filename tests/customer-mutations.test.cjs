@@ -1,6 +1,8 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
+// The shared validation module is real code, not a mock.
+function validation(){const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/customer-validation.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:()=>({})});return exports;}
 function setup({existing=[],fail=false,active='business',user=true}={}) {
  const calls=[]; const exports={};
  const db={auth:{getUser:async()=>({data:{user:user?{id:'authenticated-user'}:null}})},from:table=>{
@@ -11,7 +13,7 @@ function setup({existing=[],fail=false,active='business',user=true}={}) {
    q.single=async()=>({data:fail?null:{id:'saved',full_name:'Example',phone:null,email:null,notes:null},error:fail?{}:null});
    return q;
  }};
- vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/customer-mutations.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:name=>name.includes('active-business')?{activeBusinessHeaders:()=>({'x-anaai-business-id':active})}:{supabase:db}});
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/customer-mutations.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:name=>name.includes('active-business')?{activeBusinessHeaders:()=>({'x-anaai-business-id':active})}:name.includes('customer-validation')?validation():{supabase:db}});
  return {api:exports,calls};
 }
 const input={name:' Example ',phone:'123-456-7890',email:''};

@@ -23,8 +23,8 @@ export function DateControls({ date, today, onChange, disabled = false, composin
       onChangeText={onChange} maxLength={10} autoCorrect={false} style={s.dateInput} />}
   </View>;
 }
-export function Notice({ message, error = false }: { message: string; error?: boolean }) {
-  return <Text accessibilityRole="alert" style={[s.notice, error && s.error]}>{message}</Text>;
+export function Notice({ message, error = false, success = false }: { message: string; error?: boolean; success?: boolean }) {
+  return <Text accessibilityRole="alert" style={[s.notice, error && s.error, success && s.success]}>{message}</Text>;
 }
 export const s = StyleSheet.create({
   page: { flex: 1, minWidth: 0, backgroundColor: t.colors.workspace },
@@ -37,6 +37,7 @@ export const s = StyleSheet.create({
   dateInput: { width: 160 },
   notice: { padding: t.space.md, backgroundColor: t.colors.amberSoft, color: t.colors.amber, fontSize: t.font.body, lineHeight: 21, borderRadius: t.radius.sm },
   error: { backgroundColor: t.colors.destructiveSoft, color: t.colors.destructive },
+  success: { backgroundColor: t.colors.emeraldSoft, color: t.colors.emerald },
   section: { gap: t.space.md, paddingVertical: t.space.lg, borderBottomWidth: t.border, borderColor: t.colors.border },
   option: { minHeight: t.layout.touch, paddingVertical: t.space.md, paddingHorizontal: t.space.md, borderBottomWidth: t.border, borderBottomColor: t.colors.border, gap: t.space.xs },
   selected: { backgroundColor: t.colors.emeraldSoft, borderColor: t.colors.emerald },

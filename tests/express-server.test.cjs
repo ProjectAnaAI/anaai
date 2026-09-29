@@ -180,6 +180,13 @@ test('every authenticated endpoint is mounted and rejects missing credentials', 
     ['POST', '/api/appointments', { error: 'Please log in again.' }],
     ['PATCH', '/api/appointments', { error: 'Please log in again.' }],
     ['POST', '/api/ai', { error: 'Invalid authorization header.' }],
+    ['GET', '/api/customers/directory', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
+    ['GET', '/api/customers/44444444-4444-4444-8444-444444444444', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
+    ['POST', '/api/customers', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
+    ['PATCH', '/api/customers/44444444-4444-4444-8444-444444444444', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
+    ['GET', '/api/services/catalog', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
+    ['POST', '/api/services', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
+    ['PATCH', '/api/services/33333333-3333-4333-8333-333333333333', { success: false, code: 'UNAUTHORIZED', error: 'Missing authorization token.' }],
   ];
 
   for (const [method, route, expected] of cases) {

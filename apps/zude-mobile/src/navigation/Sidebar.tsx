@@ -4,10 +4,10 @@ import { Icon, styles as ui } from "../components/ui";
 import { Brand } from "../components/workspace";
 import type { BusinessRole } from "../lib/today-api";
 import { theme as t } from "../theme/tokens";
-import { visibleNavigation, type NavItem } from "./items";
+import { visibleNavigation, type NativeRoute, type NavItem } from "./items";
 
 export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = false, role, businessName, onExpand, initialGroup }: {
-  activeLabel: string; onSelect: (route: "/" | "/appointments") => void;
+  activeLabel: string; onSelect: (route: NativeRoute) => void;
   expanded?: boolean; disabled?: boolean; role: BusinessRole; businessName: string; onExpand?: (group: string) => void; initialGroup?: string;
 }) {
   const scroll = useRef<ScrollView>(null);
