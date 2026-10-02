@@ -1,3 +1,4 @@
+import { useEmployeeIdentity } from "../features/identity/EmployeeIdentityContext";
 import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Icon, styles as ui } from "../components/ui";
@@ -10,6 +11,7 @@ export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = fa
   activeLabel: string; onSelect: (route: NativeRoute) => void;
   expanded?: boolean; disabled?: boolean; role: BusinessRole; businessName: string; onExpand?: (group: string) => void; initialGroup?: string;
 }) {
+  const identity = useEmployeeIdentity();
   const scroll = useRef<ScrollView>(null);
   const [focused, setFocused] = useState<string | null>(null);
   function itemView(item: NavItem, utility = false) {
@@ -17,7 +19,7 @@ export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = fa
     const selected = item.label === activeLabel;
     return <Pressable key={item.label} accessibilityRole="button" accessibilityLabel={`${item.label}${unavailable ? ", unavailable on this device" : ""}`}
       accessibilityState={{ selected, disabled: disabled || unavailable }} disabled={disabled || unavailable}
-      onFocus={() => setFocused(item.label)} onBlur={() => setFocused(null)} onPress={() => { if (item.route) onSelect(item.route); }}
+      onFocus={() => setFocused(item.label)} onBlur={() => setFocused(null)} onPress={() => { if (item.label === "Lock") { void identity.lock(); return; } if (item.route) onSelect(item.route); }}
       style={({ pressed }) => [s.item, expanded && s.expanded, utility && s.utility, selected && s.active,
         focused === item.label && s.focused, (disabled || unavailable) && ui.disabled, pressed && ui.pressed]}>
       <Icon name={item.icon} color={selected ? t.colors.brandText : t.colors.shellMuted} size={20} />
@@ -27,7 +29,7 @@ export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = fa
   return <View style={s.sidebar}>
     <View style={s.brand}><Brand compact={!expanded} dark />{expanded && <Text style={s.business}>{businessName}</Text>}</View>
     <ScrollView ref={scroll} contentContainerStyle={s.items}>
-      {visibleNavigation(role).filter((g) => expanded || g.title === "Operations").map((group) => <View key={group.title} style={s.group} onLayout={(event) => {
+      {visibleNavigation(role, identity.sharedMode ? identity.identity?.permissions ?? [] : null).filter((g) => expanded || g.title === "Operations").map((group) => <View key={group.title} style={s.group} onLayout={(event) => {
         if (expanded && initialGroup === group.title) scroll.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false });
       }}>
         {expanded ? <><Text style={s.groupTitle}>{group.title}</Text>{group.items.map((item) => itemView(item))}</>
@@ -40,7 +42,7 @@ export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = fa
       </Pressable>}
       {expanded && <Text style={s.legend}>Dimmed destinations are not available on this device.</Text>}
     </ScrollView>
-    {!expanded && <View style={s.bottom}>{itemView({ label: "Settings", icon: "settings", state: "EXISTING_WEB_CAPABILITY", webRoute: "/settings" }, true)}{itemView({ label: "Lock", icon: "lock", state: "PLANNED_NATIVE" }, true)}</View>}
+    {!expanded && <View style={s.bottom}>{itemView({ label: "Settings", icon: "settings", state: "EXISTING_WEB_CAPABILITY", webRoute: "/settings" }, true)}{itemView({ label: "Lock", icon: "lock", state: "AVAILABLE_NATIVE", route: "/device" }, true)}</View>}
   </View>;
 }
 const s = StyleSheet.create({

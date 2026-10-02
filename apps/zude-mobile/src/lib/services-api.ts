@@ -1,4 +1,5 @@
 import { apiGet, apiWrite, ZudeApiError } from "./api";
+import { operationalRequest } from "./operational-identity";
 
 export type CatalogService = {
   id: string; name: string; duration_minutes: number | null; price: number | null; description: string | null; is_active: boolean;
@@ -16,7 +17,9 @@ function scoped<T extends { businessId: string }>(data: T, businessId: string) {
 }
 
 export async function getServiceCatalog(businessId: string, signal: AbortSignal) {
-  const data = scoped(await apiGet<{ businessId: string; canManage: boolean; services: CatalogService[] }>("/api/services/catalog", { businessId, signal }), businessId);
+  // On a shared device the server narrows canManage to the PIN-verified employee.
+  const data = scoped(await operationalRequest(businessId, (headers) =>
+    apiGet<{ businessId: string; canManage: boolean; services: CatalogService[] }>("/api/services/catalog", { businessId, signal, headers })), businessId);
   if (!Array.isArray(data.services) || !data.services.every(validService) || typeof data.canManage !== "boolean") invalid();
   return data;
 }
@@ -30,7 +33,8 @@ function numeric(value: string) {
   return Number.isFinite(number) ? number : text;
 }
 async function write(businessId: string, expectedUserId: string, path: string, method: "POST" | "PATCH", payload: Record<string, unknown>) {
-  const data = scoped(await apiWrite<{ businessId: string; service: CatalogService }>(path, payload, { businessId, expectedUserId, method }), businessId);
+  const data = scoped(await operationalRequest(businessId, (headers) =>
+    apiWrite<{ businessId: string; service: CatalogService }>(path, payload, { businessId, expectedUserId, method, headers })), businessId);
   if (!validService(data.service)) invalid();
   return data.service;
 }

@@ -1,6 +1,7 @@
 import { isUuid } from "@/lib/appointment-actions";
 import { validateService } from "@/lib/service-validation";
 import { readFailure, readJson } from "../read-api";
+import { managementAuthority, managementForbidden } from "../operational-authority";
 import { authorizedMember, canManageCatalog, jsonBody, optionalText, pathId, readAllPages } from "../member";
 
 // Thin wrappers over the web Services rules (lib/service-validation.ts):
@@ -32,11 +33,15 @@ export async function CATALOG(request: Request) {
     if (new URL(request.url).searchParams.size) {
       return readFailure(400, "INVALID_REQUEST", "Service catalog does not accept query parameters.");
     }
+    // Catalog reads stay open to every member; canManage reflects the effective
+    // (shared-device-narrowed) authority so staff-level users see read-only.
+    const managed = await managementAuthority(request, context);
+    if (!managed.ok) return managed.response;
     const services = (await readAllPages<Service>((from, to) => db.from("services").select(serviceFields)
       .eq("business_id", context.businessId).order("id").range(from, to)))
       .sort((first, second) => first.is_active !== second.is_active ? (first.is_active ? -1 : 1)
         : first.name.localeCompare(second.name) || first.id.localeCompare(second.id));
-    return readJson({ success: true, businessId: context.businessId, canManage: canManageCatalog(context), services });
+    return readJson({ success: true, businessId: context.businessId, canManage: canManageCatalog({ ...context, role: managed.authority.role }), services });
   } catch {
     return readFailure(503, "SERVICE_UNAVAILABLE", "Unable to load services. Please retry.");
   }
@@ -51,6 +56,11 @@ async function save(request: Request, id: string | null) {
   if (!member.ok) return member.response;
   const { db, context } = member;
   if (!canManageCatalog(context)) return roleForbidden();
+  const managed = await managementAuthority(request, context);
+  if (!managed.ok) return managed.response;
+  if (!canManageCatalog({ ...context, role: managed.authority.role })) {
+    return managementForbidden(managed.authority, (role) => canManageCatalog({ ...context, role }), "Your business role does not allow service changes.");
+  }
   if (id !== null && !isUuid(id)) return invalidRequest();
   const body = await jsonBody(request, ["name", "durationMinutes", "price", "description", "isActive"]);
   if (!body) return invalidRequest();

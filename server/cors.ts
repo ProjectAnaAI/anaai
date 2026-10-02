@@ -1,7 +1,9 @@
 import type { RequestHandler } from "express";
 
 const methods = ["GET", "POST", "PATCH"];
-const headers = ["Authorization", "Accept", "Content-Type", "x-anaai-business-id", "Idempotency-Key"];
+// x-zude-device / x-zude-employee-session carry shared-device management
+// authority (server/operational-authority.ts); still explicit, never a wildcard.
+const headers = ["Authorization", "Accept", "Content-Type", "x-anaai-business-id", "Idempotency-Key", "x-zude-device", "x-zude-employee-session"];
 const allowedHeaders = new Set(headers.map((header) => header.toLowerCase()));
 
 // Read once at app creation. No development/production wildcard or implicit

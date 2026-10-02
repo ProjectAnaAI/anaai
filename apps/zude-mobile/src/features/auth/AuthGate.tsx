@@ -6,6 +6,8 @@ import { BusinessGate } from "../business/BusinessGate";
 import { supabase } from "../../lib/supabase";
 import { AppShell } from "../../navigation/AppShell";
 import { theme as t } from "../../theme/tokens";
+import { EmployeeIdentityProvider } from "../identity/EmployeeIdentityContext";
+import { EmployeeIdentityGate } from "../identity/DeviceIdentityScreen";
 import { LoginScreen } from "./LoginScreen";
 
 export function AuthGate() {
@@ -56,7 +58,7 @@ export function AuthGate() {
 
   return (
     <BusinessGate key={session.user.id}>
-      <AppShell />
+      <EmployeeIdentityProvider><EmployeeIdentityGate><AppShell /></EmployeeIdentityGate></EmployeeIdentityProvider>
     </BusinessGate>
   );
 }

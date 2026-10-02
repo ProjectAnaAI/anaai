@@ -25,7 +25,7 @@ function clients(respond) {
       return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     },
   });
-  return { calls, api, customers: load('lib/customers-api.ts', { './api': api }), services: load('lib/services-api.ts', { './api': api }) };
+  return { calls, api, customers: load('lib/customers-api.ts', { './api': api }), services: load('lib/services-api.ts', { './api': api, './operational-identity': load('lib/operational-identity.ts', { './api': api }) }) };
 }
 const customer = { id: 'c1', full_name: 'Maya Chen', phone: null, email: null, notes: 'Prefers mornings', is_active: true };
 const service = { id: 's1', name: 'Haircut', duration_minutes: 45, price: 40, description: null, is_active: true };
@@ -150,7 +150,7 @@ test('New Appointment reuses the existing composer with the customer preselected
   const composer = fs.readFileSync(base + 'features/appointments/AppointmentComposer.tsx', 'utf8');
   assert.match(screen, /appointmentCustomer\(business\.id, params\.customer\)/);
   assert.match(screen, /initialCustomer=\{composer === "new" \? composeCustomer : null\}/, 'reschedule never receives a handoff customer');
-  assert.match(composer, /\} : initialCustomer \|\| null\);/);
+  assert.match(composer, /\}\s*:\s*initialCustomer\s*\|\|\s*null,?\s*\);/);
   for (const dir of ['features/customers', 'features/services']) for (const file of fs.readdirSync(base + dir)) {
     const source = fs.readFileSync(`${base}${dir}/${file}`, 'utf8');
     assert.doesNotMatch(source, /performAction|mutateAppointment|getAvailability|supabase|\.rpc\(/, `${dir}/${file} must not book or query the database directly`);

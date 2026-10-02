@@ -21,13 +21,18 @@ test('touch target foundation never falls below 44pt',()=>{
  assert.ok(tokens.theme.layout.touch>=44);assert.ok(tokens.theme.control.height>=44);assert.ok(tokens.theme.control.row>=44);
 });
 for(const role of ['owner','manager','staff'])test(`${role}: only implemented destinations navigate`,()=>{
- const items=visibleNavigation(role).flatMap(g=>g.items).filter(i=>i.state==='AVAILABLE_NATIVE');assert.equal(JSON.stringify(items.map(i=>i.label)),'["Today","Appointments","Customers","Services"]');
- assert.ok(items.every(i=>['/','/appointments','/customers','/services'].includes(i.route)));
+ const items=visibleNavigation(role).flatMap(g=>g.items).filter(i=>i.state==='AVAILABLE_NATIVE');
+ const expected=role==='staff'?'["Today","Appointments","Customers","Services","Device & PIN","Lock"]':'["Today","Appointments","Customers","Services","Team","Registered Devices","Device & PIN","Lock"]';
+ assert.equal(JSON.stringify(items.map(i=>i.label)),expected,'staff never receives Team administration');
+ assert.ok(items.every(i=>['/','/appointments','/customers','/services','/device','/team','/devices'].includes(i.route)));
 });
 test('navigation architecture retains future IA without fake routes or front-end authorization grants',()=>{
  assert.equal(JSON.stringify(navigationGroups.map(g=>g.title)),'["Operations","My Work","Manage","Ana AI","Business","System"]');
- assert.ok(navigationGroups.find(g=>g.title==='Manage').items.every(i=>!i.route&&i.roles.includes('owner')&&!i.roles.includes('staff')));
- assert.ok(navigationGroups.find(g=>g.title==='System').items.every(i=>!i.route));
+ const manage=navigationGroups.find(g=>g.title==='Manage').items;
+ assert.ok(manage.every(i=>i.roles.includes('owner')&&i.roles.includes('manager')&&!i.roles.includes('staff')));
+ assert.equal(manage.find(i=>i.label==='Team').route,'/team');
+ assert.ok(manage.filter(i=>i.label!=='Team').every(i=>!i.route&&i.state!=='AVAILABLE_NATIVE'),'Timesheets/Corrections/Reports stay non-navigable');
+ assert.equal(navigationGroups.find(g=>g.title==='System').items.find(i=>i.label==='Device & PIN').route,'/device');
 });
 const row=(id,start,status='Booked',duration=30)=>({id,start,status,duration,customer:id,service:'Service'});
 test('timeline orders real data without mutating it; NOW divides elapsed/future starts',()=>{
@@ -69,7 +74,7 @@ test('catalog represents real web capabilities and phase-two limits without inve
  }
  for(const label of ['Voice Assistant','Calls','Knowledge'])assert.equal(items.find(i=>i.label===label).state,'PHASE_2');
  assert.equal(items.find(i=>i.label==='Calls').webRoute,undefined,'web call history is unavailable too');
- for(const label of ['Time Clock','My Time','Lock'])assert.equal(items.find(i=>i.label===label).state,'PLANNED_NATIVE');
+ for(const label of ['Time Clock','My Time'])assert.equal(items.find(i=>i.label===label).state,'PLANNED_NATIVE');
  assert.ok(items.filter(i=>i.state!=='AVAILABLE_NATIVE').every(i=>!i.route));
 });
 test('membership-filtered catalog exposes employee operations without management grants',()=>{

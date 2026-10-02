@@ -82,8 +82,11 @@ function harness(options = {}) {
       process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://fixture.invalid', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'fixture' } },
       require(name) {
         if (name === '@supabase/supabase-js') return { createClient: () => db };
+        if (name.startsWith('node:')) return require(name);
         if (name === '@/lib/appointment-actions') return { isUuid: value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) };
-        if (name === '@/lib/supabase-server') throw new Error('service-role client must never be loaded');
+        // Shared-device identity verification may import the server client; no
+        // account-mode CRM/catalog path may ever create one.
+        if (name === '@/lib/supabase-server') return { createSupabaseServiceClient() { throw new Error('service-role client must never be created in account mode'); } };
         return load(name.startsWith('@/') ? name.slice(2) + '.ts' : path.resolve(path.dirname(file), name + '.ts'));
       },
     }); return exports;

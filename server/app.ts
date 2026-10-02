@@ -9,6 +9,8 @@ import * as currentBusiness from "./handlers/current-business";
 import * as customers from "./handlers/customers";
 import * as onboarding from "./handlers/onboarding";
 import * as services from "./handlers/services";
+import * as team from "./handlers/team";
+import * as devices from "./handlers/devices";
 import * as voice from "./handlers/voice";
 import * as voiceTrial from "./handlers/voice-trial";
 import { webHandler } from "./http";
@@ -37,17 +39,37 @@ export function createApp() {
   api.post("/appointments", webHandler(appointments.POST));
   api.patch("/appointments", webHandler(appointments.PATCH));
   api.get("/appointments/day", webHandler(appointmentReads.DAY));
-  api.get("/appointments/availability", webHandler(appointmentReads.AVAILABILITY));
+  api.get(
+    "/appointments/availability",
+    webHandler(appointmentReads.AVAILABILITY),
+  );
   api.get("/customers", webHandler(appointmentReads.CUSTOMERS));
   api.get("/services", webHandler(appointmentReads.SERVICES));
+
   // Native CRM and catalog. Fixed paths are registered before :id.
   api.get("/customers/directory", webHandler(customers.DIRECTORY));
   api.get("/customers/:id", webHandler(customers.DETAIL));
   api.post("/customers", webHandler(customers.CREATE));
   api.patch("/customers/:id", webHandler(customers.UPDATE));
+
   api.get("/services/catalog", webHandler(services.CATALOG));
   api.post("/services", webHandler(services.CREATE));
   api.patch("/services/:id", webHandler(services.UPDATE));
+
+  // M04 account-managed devices and separate opaque employee identity.
+  api.get("/devices", webHandler(devices.DIRECTORY));
+  api.post("/devices", webHandler(devices.REGISTER));
+  api.post("/devices/:id", webHandler(devices.REVOKE));
+  api.post("/device/pin", webHandler(devices.PIN));
+  api.post("/employee-session/validate", webHandler(devices.VALIDATE));
+  api.post("/employee-session/lock", webHandler(devices.LOCK));
+
+  // M04 Team administration.
+  api.get("/team", webHandler(team.DIRECTORY));
+  api.post("/team", webHandler(team.CREATE));
+  api.patch("/team/:id", webHandler(team.UPDATE));
+  api.post("/team/:id/pin", webHandler(team.RESET_PIN));
+
   api.get("/appointments", webHandler(todayAppointments.GET));
   api.get("/businesses", webHandler(businesses.GET));
 
@@ -67,14 +89,25 @@ export function createApp() {
 
   app.use("/api", api);
 
-  const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+  const errorHandler: ErrorRequestHandler = (
+    error,
+    _req,
+    res,
+    _next,
+  ) => {
     if (error?.type === "entity.too.large") {
-      res.status(413).json({ success: false, error: "Request body is too large." });
+      res.status(413).json({
+        success: false,
+        error: "Request body is too large.",
+      });
       return;
     }
 
     console.error("AnaAI API request failed:", error);
-    res.status(500).json({ success: false, error: "Unexpected server error." });
+    res.status(500).json({
+      success: false,
+      error: "Unexpected server error.",
+    });
   };
 
   app.use(errorHandler);

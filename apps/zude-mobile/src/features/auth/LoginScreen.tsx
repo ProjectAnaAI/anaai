@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, IconButton, styles as ui } from "../../components/ui";
 import { Brand, Field } from "../../components/workspace";
+import { recordAccountSignIn } from "../../lib/account-proof";
 import { supabase } from "../../lib/supabase";
 import { theme as t } from "../../theme/tokens";
 
@@ -30,13 +31,17 @@ export function LoginScreen() {
     setError("");
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password,
       });
 
       if (signInError) {
         setError(signInError.message);
+      } else if (data.user) {
+        // Interactive password sign-in is the account step-up for changing a
+        // shared device's registration (lib/account-proof.ts).
+        recordAccountSignIn(data.user.id);
       }
     } catch {
       setError("Unable to sign in. Please try again.");

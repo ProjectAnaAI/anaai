@@ -54,7 +54,7 @@ for (const method of ['GET', 'POST', 'PATCH']) {
       headers: 'Authorization, Accept, Content-Type, X-AnaAI-Business-ID, Idempotency-Key' });
     assert.equal(response.status, 204); grant(response);
     assert.deepEqual(response.headers.get('access-control-allow-headers').toLowerCase().split(', '),
-      ['authorization', 'accept', 'content-type', 'x-anaai-business-id', 'idempotency-key']);
+      ['authorization', 'accept', 'content-type', 'x-anaai-business-id', 'idempotency-key', 'x-zude-device', 'x-zude-employee-session']);
   });
 }
 
@@ -155,4 +155,12 @@ test('requests without Origin preserve native authentication and Twilio signatur
   assert.equal(response.status, 401); assert.equal(response.headers.get('access-control-allow-origin'), null);
   const voice = await nativeFetch(base + '/api/voice', { method: 'POST', body: new URLSearchParams({ To: '+15005550006' }) });
   assert.equal(voice.status, 403); assert.equal(voice.headers.get('access-control-allow-origin'), null);
+});
+
+test('shared-device management headers are explicitly permitted, arbitrary headers still denied', async () => {
+  const base = await app();
+  const allowed = await preflight(base, { method: 'PATCH', path: '/api/team/x', headers: 'Authorization, Content-Type, X-AnaAI-Business-ID, X-Zude-Device, X-Zude-Employee-Session' });
+  assert.equal(allowed.status, 204);
+  const denied = await preflight(base, { method: 'PATCH', path: '/api/team/x', headers: 'Authorization, X-Zude-Role' });
+  assert.equal(denied.status, 403);
 });

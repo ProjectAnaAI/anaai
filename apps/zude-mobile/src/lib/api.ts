@@ -12,7 +12,7 @@ function checkCancelled(signal?: AbortSignal) {
 }
 
 // Configuration is a public API origin, never a database connection string.
-function apiUrl(path: string) {
+export function apiUrl(path: string) {
   try {
     const origin = new URL(process.env.EXPO_PUBLIC_ZUDE_API_URL || "");
     const development = typeof __DEV__ !== "undefined" && __DEV__;
@@ -28,7 +28,9 @@ function apiUrl(path: string) {
   }
 }
 
-type Options = { businessId?: string; signal?: AbortSignal; expectedUserId?: string };
+// `headers` adds request headers (shared-device management authority); it is
+// applied first, so it can never replace Authorization or the business header.
+type Options = { businessId?: string; signal?: AbortSignal; expectedUserId?: string; headers?: Record<string, string> };
 export function apiGet<T>(path: string, options: Options = {}): Promise<T> {
   return apiRequest<T>(path, options);
 }
@@ -57,6 +59,7 @@ async function apiRequest<T>(path: string, options: Options & { method?: "POST" 
       method: options.method || "GET",
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
       headers: {
+        ...options.headers,
         Accept: "application/json",
         ...(options.body ? { "Content-Type": "application/json" } : {}),
         ...(options.requestKey ? { "Idempotency-Key": options.requestKey } : {}),
