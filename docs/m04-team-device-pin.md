@@ -170,8 +170,8 @@ CORS explicitly allows the two shared-device headers; there is no wildcard.
 
 ## 12. Remaining for M05 and later
 
-- Time Clock, My Time, breaks, timesheets, corrections and reports are not implemented.
-- Future M05/M06 employee-scoped handlers must use `employeeIdentity()`/`authorizedEmployee()`.
+- Time Clock, My Time and breaks are implemented in M05 (`docs/m05-time-clock.md`) on top of `employeeIdentity()`. Timesheets, corrections and reports remain for M06.
+- Future M06 employee-scoped handlers must use `employeeIdentity()`/`authorizedEmployee()`.
 - Appointments and customers remain open to any member, and an employee may use them, as in M03.
 - **Product decision:** whether an owner may create or assign owner-role employees.
 

@@ -1,3 +1,8 @@
+import * as timeReports from "./handlers/time-reports";
+import * as audit from "./handlers/audit";
+import * as timeIssues from "./handlers/time-issues";
+import * as timesheets from "./handlers/timesheets";
+import * as working from "./handlers/working";
 import express, { type ErrorRequestHandler } from "express";
 
 import * as ai from "./handlers/ai";
@@ -11,6 +16,7 @@ import * as onboarding from "./handlers/onboarding";
 import * as services from "./handlers/services";
 import * as team from "./handlers/team";
 import * as devices from "./handlers/devices";
+import * as timeClock from "./handlers/time-clock";
 import * as voice from "./handlers/voice";
 import * as voiceTrial from "./handlers/voice-trial";
 import { webHandler } from "./http";
@@ -69,6 +75,28 @@ export function createApp() {
   api.post("/team", webHandler(team.CREATE));
   api.patch("/team/:id", webHandler(team.UPDATE));
   api.post("/team/:id/pin", webHandler(team.RESET_PIN));
+
+  api.get("/management/timesheets", webHandler(timesheets.DIRECTORY));
+  api.get("/management/timesheets/:employeeId", webHandler(timesheets.GET));
+  // M06 Slice 4: immutable time corrections (backend only).
+  api.post("/management/timesheets/:employeeId/corrections/preview", webHandler(timesheets.PREVIEW_CORRECTION));
+  api.post("/management/timesheets/:employeeId/corrections", webHandler(timesheets.COMMIT_CORRECTION));
+  api.get("/management/time-reports", webHandler(timeReports.GET));
+  api.post("/management/time-reports/export", webHandler(timeReports.EXPORT));
+  api.get("/management/audit", webHandler(audit.GET));
+  api.get("/management/time-issues", webHandler(timeIssues.GET));
+  api.get("/management/time-issues/:issueId", webHandler(timeIssues.DETAIL));
+  api.post("/management/time-issues/:issueId/resolve", webHandler(timeIssues.RESOLVE));
+  api.get("/management/working", webHandler(working.GET));
+
+  // M05 Time Clock + My Time: device credential + employee session only.
+  api.get("/time-clock", webHandler(timeClock.STATE));
+  api.post("/time-clock/clock-in", webHandler(timeClock.CLOCK_IN));
+  api.post("/time-clock/break-start", webHandler(timeClock.BREAK_START));
+  api.post("/time-clock/break-end", webHandler(timeClock.BREAK_END));
+  api.post("/time-clock/clock-out", webHandler(timeClock.CLOCK_OUT));
+  api.get("/my-time", webHandler(timeClock.MY_TIME));
+  api.post("/my-time/issues", webHandler(timeClock.REPORT_ISSUE));
 
   api.get("/appointments", webHandler(todayAppointments.GET));
   api.get("/businesses", webHandler(businesses.GET));

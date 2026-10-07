@@ -49,11 +49,13 @@ function harness({ platform = 'ios', stored = { businessId: 'business', credenti
   };
   const api = apiModule(fetch), vault = vaultModule(platform, secure);
   const states = [], effects = [];
-  let cursor = 0, ec = 0, background, context;
+  let cursor = 0, ec = 0, background, context, childEffect, expire;
+  const layouts = []; let lc = 0;
   const react = {
     createContext: () => ({ Provider: 'Provider' }), useContext: () => context,
     useState(initial) { const i = cursor++; if (!(i in states)) states[i] = typeof initial === 'function' ? initial() : initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v; }]; },
     useRef(initial) { const i = cursor++; if (!(i in states)) states[i] = { current: initial }; return states[i]; },
+    useLayoutEffect(fn, deps) { const i = lc++, old = layouts[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) layouts[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
     useEffect(fn, deps) { const i = ec++, old = effects[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) effects[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
   };
   const jsx = { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
@@ -66,7 +68,7 @@ function harness({ platform = 'ios', stored = { businessId: 'business', credenti
   let signedOut = 0;
   const contextImports = { ...shared, '../../lib/account-proof': proofModule, '../../lib/account-session': { signOutAccount: async () => { signedOut++; proofModule.clearAccountProof(); } }, '../../lib/operational-identity': operational, '../business/BusinessContext': { useBusiness: () => ({ business: { id: business, name: 'Business', role }, userId: 'account' }) }, '../../lib/employee-identity-api': api, '../../lib/api': { ZudeApiError: ApiError }, './device-vault': vault };
   const screenImports = { ...shared, '../../components/ui': { Button: 'Button', styles: {} }, '../../components/workspace': { Field: 'Field', WorkspaceHeader: 'Header', workspaceStyles: {} }, '../../theme/tokens': { theme: { space: { xl: 24, lg: 16, sm: 8 } } }, './EmployeeIdentityContext': contextExports };
-  Object.assign(contextExports, compile('features/identity/EmployeeIdentityContext.tsx', contextImports, { setTimeout: () => 1, clearTimeout() {}, console }));
+  Object.assign(contextExports, compile('features/identity/EmployeeIdentityContext.tsx', contextImports, { setTimeout: fn => { expire = fn; return 1; }, clearTimeout() {}, console }));
   const screen = compile('features/identity/DeviceIdentityScreen.tsx', screenImports, { console });
   function nodes(n) { if (!n || typeof n !== 'object') return []; if (Array.isArray(n)) return n.flatMap(nodes); return [n, ...nodes(n.props?.children)]; }
   let tree, gate;
@@ -74,10 +76,15 @@ function harness({ platform = 'ios', stored = { businessId: 'business', credenti
     secure, requests, logs, vault, api, proofModule, operational, get signedOut() { return signedOut; },
     get context() { return context; }, get gate() { return gate; },
     render() {
-      cursor = 0; ec = 0;
+      cursor = 0; ec = 0; lc = 0;
       context = contextExports.EmployeeIdentityProvider({ children: null }).props.value;
       tree = screen.DeviceIdentityScreen(); gate = screen.EmployeeIdentityGate({ children: 'WORKSPACE' });
-      for (const e of effects) if (e.pending) { e.cleanup?.(); e.cleanup = e.fn(); e.pending = false; }
+      for (const e of layouts) if (e.pending) e.cleanup?.();
+      for (const e of layouts) if (e.pending) { e.cleanup = e.fn(); e.pending = false; }
+      // React flushes passive cleanups before child-first passive setups.
+      for (const e of effects) if (e.pending) e.cleanup?.();
+      if (gate === 'WORKSPACE') childEffect?.();
+      for (const e of effects) if (e.pending) { e.cleanup = e.fn(); e.pending = false; }
       return tree;
     },
     async settle() { for (let i = 0; i < 6; i++) { await flush(); h.render(); } },
@@ -87,6 +94,10 @@ function harness({ platform = 'ios', stored = { businessId: 'business', credenti
     async forget() { h.click('Forget This Device'); h.click('Yes, Forget This Device'); await h.settle(); },
     text() { return JSON.stringify(tree); },
     background() { background('background'); },
+    expire() { expire(); },
+    childEffect(fn) { childEffect = fn; },
+    unmount() { for (const e of [...layouts, ...effects]) e.cleanup?.(); },
+    replayEffects() { for (const e of [...layouts, ...effects]) e.cleanup?.(); for (const e of [...layouts, ...effects]) e.cleanup = e.fn(); },
     pinLater() { pinNext = () => new Promise(r => { resolvePin = r; }); },
     finishPin(result) { resolvePin(result); },
     stored() { return h.secure.store.get(KEY) ?? null; },
@@ -372,4 +383,89 @@ test('S14. a stale management rejection for an old credential never deletes a ne
   const fresh = h.stored(); assert.ok(fresh);
   rejectOld(new ApiError(401, 'DEVICE_REVOKED', 'x')); await assert.rejects(old); await h.settle();
   assert.equal(h.stored(), fresh);
+});
+
+// ---- M05: Clock Out ends the PIN session only ------------------------------------------
+test('M05: lock with a clock-out notice revokes only the employee session; device stays registered, account stays signed in', async () => {
+  const h = await opened();
+  await h.enterPin(); assert.ok(h.context.identity); assert.equal(h.gate, 'WORKSPACE');
+  const before = h.requests.length;
+  await h.context.lock('You are clocked out. Enter your PIN to continue.'); await h.settle();
+  assert.equal(h.context.identity, null); assert.notEqual(h.gate, 'WORKSPACE', 'back to the PIN keypad');
+  assert.ok(h.button('Unlock'), 'universal PIN keypad'); assert.equal(h.context.message, 'You are clocked out. Enter your PIN to continue.');
+  assert.deepEqual(h.requests.slice(before).map(r => r.path), ['/api/employee-session/lock'], 'only the session is revoked; no time or device request');
+  assert.ok(h.stored(), 'device credential kept'); assert.ok(h.context.device); assert.equal(h.signedOut, 0, 'account not signed out');
+  await h.enterPin(); assert.equal(h.gate, 'WORKSPACE', 'next PIN unlocks normally');
+});
+test('M05: plain Lock keeps its default message', async () => {
+  const h = await opened(); await h.enterPin();
+  h.click('Lock'); await h.settle();
+  assert.equal(h.context.message, 'Locked. Device registration is retained.');
+});
+
+// Exercise the real transport at the descendant passive-effect boundary.
+function clockClient(h) {
+  const calls = [];
+  const api = compile('lib/time-clock-api.ts', {
+    './api': { ZudeApiError: ApiError, apiUrl: p => 'https://zude.test' + p },
+    './operational-identity': h.operational,
+  }, { fetch: async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ success: true,
+      businessId: 'business', timezone: 'UTC', serverNow: new Date().toISOString(),
+      employee: { id: 'e', name: 'Employee', role: 'employee' }, state: 'OFF_CLOCK', shift: null,
+      today: { date: '2026-10-02', workedMs: 0, paidBreakMs: 0, mealBreakMs: 0 },
+    }) };
+  } });
+  return { ...api, calls };
+}
+test('PIN identity is operational when a descendant first requests its clock after passive cleanup', async () => {
+  const h = await opened(), clock = clockClient(h);
+  let request;
+  h.childEffect(() => { if (h.context.identity && !request) request = clock.getTimeClock('business').then(view => ({ view }), error => ({ error })); });
+  await h.enterPin();
+  const result = await request;
+  assert.equal(result.error?.code, undefined);
+  assert.equal(result.view.state, 'OFF_CLOCK');
+  assert.equal(clock.calls.length, 1);
+  assert.ok(clock.calls[0].options.headers.Authorization === `ZudeDevice ${CREDENTIAL}`, 'matching device');
+  assert.ok(clock.calls[0].options.headers['x-zude-employee-session'] === SESSION, 'matching PIN session');
+});
+for (const event of ['lock', 'background', 'expiry', 'forget', 'rejection', 'device-rejection', 'unmount']) test(`operational access closes synchronously on ${event}, before another render`, async () => {
+  const h = await opened(); await h.enterPin(); const clock = clockClient(h);
+  if (event === 'lock') void h.context.lock();
+  if (event === 'background') h.background();
+  if (event === 'expiry') h.expire();
+  if (event === 'forget') void h.context.forget();
+  if (event === 'unmount') h.unmount();
+  if (event === 'rejection' || event === 'device-rejection') h.operational.reportIdentityRejection(new ApiError(401, event === 'rejection' ? 'IDENTITY_UNAUTHORIZED' : 'DEVICE_REVOKED'), { credential: CREDENTIAL, session: SESSION });
+  await assert.rejects(clock.getTimeClock('business'), e => e.code === 'IDENTITY_REQUIRED');
+  assert.equal(clock.calls.length, 0);
+  if (event === 'unmount') assert.equal(h.requests.filter(r => r.path === '/api/employee-session/lock').length, 0, 'cleanup never revokes a session');
+});
+
+test('stale identity rejections cannot remove current operational access', async () => {
+  const h = await opened(); await h.enterPin(); const clock = clockClient(h);
+  h.operational.reportIdentityRejection(new ApiError(401, 'IDENTITY_UNAUTHORIZED'), { credential: CREDENTIAL, session: 'old-session' });
+  h.operational.reportIdentityRejection(new ApiError(401, 'DEVICE_REVOKED'), { credential: 'old-device', session: SESSION });
+  assert.equal((await clock.getTimeClock('business')).state, 'OFF_CLOCK');
+  assert.equal(clock.calls.length, 1);
+});
+test('mount effect replay stays locked until PIN and does not revoke a server session', async () => {
+  const h = harness(); h.render(); h.replayEffects(); await h.settle();
+  assert.equal(h.operational.operationalIdentity('business').mode, 'locked');
+  await h.enterPin();
+  assert.equal((await clockClient(h).getTimeClock('business')).state, 'OFF_CLOCK');
+  assert.equal(h.requests.filter(r => r.path === '/api/employee-session/lock').length, 0);
+});
+test('failed remote revocation never restores local operational access', async () => {
+  const h = await opened({ lockResponse: () => 'network' }); await h.enterPin();
+  await h.context.lock(); await h.settle(); const clock = clockClient(h);
+  await assert.rejects(clock.getTimeClock('business'), e => e.code === 'IDENTITY_REQUIRED');
+  assert.equal(clock.calls.length, 0); assert.equal(h.context.identity, null);
+});
+
+test('backgrounding an account-only installation preserves account transport', async () => {
+  const h = await opened({ stored: null }); h.background(); await h.settle();
+  assert.equal(h.operational.operationalIdentity('business').mode, 'account');
 });

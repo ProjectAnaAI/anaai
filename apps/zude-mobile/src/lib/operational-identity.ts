@@ -36,8 +36,16 @@ export function onOperationalRejection(listener: (rejection: OperationalRejectio
 }
 
 const IDENTITY_CODES = new Set(["IDENTITY_UNAUTHORIZED", "DEVICE_INVALID", "DEVICE_REVOKED"]);
+// Reports a coded 401 identity rejection of a request made with `identity` to
+// the identity provider (which locks, or runs device recovery). Any other
+// failure is ignored here.
+export function reportIdentityRejection(error: unknown, identity: { credential: string; session: string }) {
+  if (error instanceof ZudeApiError && error.status === 401 && IDENTITY_CODES.has(error.code)) {
+    for (const listener of [...listeners]) listener({ code: error.code, credential: identity.credential, session: identity.session });
+  }
+}
 // Wraps a management request. Identity rejections are reported to the identity
-// provider (which locks, or runs device recovery); they are never retried.
+// provider; they are never retried.
 export async function operationalRequest<T>(businessId: string, send: (headers: Record<string, string>) => Promise<T>): Promise<T> {
   const identity = operationalIdentity(businessId);
   if (identity.mode === "locked") throw new ZudeApiError(401, "IDENTITY_REQUIRED", "Unlock with an employee PIN to continue.");
@@ -45,9 +53,7 @@ export async function operationalRequest<T>(businessId: string, send: (headers: 
   try {
     return await send({ "x-zude-device": identity.credential, "x-zude-employee-session": identity.session });
   } catch (error) {
-    if (error instanceof ZudeApiError && error.status === 401 && IDENTITY_CODES.has(error.code)) {
-      for (const listener of [...listeners]) listener({ code: error.code, credential: identity.credential, session: identity.session });
-    }
+    reportIdentityRejection(error, identity);
     throw error;
   }
 }

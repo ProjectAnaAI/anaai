@@ -14,7 +14,7 @@ import {
   readAllPages,
 } from "../member";
 import { readFailure, readJson } from "../read-api";
-import { managementAuthority, managementForbidden } from "../operational-authority";
+import { managementAuthority, managementForbidden, managementWriteActor } from "../operational-authority";
 
 type EmployeeRole = "employee" | "manager" | "owner";
 
@@ -51,6 +51,16 @@ function roleForbidden(
 
 function unavailable(message = "Unable to update Team. Please retry.") {
   return readFailure(503, "SERVICE_UNAVAILABLE", message);
+}
+
+// SQL identity rejections must trigger the existing native session recovery.
+// Never classify a transactional race as a permanent device rejection.
+function writeFailure(error: { code?: string } | null) {
+  if (error?.code === "28000") return readFailure(401, "IDENTITY_UNAUTHORIZED", "Your employee session ended. Unlock again.");
+  if (error?.code === "42501") return roleForbidden();
+  if (error?.code === "40001") return readFailure(409, "TEAM_CHANGED", "Team changed. Refresh and retry.");
+  if (error?.code === "22023") return invalidRequest();
+  return unavailable();
 }
 
 function canManageTeam(role: string) {
@@ -318,7 +328,7 @@ export async function CREATE(request: Request) {
     const { data, error } = await db
       .rpc("m04_write_employee", {
         p_business_id: context.businessId,
-        p_actor_id: context.userId,
+        ...managementWriteActor(authority),
         p_employee_id: null,
         p_expected_updated_at: null,
         p_pin_snapshot: checked.snapshot,
@@ -337,7 +347,7 @@ export async function CREATE(request: Request) {
       .single();
 
     if (error || !data) {
-      throw new Error("Team create failed.");
+      return writeFailure(error);
     }
 
     return readJson(
@@ -499,7 +509,7 @@ export async function UPDATE(request: Request) {
 
     const { data, error } = await db
       .rpc("m04_write_employee", {
-        p_business_id: context.businessId, p_actor_id: context.userId,
+        p_business_id: context.businessId, ...managementWriteActor(authority),
         p_employee_id: id, p_expected_updated_at: employee.updated_at,
         p_pin_snapshot: pinSnapshot, p_values: values,
       })
@@ -507,7 +517,7 @@ export async function UPDATE(request: Request) {
       .single();
 
     if (error || !data) {
-      throw new Error("Team update failed.");
+      return writeFailure(error);
     }
 
     return readJson({
@@ -593,7 +603,7 @@ export async function RESET_PIN(request: Request) {
 
     const { data, error } = await db
       .rpc("m04_write_employee", {
-        p_business_id: context.businessId, p_actor_id: context.userId,
+        p_business_id: context.businessId, ...managementWriteActor(authority),
         p_employee_id: id, p_expected_updated_at: employee.updated_at,
         p_pin_snapshot: checked.snapshot,
         p_values: {
@@ -607,7 +617,7 @@ export async function RESET_PIN(request: Request) {
       .single();
 
     if (error || !data) {
-      throw new Error("PIN reset failed.");
+      return writeFailure(error);
     }
 
     return readJson({

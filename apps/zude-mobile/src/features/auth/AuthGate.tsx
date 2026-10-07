@@ -8,6 +8,7 @@ import { AppShell } from "../../navigation/AppShell";
 import { theme as t } from "../../theme/tokens";
 import { EmployeeIdentityProvider } from "../identity/EmployeeIdentityContext";
 import { EmployeeIdentityGate } from "../identity/DeviceIdentityScreen";
+import { ShiftGate } from "../time/ShiftGate";
 import { LoginScreen } from "./LoginScreen";
 
 export function AuthGate() {
@@ -58,7 +59,7 @@ export function AuthGate() {
 
   return (
     <BusinessGate key={session.user.id}>
-      <EmployeeIdentityProvider><EmployeeIdentityGate><AppShell /></EmployeeIdentityGate></EmployeeIdentityProvider>
+      <EmployeeIdentityProvider><EmployeeIdentityGate><ShiftGate><AppShell /></ShiftGate></EmployeeIdentityGate></EmployeeIdentityProvider>
     </BusinessGate>
   );
 }

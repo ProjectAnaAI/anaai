@@ -29,7 +29,7 @@ export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = fa
   return <View style={s.sidebar}>
     <View style={s.brand}><Brand compact={!expanded} dark />{expanded && <Text style={s.business}>{businessName}</Text>}</View>
     <ScrollView ref={scroll} contentContainerStyle={s.items}>
-      {visibleNavigation(role, identity.sharedMode ? identity.identity?.permissions ?? [] : null).filter((g) => expanded || g.title === "Operations").map((group) => <View key={group.title} style={s.group} onLayout={(event) => {
+      {visibleNavigation(role, identity.sharedMode ? identity.identity?.permissions ?? [] : null).filter((g) => expanded || g.title === "Operations" || g.title === "My Work").map((group) => <View key={group.title} style={s.group} onLayout={(event) => {
         if (expanded && initialGroup === group.title) scroll.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false });
       }}>
         {expanded ? <><Text style={s.groupTitle}>{group.title}</Text>{group.items.map((item) => itemView(item))}</>

@@ -1,7 +1,9 @@
 import { supabase } from "./supabase";
 
 export class ZudeApiError extends Error {
-  constructor(public readonly status: number, public readonly code: string, message: string) {
+  // `reason`: an optional server reason code (same safe A–Z format as `code`),
+  // e.g. why a time correction is invalid. Never free text.
+  constructor(public readonly status: number, public readonly code: string, message: string, public readonly reason?: string) {
     super(message);
     this.name = "ZudeApiError";
   }
@@ -85,9 +87,10 @@ async function apiRequest<T>(path: string, options: Options & { method?: "POST" 
     if (!response.ok || payload?.success !== true) {
       const code = typeof payload?.code === "string" && /^[A-Z_]{1,64}$/.test(payload.code)
         ? payload.code : "REQUEST_FAILED";
+      const reason = typeof payload?.reason === "string" && /^[A-Z_]{1,64}$/.test(payload.reason) ? payload.reason : undefined;
       // Do not display arbitrary proxy/provider error bodies or log credentials.
       throw new ZudeApiError(response.status, code,
-        response.status === 401 ? "Please sign in again." : "Unable to load ZUDE data. Please try again.");
+        response.status === 401 ? "Please sign in again." : "Unable to load ZUDE data. Please try again.", reason);
     }
     return payload as T;
   } catch (error) {

@@ -20,12 +20,27 @@ function employeeAuthorityRole(permissions: readonly string[]): BusinessRole {
   if (permissions.includes("team:manage-employees")) return "manager";
   return "staff";
 }
-export type ManagementAuthority = { mode: "account" | "shared-device"; role: BusinessRole; accountRole: BusinessRole };
+// Identifiers only: never retain credential/token/hash material in authority.
+export type ManagementAuthority = { role: BusinessRole; accountRole: BusinessRole; accountUserId: string } & (
+  | { mode: "account"; employeeId: null; deviceId: null; sessionId: null }
+  | { mode: "shared-device"; employeeId: string; deviceId: string; sessionId: string }
+);
+// Only call with authority produced above, never with request body fields.
+export function managementWriteActor(authority: ManagementAuthority) {
+  return {
+    p_actor_id: authority.accountUserId,
+    p_authority_mode: authority.mode,
+    p_expected_account_role: authority.accountRole,
+    p_actor_employee_id: authority.employeeId,
+    p_actor_device_id: authority.deviceId,
+    p_actor_session_id: authority.sessionId,
+  };
+}
 export async function managementAuthority(request: Request, context: BusinessContext):
   Promise<{ ok: true; authority: ManagementAuthority } | { ok: false; response: Response }> {
   try {
     const identity = await sharedDeviceIdentity(request);
-    if (!identity) return { ok: true, authority: { mode: "account", role: context.role, accountRole: context.role } };
+    if (!identity) return { ok: true, authority: { mode: "account", role: context.role, accountRole: context.role, accountUserId: context.userId, employeeId: null, deviceId: null, sessionId: null } };
     // The device credential decides its business; it must match the verified
     // account business, never the other way round.
     if (identity.device.business_id !== context.businessId) {
@@ -33,7 +48,7 @@ export async function managementAuthority(request: Request, context: BusinessCon
     }
     const employeeRole = employeeAuthorityRole(identity.permissions);
     const role = rank[employeeRole] < rank[context.role] ? employeeRole : context.role;
-    return { ok: true, authority: { mode: "shared-device", role, accountRole: context.role } };
+    return { ok: true, authority: { mode: "shared-device", role, accountRole: context.role, accountUserId: context.userId, employeeId: identity.employee.id, deviceId: identity.device.id, sessionId: identity.session.id } };
   } catch (error) {
     if (error instanceof IdentityFailure) return { ok: false, response: readFailure(error.status, error.code, error.message) };
     throw error;

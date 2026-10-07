@@ -22,16 +22,16 @@ test('touch target foundation never falls below 44pt',()=>{
 });
 for(const role of ['owner','manager','staff'])test(`${role}: only implemented destinations navigate`,()=>{
  const items=visibleNavigation(role).flatMap(g=>g.items).filter(i=>i.state==='AVAILABLE_NATIVE');
- const expected=role==='staff'?'["Today","Appointments","Customers","Services","Device & PIN","Lock"]':'["Today","Appointments","Customers","Services","Team","Registered Devices","Device & PIN","Lock"]';
+ const expected=role==='staff'?'["Today","Appointments","Customers","Services","Time Clock","My Time","Device & PIN","Lock"]':'["Today","Appointments","Customers","Services","Time Clock","My Time","Who’s Working","Team","Timesheets","Reported Issues","Audit History","Reports","Registered Devices","Device & PIN","Lock"]';
  assert.equal(JSON.stringify(items.map(i=>i.label)),expected,'staff never receives Team administration');
- assert.ok(items.every(i=>['/','/appointments','/customers','/services','/device','/team','/devices'].includes(i.route)));
+ assert.ok(items.every(i=>['/time-issues','/audit','/reports','/timesheets','/working','/','/appointments','/customers','/services','/time-clock','/my-time','/device','/team','/devices'].includes(i.route)));
 });
 test('navigation architecture retains future IA without fake routes or front-end authorization grants',()=>{
  assert.equal(JSON.stringify(navigationGroups.map(g=>g.title)),'["Operations","My Work","Manage","Ana AI","Business","System"]');
  const manage=navigationGroups.find(g=>g.title==='Manage').items;
  assert.ok(manage.every(i=>i.roles.includes('owner')&&i.roles.includes('manager')&&!i.roles.includes('staff')));
  assert.equal(manage.find(i=>i.label==='Team').route,'/team');
- assert.ok(manage.filter(i=>i.label!=='Team').every(i=>!i.route&&i.state!=='AVAILABLE_NATIVE'),'Timesheets/Corrections/Reports stay non-navigable');
+ assert.ok(manage.filter(i=>!['Team','Who’s Working','Timesheets','Reported Issues','Audit History','Reports'].includes(i.label)).every(i=>!i.route&&i.state!=='AVAILABLE_NATIVE'),'Standalone Corrections stays non-navigable; correction UI lives in Timesheets and Issues');
  assert.equal(navigationGroups.find(g=>g.title==='System').items.find(i=>i.label==='Device & PIN').route,'/device');
 });
 const row=(id,start,status='Booked',duration=30)=>({id,start,status,duration,customer:id,service:'Service'});
@@ -74,7 +74,8 @@ test('catalog represents real web capabilities and phase-two limits without inve
  }
  for(const label of ['Voice Assistant','Calls','Knowledge'])assert.equal(items.find(i=>i.label===label).state,'PHASE_2');
  assert.equal(items.find(i=>i.label==='Calls').webRoute,undefined,'web call history is unavailable too');
- for(const label of ['Time Clock','My Time'])assert.equal(items.find(i=>i.label===label).state,'PLANNED_NATIVE');
+ // M05: real destinations for every PIN role; no role or permission filter.
+ for(const [label,route] of [['Time Clock','/time-clock'],['My Time','/my-time']]){const item=items.find(i=>i.label===label);assert.equal(item.state,'AVAILABLE_NATIVE');assert.equal(item.route,route);assert.equal(item.roles,undefined);assert.equal(item.permission,undefined)}
  assert.ok(items.filter(i=>i.state!=='AVAILABLE_NATIVE').every(i=>!i.route));
 });
 test('membership-filtered catalog exposes employee operations without management grants',()=>{
