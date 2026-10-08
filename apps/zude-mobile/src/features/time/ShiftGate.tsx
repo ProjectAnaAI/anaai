@@ -11,48 +11,20 @@ import { Feedback } from "../../components/workspace";
 import { ZudeApiError } from "../../lib/api";
 import {
   getTimeClock,
-  type TimeClockView,
 } from "../../lib/time-clock-api";
 import { theme as t } from "../../theme/tokens";
 import { useBusiness } from "../business/BusinessContext";
 import { useEmployeeIdentity } from "../identity/EmployeeIdentityContext";
-import { ClockInLanding } from "./ClockInLanding";
-import { postPinRoute, timeMessage } from "./state";
+import { defaultWorkspaceRoute } from "../../navigation/items";
+import { timeMessage } from "./state";
 
 type Decision =
   | { key: string; status: "error"; error: unknown }
-  | {
-      key: string;
-      status: "clock-in";
-      view: TimeClockView;
-    }
-  | {
-      key: string;
-      status: "admitted";
-      route: "/" | "/time-clock";
-    };
+  | { key: string; status: "admitted"; route: "/" | "/appointments-today" };
 
-function decide(
-  key: string,
-  view: TimeClockView,
-): Decision {
-  const route = postPinRoute(view.state);
-
-  return route === "clock-in"
-    ? { key, status: "clock-in", view }
-    : { key, status: "admitted", route };
-}
-
-// The single post-PIN routing decision (docs/m05-time-clock.md §8).
-//
-// Each new employee session (every PIN unlock) fetches the authoritative
-// time-clock state before the workspace opens:
-//   OFF_CLOCK  -> Clock-In Landing (no workspace until the server says WORKING)
-//   WORKING    -> Today
-//   ON_*_BREAK -> Time Clock, where the break can be ended
-// A failed fetch never falls through to the workspace. PIN unlock itself
-// never clocks in; Lock never clocks out.
-//
+// Validate the current PIN session against the authoritative time-clock read.
+// Landing is role-based for every shift state; admission never mutates time.
+// Failed reads remain closed, and each new PIN session gets its own decision.
 // Account mode (not a shared device, no PIN identity) is unchanged.
 export function ShiftGate({
   children,
@@ -60,12 +32,12 @@ export function ShiftGate({
   children: ReactNode;
 }) {
   const { business } = useBusiness();
-  const { sharedMode, identity, lock } =
+  const { sharedMode, identity, lock, managementRole } =
     useEmployeeIdentity();
 
   const key =
     sharedMode && identity
-      ? `${business.id}:${identity.employee.id}:${identity.expiresAt}`
+      ? `${business.id}:${identity.employee.id}:${identity.expiresAt}:${managementRole}`
       : null;
 
   const [decision, setDecision] =
@@ -88,9 +60,9 @@ export function ShiftGate({
       business.id,
       controller.signal,
     ).then(
-      (view) => {
+      () => {
         if (!cancelled) {
-          setDecision(decide(key, view));
+          setDecision({ key, status: "admitted", route: defaultWorkspaceRoute(managementRole) });
         }
       },
       (error: unknown) => {
@@ -114,7 +86,7 @@ export function ShiftGate({
       cancelled = true;
       controller.abort();
     };
-  }, [key, attempt, business.id]);
+  }, [key, attempt, business.id, managementRole]);
 
   // Enter the decided destination once per employee session.
   const admittedRoute =
@@ -151,21 +123,6 @@ export function ShiftGate({
       onPress={() => void lock()}
     />
   );
-
-  if (current?.status === "clock-in") {
-    return (
-      <ClockInLanding
-        view={current.view}
-        onDecision={(view) =>
-          setDecision(decide(key, view))
-        }
-        onRefresh={() =>
-          setAttempt((value) => value + 1)
-        }
-        onLock={() => void lock()}
-      />
-    );
-  }
 
   return (
     <View style={s.page}>

@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -7,7 +8,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform, View } from "react-native";
+import { employeeInactivity } from "./employee-inactivity";
+import { EmployeeActivityContext } from "./EmployeeActivityContext";
 import { useBusiness } from "../business/BusinessContext";
 import {
   deviceCredentialRejected,
@@ -98,6 +101,16 @@ function useIdentityFoundation() {
     token: string;
   } | null>(null);
   const revokePending = useRef(false);
+  const inactivity = useRef<ReturnType<typeof employeeInactivity> | null>(null);
+  const stopInactivity = useCallback(() => {
+    inactivity.current?.dispose();
+    inactivity.current = null;
+  }, []);
+  // A queued input callback from an old tree must not reset or lock a new user.
+  const activityOwner = inactivity.current;
+  function recordEmployeeActivity() {
+    return activityOwner === inactivity.current && (activityOwner?.activity() ?? true);
+  }
 
   const accountAdmin =
     business.role === "owner" ||
@@ -198,6 +211,7 @@ function useIdentityFoundation() {
     }
 
     forgetInFlight.current = true;
+    stopInactivity();
     publishOperationalIdentity(business.id, { mode: "locked" });
 
     // Any in-flight PIN reply now belongs to an older generation and is revoked.
@@ -292,14 +306,14 @@ function useIdentityFoundation() {
   //
   // This function may revoke the current employee session on the server.
   // Therefore it must be called only for an intentional security event:
-  // user Lock, app backgrounding, session expiry, clock-out completion,
+  // user Lock/Switch User, inactivity, app backgrounding, session expiry, clock-out completion,
   // Forget Device, or an authoritative identity rejection.
   //
   // React component cleanup must never call this function.
-  async function lock(
+  const lock = useCallback(async (
     rejection?: OperationalRejection,
     notice?: string,
-  ) {
+  ) => {
     const held = session.current;
     generation.current += 1;
 
@@ -342,6 +356,7 @@ function useIdentityFoundation() {
           return;
         }
 
+        stopInactivity();
         publishOperationalIdentity(business.id, { mode: "locked" });
         session.current = null;
 
@@ -356,6 +371,7 @@ function useIdentityFoundation() {
         held &&
         held.token === rejection.session
       ) {
+        stopInactivity();
         publishOperationalIdentity(business.id, { mode: "locked" });
         session.current = null;
 
@@ -371,6 +387,8 @@ function useIdentityFoundation() {
 
       return;
     }
+
+    stopInactivity();
 
     // Remove employee authority before React renders or revocation awaits.
     // Account-only installations have no employee session to lock.
@@ -444,7 +462,7 @@ function useIdentityFoundation() {
     } finally {
       revokePending.current = false;
     }
-  }
+  }, [business.id, stopInactivity]);
 
   useEffect(() => {
     active.current = true;
@@ -456,9 +474,24 @@ function useIdentityFoundation() {
         (state) => {
           if (state !== "active") {
             void lock();
+          } else {
+            inactivity.current?.check();
           }
         },
       );
+
+    // Web keyboard/pointer activity uses the same controller. Native touches
+    // are observed once at the provider View; no per-screen reset calls.
+    const webActivity = (event: Event) => {
+      if (!(inactivity.current?.activity() ?? true)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const webEvents = ["pointerdown", "keydown", "wheel"] as const;
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      for (const event of webEvents) window.addEventListener(event, webActivity, { capture: true, passive: false });
+    }
 
     const stopProof =
       onAccountProofChange(setProof);
@@ -478,11 +511,15 @@ function useIdentityFoundation() {
       // or application teardown. None of those events is an intentional
       // employee Lock and none may revoke a real server session.
       active.current = false;
+      stopInactivity();
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        for (const event of webEvents) window.removeEventListener(event, webActivity, { capture: true });
+      }
       subscription.remove();
       stopProof();
       stopRejections();
     };
-  }, []);
+  }, [lock, stopInactivity]);
 
   // Only leaving this business/provider owns lifecycle cleanup. Dependency
   // changes (especially PIN unlock) are not security lock events.
@@ -531,9 +568,12 @@ function useIdentityFoundation() {
       return;
     }
 
+    const held = session.current;
     const timer = setTimeout(
       () => {
-        void lock();
+        // A cancelled expiry callback may already be queued. It belongs only
+        // to this PIN session, never to a subsequently unlocked employee.
+        if (active.current && held && session.current === held) void lock();
       },
       Math.max(
         0,
@@ -543,7 +583,7 @@ function useIdentityFoundation() {
     );
 
     return () => clearTimeout(timer);
-  }, [identity]);
+  }, [identity, lock]);
 
   async function run(
     action: () => Promise<void>,
@@ -688,6 +728,15 @@ function useIdentityFoundation() {
       token: result.session,
     };
 
+    // Bind the one idle deadline to this exact in-memory session object. A
+    // previous employee's callback cannot affect a replacement PIN session.
+    stopInactivity();
+    const unlocked = session.current;
+    inactivity.current = employeeInactivity({
+      isCurrent: () => active.current && session.current === unlocked,
+      onLock: () => { void lock(undefined, "Locked after five minutes of inactivity. Enter your PIN to unlock."); },
+    });
+
     // Publication-order invariant:
     //
     // Once React exposes this PIN-unlocked employee identity to descendants,
@@ -736,6 +785,7 @@ function useIdentityFoundation() {
     canAdministerDevice,
     canLeaveSharedMode,
     managementRole,
+    recordEmployeeActivity,
     forgetPrompt,
     setForgetPrompt,
     forgetting,
@@ -774,7 +824,13 @@ export function EmployeeIdentityProvider({
 
   return (
     <IdentityContext.Provider value={value}>
-      {children}
+      <EmployeeActivityContext.Provider value={value.recordEmployeeActivity}>
+        <View style={{ flex: 1 }}
+          onStartShouldSetResponderCapture={() => !value.recordEmployeeActivity()}
+          onMoveShouldSetResponderCapture={() => !value.recordEmployeeActivity()}>
+          {children}
+        </View>
+      </EmployeeActivityContext.Provider>
     </IdentityContext.Provider>
   );
 }

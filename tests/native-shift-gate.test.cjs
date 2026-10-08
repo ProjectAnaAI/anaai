@@ -49,8 +49,8 @@ function gate({ responses, sharedMode = true, role = 'employee' } = {}) {
     '../../components/ui': { Button: 'Button' }, '../../components/workspace': { Feedback: 'Feedback' },
     '../../lib/api': { ZudeApiError: ApiError }, '../../lib/time-clock-api': api, '../../theme/tokens': load('theme/tokens.ts'),
     '../business/BusinessContext': { useBusiness: () => ({ business: { id: B, name: 'Business', role: 'owner' } }) },
-    '../identity/EmployeeIdentityContext': { useEmployeeIdentity: () => ({ sharedMode, identity, lock: async () => { locks.push(1); } }) },
-    './ClockInLanding': { ClockInLanding: 'ClockInLanding' }, './state': state,
+    '../identity/EmployeeIdentityContext': { useEmployeeIdentity: () => ({ sharedMode, identity, managementRole: identity.employee.role === 'employee' ? 'staff' : identity.employee.role, lock: async () => { locks.push(1); } }) },
+    '../../navigation/items': load('navigation/items.ts'), './state': state,
   });
   let tree;
   const g = {
@@ -69,62 +69,40 @@ function gate({ responses, sharedMode = true, role = 'employee' } = {}) {
 }
 async function opened(options) { const g = gate(options); g.render(); await g.settle(); return g; }
 
-test('1/2. PIN + OFF_CLOCK shows the Clock-In Landing and never the workspace', async () => {
-  const g = gate({ responses: [view('OFF_CLOCK')] });
-  g.render(); assert.equal(g.workspace(), false, 'nothing before the server answers'); assert.equal(g.feedback().props.kind, 'loading');
-  await g.settle();
-  assert.ok(g.landing()); assert.equal(g.landing().props.view.state, 'OFF_CLOCK');
-  assert.equal(g.workspace(), false); assert.deepEqual(g.routes, []);
-  g.landing().props.onRefresh(); await g.settle();
-  assert.ok(g.landing(), 'a re-check that is still OFF_CLOCK stays on the landing'); assert.deepEqual(g.routes, []);
-  assert.equal(g.actions.length, 0, 'PIN unlock never clocks in');
+for (const role of ['employee', 'manager', 'owner']) {
+  for (const status of ['OFF_CLOCK', 'WORKING', 'ON_PAID_BREAK', 'ON_MEAL_BREAK']) {
+    test(`${role} PIN lands at its role destination with ${status} unchanged`, async () => {
+      const authoritative = view(status);
+      const before = JSON.stringify(authoritative);
+      const g = gate({ role, responses: [authoritative] });
+      g.render(); assert.equal(g.workspace(), false);
+      await g.settle();
+      const route = role === 'employee' ? '/appointments-today' : '/';
+      assert.equal(g.workspace(), true); assert.deepEqual(g.routes, [route]);
+      g.render(); await g.settle(); assert.deepEqual(g.routes, [route]);
+      g.newSession(); g.render(); assert.equal(g.workspace(), false);
+      await g.settle(); assert.deepEqual(g.routes, [route, route]);
+      assert.equal(g.fetches.length, 2); assert.equal(g.actions.length, 0);
+      assert.equal(JSON.stringify(authoritative), before);
+    });
+  }
+}
+test('Switch User changes the role landing and cannot reuse the previous admission', async () => {
+  const g = await opened({ role: 'manager', responses: [view('WORKING')] });
+  g.newSession({ id: 'employee-b', role: 'employee' }); g.render();
+  assert.equal(g.workspace(), false); await g.settle();
+  assert.deepEqual(g.routes, ['/', '/appointments-today']); assert.equal(g.actions.length, 0);
 });
-test('3. Clock In success: only a server WORKING state enters Today', async () => {
-  const g = await opened({ responses: [view('OFF_CLOCK')] });
-  g.landing().props.onDecision(view('OFF_CLOCK')); g.render();
-  assert.ok(g.landing(), 'a non-WORKING result keeps the landing'); assert.deepEqual(g.routes, []);
-  g.landing().props.onDecision(view('WORKING')); g.render(); await g.settle();
-  assert.equal(g.workspace(), true); assert.deepEqual(g.routes, ['/']);
-});
-test('6. PIN + WORKING goes directly to Today without any time action', async () => {
-  const g = await opened({ responses: [view('WORKING')] });
-  assert.equal(g.workspace(), true); assert.deepEqual(g.routes, ['/']); assert.equal(g.actions.length, 0); assert.equal(g.fetches.length, 1);
-  g.render(); await g.settle(); assert.deepEqual(g.routes, ['/'], 'navigates once per session');
-});
-for (const s of ['ON_PAID_BREAK', 'ON_MEAL_BREAK']) test(`7/8. PIN + ${s} opens the Time Clock with the break still running`, async () => {
-  const g = await opened({ responses: [view(s)] });
-  assert.equal(g.workspace(), true); assert.deepEqual(g.routes, ['/time-clock']); assert.equal(g.actions.length, 0);
-});
-test('9. Lock while WORKING, then PIN: re-checked, Today again, no time side effects', async () => {
-  const g = await opened({ responses: [view('WORKING')] });
-  g.newSession(); g.render();
-  assert.equal(g.workspace(), false, 'a new session is never admitted on the old decision');
-  await g.settle();
-  assert.equal(g.workspace(), true); assert.deepEqual(g.routes, ['/', '/']); assert.equal(g.fetches.length, 2); assert.equal(g.actions.length, 0);
-});
-test('10. Lock while on a break, then PIN: back to the Time Clock, break untouched', async () => {
-  const g = await opened({ responses: [view('ON_MEAL_BREAK')] });
-  g.newSession(); g.render(); await g.settle();
-  assert.deepEqual(g.routes, ['/time-clock', '/time-clock']); assert.equal(g.actions.length, 0);
-});
-test('14. same-day second work period: OFF_CLOCK after a clock-out needs another Clock In (state, not date)', async () => {
-  const g = await opened({ responses: [view('WORKING', { today: { date: '2026-10-01', workedMs: 4 * 3600_000, paidBreakMs: 0, mealBreakMs: 0 } })] });
-  assert.equal(g.workspace(), true);
-  // Clock Out ends the session; the same employee returns the same day.
-  g.newSession(); g.respond(view('OFF_CLOCK', { today: { date: '2026-10-01', workedMs: 4 * 3600_000, paidBreakMs: 0, mealBreakMs: 0 } })); g.render(); await g.settle();
-  assert.ok(g.landing()); assert.equal(g.workspace(), false);
-  const source = fs.readFileSync(root + 'features/time/ShiftGate.tsx', 'utf8') + fs.readFileSync(root + 'features/time/state.ts', 'utf8');
-  assert.doesNotMatch(source.match(/export function postPinRoute[\s\S]*?\n}/)[0], /date|today|Date/, 'the decision uses state only');
-});
-test('15. overnight WORKING (clocked in yesterday) still goes to Today', async () => {
-  const g = await opened({ responses: [view('WORKING', { shift: { id: 's', clockInAt: '2026-09-30T02:00:00Z', elapsedMs: 35 * 3600_000, workedMs: 1, paidBreakMs: 0, mealBreakMs: 0, break: null } })] });
-  assert.deepEqual(g.routes, ['/']);
-});
-for (const role of ['manager', 'owner']) test(`16. ${role} PIN follows the same time-state routing (no bypass)`, async () => {
-  const off = await opened({ role, responses: [view('OFF_CLOCK', { employee: { id: 'm1', name: 'Morgan', role } })] });
-  assert.ok(off.landing()); assert.equal(off.workspace(), false);
-  const on = await opened({ role, responses: [view('ON_PAID_BREAK', { employee: { id: 'm1', name: 'Morgan', role } })] });
-  assert.deepEqual(on.routes, ['/time-clock']);
+test('a delayed old PIN-session read cannot replace the new employee landing', async () => {
+  let release;
+  const oldRead = new Promise(resolve => { release = resolve; });
+  const g = gate({ role: 'manager', responses: [oldRead, view('ON_MEAL_BREAK')] });
+  g.render();
+  g.newSession({ id: 'new-employee', role: 'employee' }); g.render(); await g.settle();
+  assert.deepEqual(g.routes, ['/appointments-today']);
+  release(view('WORKING')); await g.settle();
+  assert.deepEqual(g.routes, ['/appointments-today']); assert.equal(g.workspace(), true);
+  assert.equal(g.actions.length, 0);
 });
 test('17. a state-fetch failure shows an error with Retry and never falls through to Today', async () => {
   for (const error of [new ApiError(0, 'NETWORK_ERROR'), new ApiError(503, 'TIME_UNAVAILABLE'), new ApiError(0, 'INVALID_RESPONSE'), new ApiError(401, 'DEVICE_REVOKED')]) {
@@ -163,6 +141,7 @@ function landing({ summary = week(), summaryError, fail = [], pending = false, r
     react: h.react, 'react/jsx-runtime': jsx, 'expo-crypto': { randomUUID: () => 'uuid-' + ++uuids },
     'react-native': { ScrollView: 'ScrollView', StyleSheet: { create: s => s }, Text: 'Text', View: 'View', useWindowDimensions: () => ({ width: 1366, height: 1024, fontScale: 1 }) },
     '../../components/ui': { Badge: 'Badge', Button: 'Button', styles: {} },
+    '../../components/operations': { Action: 'Action' },
     '../../components/workspace': { Brand: 'Brand', Feedback: 'Feedback', PaneTitle: 'PaneTitle' },
     '../../lib/api': { ZudeApiError: ApiError }, '../../lib/time-clock-api': api,
     '../../theme/tokens': load('theme/tokens.ts'), '../../theme/layout': { workspaceLayout: () => ({ split: true }) },

@@ -51,3 +51,21 @@ export const theme = {
     maxContent: 1600,
   },
 } as const;
+
+// Product UI foundation. Legacy screens retain their established theme above.
+export const design = {
+  color: {
+    canvas: "#F7F5EE", surface: "#FFFFFF", surfaceSubtle: "#EDF1E9",
+    textPrimary: "#203D32", textSecondary: "#51665A", textMuted: "#66756B",
+    actionPrimary: "#244B3B", actionPrimaryPressed: "#18382B", onAction: "#FFFFFF",
+    border: "#D7DED2", divider: "#E5E8DE", selection: "#E1EBDC",
+    successSubtle: "#EDF3E8", statusWorking: "#315C3C", statusBreak: "#855D20",
+    statusOff: "#66756B", statusAttention: "#855D20", attentionSubtle: "#FAF1DD",
+    scrim: "rgba(32,61,50,0.22)", destructive: "#A33229", destructiveSubtle: "#FBEDE9", focus: "#855D20",
+  },
+  type: { display: 30, page: 26, section: 20, row: 17, body: 16, supporting: 14, metadata: 13 },
+  space: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
+  radius: { sm: 6, md: 12 },
+  control: { minimum: 44, primary: 48, navigation: 64 },
+  layout: { horizontal: 32, compactHorizontal: 16, splitAt: 900, attentionWidth: 288 },
+} as const;

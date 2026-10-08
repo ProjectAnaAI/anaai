@@ -24,7 +24,7 @@ for(const role of ['owner','manager','staff'])test(`${role}: only implemented de
  const items=visibleNavigation(role).flatMap(g=>g.items).filter(i=>i.state==='AVAILABLE_NATIVE');
  const expected=role==='staff'?'["Today","Appointments","Customers","Services","Time Clock","My Time","Device & PIN","Lock"]':'["Today","Appointments","Customers","Services","Time Clock","My Time","Who’s Working","Team","Timesheets","Reported Issues","Audit History","Reports","Registered Devices","Device & PIN","Lock"]';
  assert.equal(JSON.stringify(items.map(i=>i.label)),expected,'staff never receives Team administration');
- assert.ok(items.every(i=>['/time-issues','/audit','/reports','/timesheets','/working','/','/appointments','/customers','/services','/time-clock','/my-time','/device','/team','/devices'].includes(i.route)));
+ assert.ok(items.every(i=>['/time-issues','/audit','/reports','/timesheets','/working','/','/appointments','/appointments-today','/customers','/services','/time-clock','/my-time','/device','/team','/devices'].includes(i.route)));
 });
 test('navigation architecture retains future IA without fake routes or front-end authorization grants',()=>{
  assert.equal(JSON.stringify(navigationGroups.map(g=>g.title)),'["Operations","My Work","Manage","Ana AI","Business","System"]');

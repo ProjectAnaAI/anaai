@@ -58,6 +58,7 @@ function harness({ platform = 'ios', stored = { businessId: 'business', credenti
     useLayoutEffect(fn, deps) { const i = lc++, old = layouts[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) layouts[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
     useEffect(fn, deps) { const i = ec++, old = effects[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) effects[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
   };
+  react.useCallback = (fn, deps) => { const memo = react.useRef(null); if (!memo.current || deps.some((v, i) => !Object.is(v, memo.current.deps[i]))) memo.current = { fn, deps }; return memo.current.fn; };
   const jsx = { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
   const console = { log: (...a) => logs.push(a), warn: (...a) => logs.push(a), error: (...a) => logs.push(a), info: (...a) => logs.push(a) };
   const contextExports = {};
@@ -66,7 +67,7 @@ function harness({ platform = 'ios', stored = { businessId: 'business', credenti
   if (proven) proofModule.recordAccountSignIn('account');
   const operational = compile('lib/operational-identity.ts', { './api': { ZudeApiError: ApiError } });
   let signedOut = 0;
-  const contextImports = { ...shared, '../../lib/account-proof': proofModule, '../../lib/account-session': { signOutAccount: async () => { signedOut++; proofModule.clearAccountProof(); } }, '../../lib/operational-identity': operational, '../business/BusinessContext': { useBusiness: () => ({ business: { id: business, name: 'Business', role }, userId: 'account' }) }, '../../lib/employee-identity-api': api, '../../lib/api': { ZudeApiError: ApiError }, './device-vault': vault };
+  const contextImports = { ...shared, '../../lib/account-proof': proofModule, '../../lib/account-session': { signOutAccount: async () => { signedOut++; proofModule.clearAccountProof(); } }, '../../lib/operational-identity': operational, '../business/BusinessContext': { useBusiness: () => ({ business: { id: business, name: 'Business', role }, userId: 'account' }) }, '../../lib/employee-identity-api': api, '../../lib/api': { ZudeApiError: ApiError }, './EmployeeActivityContext': { EmployeeActivityContext: { Provider: 'ActivityProvider' } }, './device-vault': vault, './employee-inactivity': compile('features/identity/employee-inactivity.ts', {}, { Date, setTimeout: () => 2, clearTimeout() {} }) };
   const screenImports = { ...shared, '../../components/ui': { Button: 'Button', styles: {} }, '../../components/workspace': { Field: 'Field', WorkspaceHeader: 'Header', workspaceStyles: {} }, '../../theme/tokens': { theme: { space: { xl: 24, lg: 16, sm: 8 } } }, './EmployeeIdentityContext': contextExports };
   Object.assign(contextExports, compile('features/identity/EmployeeIdentityContext.tsx', contextImports, { setTimeout: fn => { expire = fn; return 1; }, clearTimeout() {}, console }));
   const screen = compile('features/identity/DeviceIdentityScreen.tsx', screenImports, { console });

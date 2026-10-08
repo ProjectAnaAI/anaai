@@ -64,7 +64,7 @@ test('native JSX guard permits indentation and legitimate Text children', () => 
 });
 test('all M06 screens and shared native components have no literal children outside Text', () => {
   const root = path.resolve(__dirname, '../apps/zude-mobile/src');
-  const directories = ['features/team', 'features/working', 'features/timesheets', 'features/management', 'components'];
+  const directories = ['features/team', 'features/working', 'features/timesheets', 'features/management', 'components', 'navigation', 'features/identity', 'features/time'];
   for (const directory of directories) for (const file of fs.readdirSync(path.join(root, directory)).filter(file => file.endsWith('.tsx'))) {
     assert.deepEqual(invalidChildren(fs.readFileSync(path.join(root, directory, file), 'utf8')), [], `${directory}/${file}`);
   }

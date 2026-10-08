@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { Badge, Button, styles as ui } from "../../components/ui";
+import { Action } from "../../components/operations";
 import { Brand, Feedback, PaneTitle } from "../../components/workspace";
 import { ZudeApiError } from "../../lib/api";
 import { getMyTime, recordTimeAction, type TimeClockView } from "../../lib/time-clock-api";
@@ -65,7 +66,10 @@ export function ClockInLanding({ view, onDecision, onRefresh, onLock }: {
       <Brand compact />
       <View style={s.who}>
         <Text style={s.date}>{formatNow(now, view.timezone)}</Text>
-        <Text accessibilityRole="header" style={s.name}>{view.employee.name}</Text>
+        <View style={s.identityHeading}>
+          <Text accessibilityRole="header" style={[s.name, { flex: 1, minWidth: 0 }]}>{view.employee.name}</Text>
+          <Action label="Switch User" onPress={onLock} />
+        </View>
         <Badge label="Not clocked in" />
       </View>
       <Text style={s.lead}>Clock in to start working. Unlocking ZUDE with your PIN does not clock you in.</Text>
@@ -95,6 +99,7 @@ const s = StyleSheet.create({
   identity: { flexGrow: 0, backgroundColor: t.colors.shell },
   identitySplit: { width: 400, flexGrow: 0 },
   identityContent: { padding: t.space.xl, gap: t.space.lg },
+  identityHeading: { flexDirection: "row", alignItems: "center", gap: t.space.md, flexWrap: "wrap" },
   who: { gap: t.space.sm, paddingTop: t.space.lg },
   date: { color: t.colors.shellMuted, fontSize: t.font.body },
   name: { color: t.colors.surface, fontSize: 32, fontWeight: "700", letterSpacing: -0.5 },

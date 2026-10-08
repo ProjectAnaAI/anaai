@@ -1,7 +1,7 @@
 import type { BusinessRole } from "../lib/today-api";
 import type { IconName } from "../components/ui";
 export type CapabilityState = "AVAILABLE_NATIVE" | "EXISTING_WEB_CAPABILITY" | "PLANNED_NATIVE" | "ROLE_RESTRICTED" | "PHASE_2";
-export type NativeRoute = "/reports" | "/audit" | "/time-issues" | "/timesheets" | "/working" | "/" | "/appointments" | "/customers" | "/services" | "/device" | "/team" | "/devices" | "/time-clock" | "/my-time";
+export type NativeRoute = "/appointments-today" | "/report-issue" | "/reports" | "/audit" | "/time-issues" | "/timesheets" | "/working" | "/" | "/appointments" | "/customers" | "/services" | "/device" | "/team" | "/devices" | "/time-clock" | "/my-time";
 type Destination =
   | { state: "AVAILABLE_NATIVE"; route: NativeRoute; webRoute?: string }
   | { state: Exclude<CapabilityState, "AVAILABLE_NATIVE">; route?: never; webRoute?: string };
@@ -9,7 +9,7 @@ type Destination =
 export type NavItem = Destination & { label: string; icon: IconName; roles?: readonly BusinessRole[]; permission?: string };
 export const navigationGroups: { title: string; icon: IconName; items: NavItem[] }[] = [
   { title: "Operations", icon: "grid", items: [
-    { label: "Today", icon: "calendar", state: "AVAILABLE_NATIVE", route: "/", webRoute: "/dashboard" },
+    { label: "Today", icon: "calendar", state: "AVAILABLE_NATIVE", route: "/appointments-today", webRoute: "/dashboard" },
     { label: "Appointments", icon: "calendar", state: "AVAILABLE_NATIVE", route: "/appointments", webRoute: "/appointments" },
     { label: "Customers", icon: "users", state: "AVAILABLE_NATIVE", route: "/customers", webRoute: "/customers" },
     { label: "Services", icon: "scissors", state: "AVAILABLE_NATIVE", route: "/services", webRoute: "/services" },
@@ -47,7 +47,8 @@ export const navigationGroups: { title: string; icon: IconName; items: NavItem[]
   { title: "System", icon: "lock", items: [{ label: "Device & PIN", icon: "lock", state: "AVAILABLE_NATIVE", route: "/device" }, { label: "Lock", icon: "lock", state: "AVAILABLE_NATIVE", route: "/device" }] },
 ];
 export function activeNavigationLabel(pathname: string) {
-  return pathname === "/reports" ? "Reports" : pathname === "/audit" ? "Audit History" : pathname === "/time-issues" ? "Reported Issues" : pathname === "/timesheets" ? "Timesheets" : pathname === "/working" ? "Who’s Working" : pathname === "/time-clock" ? "Time Clock" : pathname === "/my-time" ? "My Time" : pathname === "/devices" ? "Registered Devices" : pathname === "/team" ? "Team" : pathname === "/device" ? "Device & PIN" : pathname === "/appointments" ? "Appointments" : pathname === "/customers" ? "Customers" : pathname === "/services" ? "Services" : "Today";
+  return navigationGroups.flatMap(group => group.items)
+    .find(item => item.state === "AVAILABLE_NATIVE" && item.route === pathname && item.label !== "Lock")?.label ?? "";
 }
 export function capabilityLabel(state: CapabilityState) {
   return state === "AVAILABLE_NATIVE" ? "" : state === "EXISTING_WEB_CAPABILITY" ? "Web" : state === "PHASE_2" ? "Phase 2" : "Later";
@@ -61,4 +62,34 @@ export function visibleNavigation(role: BusinessRole, sharedDevicePermissions: r
     items: group.items.filter((item) => (!item.roles || item.roles.includes(role)) &&
       (!item.permission || sharedDevicePermissions === null || sharedDevicePermissions.includes(item.permission))),
   })).filter((group) => group.items.length);
+}
+
+// Shell presentation only. The existing APIs still authorize every destination.
+export const managerTabs = [
+  { label: "Today", route: "/" }, { label: "Attention", route: "/time-issues" },
+  { label: "People", route: "/team" }, { label: "Time", route: "/timesheets" },
+  { label: "Reports", route: "/reports" },
+] as const;
+export const employeeTabs = [
+  { label: "Clock", route: "/time-clock" }, { label: "My Time", route: "/my-time" },
+  { label: "Report Issue", route: "/report-issue" },
+] as const;
+export function primaryTabs(role: BusinessRole) {
+  return role === "manager" || role === "owner" ? managerTabs : employeeTabs;
+}
+
+export function shellDestination(role: BusinessRole, pathname: string, sharedPermissions: readonly string[] | null = null): NativeRoute {
+  const manager = role === "manager" || role === "owner";
+  // The original catalog owns menu access and route admission. Primary tabs
+  // are shortcuts, not an allowlist that can exclude legitimate destinations.
+  const available = visibleNavigation(role, sharedPermissions).flatMap(group => group.items)
+    .some(item => item.state === "AVAILABLE_NATIVE" && item.route === pathname);
+  const employeeEntry = !manager && employeeTabs.some(tab => tab.route === pathname);
+  return available || employeeEntry || (manager && pathname === "/")
+    ? pathname as NativeRoute : defaultWorkspaceRoute(role);
+}
+
+// Landing is a presentation choice, independent of authoritative shift state.
+export function defaultWorkspaceRoute(role: BusinessRole): "/" | "/appointments-today" {
+  return role === "manager" || role === "owner" ? "/" : "/appointments-today";
 }

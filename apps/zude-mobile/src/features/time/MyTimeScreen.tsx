@@ -13,14 +13,14 @@ import { useTimeResource } from "./useTimeResource";
 
 // Self only, current business-local workweek only. There is deliberately no
 // employee picker, no week navigation and no way to edit time here.
-export function MyTimeScreen() {
+export function MyTimeScreen({ initiallyReporting = false }: { initiallyReporting?: boolean } = {}) {
   const { business, userId } = useBusiness();
   const { sharedMode, identity } = useEmployeeIdentity();
   const employee = sharedMode ? identity?.employee ?? null : null;
   const key = employee ? `${userId}:${business.id}:${employee.id}:${identity?.expiresAt}:my-time` : null;
   const time = useTimeResource(key, (signal) => getMyTime(business.id, signal));
   const [now, setNow] = useState(() => Date.now());
-  const [reporting, setReporting] = useState(false);
+  const [reporting, setReporting] = useState(initiallyReporting);
   const [workDate, setWorkDate] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);

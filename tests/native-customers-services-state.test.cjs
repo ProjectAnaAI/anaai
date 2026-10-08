@@ -160,5 +160,5 @@ test('New Appointment reuses the existing composer with the customer preselected
 });
 const { activeNavigationLabel } = load('navigation/items.ts');
 test('active navigation label follows the native route', () => {
-  assert.deepEqual(['/', '/appointments', '/customers', '/services', '/unknown'].map(activeNavigationLabel), ['Today', 'Appointments', 'Customers', 'Services', 'Today']);
+  assert.deepEqual(['/', '/appointments-today', '/appointments', '/customers', '/services', '/unknown'].map(activeNavigationLabel), ['', 'Today', 'Appointments', 'Customers', 'Services', '']);
 });

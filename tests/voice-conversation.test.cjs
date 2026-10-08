@@ -65,6 +65,10 @@ const voiceInput = load('lib/voice-input.ts', {});
  */
 const TODAY = parsing.businessLocalDate(TIMEZONE, 0);
 const TOMORROW = parsing.businessLocalDate(TIMEZONE, 1);
+// A correction must actually change the day. On Thursdays, a hard-coded
+// Friday is already TOMORROW and cannot exercise these regression assertions.
+const REPLACEMENT_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' })
+  .format(new Date(parsing.businessLocalDate(TIMEZONE, 2) + 'T12:00:00Z'));
 
 function stateOf(xml) {
   const action = /action="([^"]+)"/.exec(xml)?.[1];
@@ -373,7 +377,7 @@ test('14. "Actually make it 3:30" is a correction, not authorization', async () 
 test('15. a day-only correction keeps the service and the time', async () => {
   const h = harness();
   const confirm = await atConfirmation(h);
-  const xml = await h.run({ speech: 'No, make that Friday.', stateToken: stateOf(confirm) });
+  const xml = await h.run({ speech: `No, make that ${REPLACEMENT_DAY}.`, stateToken: stateOf(confirm) });
   const s = h.open(xml);
 
   assert.notEqual(s.booking.date, TOMORROW, 'the day changed');
@@ -410,7 +414,7 @@ test('17. a correction invalidates a stale availability answer', async () => {
   const confirm = await atConfirmation(h);
   assert.equal(h.open(confirm).booking.time, '13:00');
 
-  const xml = await h.run({ speech: 'Make it Friday instead.', stateToken: stateOf(confirm) });
+  const xml = await h.run({ speech: `Make it ${REPLACEMENT_DAY} instead.`, stateToken: stateOf(confirm) });
 
   // The earlier "available" answer must not carry over to the new day.
   assert.equal(h.open(xml).booking.time, null);

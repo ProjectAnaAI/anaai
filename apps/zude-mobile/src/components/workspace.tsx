@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps, useWindowDimensions } from "react-native";
+import { useEmployeeActivity } from "../features/identity/EmployeeActivityContext";
 import { theme as t } from "../theme/tokens";
 import { workspaceLayout } from "../theme/layout";
 import { Button, Icon, styles as ui, type IconName } from "./ui";
@@ -11,9 +12,13 @@ export function Brand({ compact = false }: { compact?: boolean; dark?: boolean }
 }
 export function Field({ label, search = false, style, ...props }: TextInputProps & { label: string; search?: boolean }) {
   const [focused, setFocused] = useState(false);
+  const recordActivity = useEmployeeActivity();
   return <View style={[s.field, focused && s.fieldFocus, props.editable === false && ui.disabled, style]}>
     {search && <Icon name="search" size={17} />}
     <TextInput {...props} accessibilityLabel={props.accessibilityLabel || label} placeholderTextColor={t.colors.muted}
+      onChangeText={(text) => { if (recordActivity()) props.onChangeText?.(text); }}
+      onKeyPress={(event) => { if (recordActivity()) props.onKeyPress?.(event); }}
+      onSubmitEditing={(event) => { if (recordActivity()) props.onSubmitEditing?.(event); }}
       onFocus={(event) => { setFocused(true); props.onFocus?.(event); }}
       onBlur={(event) => { setFocused(false); props.onBlur?.(event); }} style={s.input} />
   </View>;
