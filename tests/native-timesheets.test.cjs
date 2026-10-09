@@ -56,7 +56,7 @@ async function ready(){const h=screen();await h.settle(0,directory());h.click('V
 test('Timesheets manager/owner navigation and native route; employee/shared regular role hidden',()=>{
  const nav=load('navigation/items.ts');for(const role of ['manager','owner'])assert.ok(nav.visibleNavigation(role).flatMap(g=>g.items).some(i=>i.route==='/timesheets'));
  for(const [role,permissions] of [['staff',null],['owner',[]]])assert.ok(!nav.visibleNavigation(role,permissions).flatMap(g=>g.items).some(i=>i.route==='/timesheets'));
- assert.equal(nav.activeNavigationLabel('/timesheets'),'Timesheets');assert.match(fs.readFileSync(root+'app/timesheets.tsx','utf8'),/TimesheetsScreen as default/);
+ assert.equal(nav.activeNavigationLabel('/timesheets'),'Timesheets');assert.match(fs.readFileSync(root+'app/timesheets.tsx','utf8'),/<TimesheetsScreen/);
 });
 test('Timesheets direct employee route blocked, including locked identity; no requests',()=>{
  for(const over of [{managementRole:'staff'},{identity:null},{userId:null}]){const h=screen(over);assert.equal(h.calls.length,0);assert.match(h.text(),/for managers and owners/);h.dispose();}

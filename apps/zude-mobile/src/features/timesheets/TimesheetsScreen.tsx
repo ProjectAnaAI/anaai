@@ -23,18 +23,22 @@ const eventLabel = (event: LedgerEvent) => event.type === 'CLOCK_IN' ? 'Clock in
 // `correcting` opens the correction panel for the selected day. Every other
 // selection change creates a new object without it, closing the panel.
 type Selection = { scope: string; employeeId: string; week: string | null; day: string | null; correcting?: boolean };
-export function TimesheetsScreen() {
+export function TimesheetsScreen({ initialContext = null, invalidContext = false }: { initialContext?: { employeeId: string; week: string | null; day: string | null } | null; invalidContext?: boolean } = {}) {
   const { business, userId } = useBusiness();
   const { managementRole, sharedMode, identity } = useEmployeeIdentity();
   const allowed = !!userId && (managementRole === 'manager' || managementRole === 'owner') && (!sharedMode || !!identity);
   const generation = useRef(0);
   const [focus, setFocus] = useState<number | null>(null);
   useFocusEffect(useCallback(() => { setFocus(++generation.current); return () => setFocus(null); }, []));
-  const scope = allowed && focus !== null ? `${userId}:${business.id}:${managementRole}:${sharedMode ? `${identity!.employee.id}:${identity!.expiresAt}` : 'account'}:${focus}` : null;
+  const scope = allowed && !invalidContext && focus !== null ? `${userId}:${business.id}:${managementRole}:${sharedMode ? `${identity!.employee.id}:${identity!.expiresAt}` : 'account'}:${focus}` : null;
+  const [appliedScope, setAppliedScope] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [denied, setDenied] = useState<{ scope: string; message: string } | null>(null);
   const [saved, setSaved] = useState<{ key: string; message: string } | null>(null);
   // Key checks hide old state in the render itself, before cleanup effects.
+  if (scope && initialContext && appliedScope !== scope) {
+    setAppliedScope(scope); setSelection({ scope, ...initialContext });
+  }
   const selected = selection?.scope === scope ? selection : null;
   const directory = useTimeResource(scope ? `${scope}:targets` : null, signal => getTimesheetDirectory(business.id, signal));
   const targets = !directory.loading && !directory.error ? directory.data?.employees : undefined;
@@ -75,6 +79,7 @@ export function TimesheetsScreen() {
     <WorkspaceHeader title="Timesheets" business={business.name} subtitle="Employee time · corrections are previewed and recorded"
       action={allowed ? <Button label="Refresh" secondary icon="refresh-cw" disabled={!scope || directory.loading || sheet.loading} onPress={refresh} /> : undefined} />
     {!allowed ? <Feedback title="Timesheets are for managers and owners" detail="Unlock with an authorized employee PIN to continue." />
+      : invalidContext ? <Feedback kind="error" title="Invalid timesheet link" detail="Open Time and choose an authorized employee." />
       : <>{notice && <Feedback kind="error" title="Timesheet access changed" detail={notice} retry={refresh} />}
       <MasterDetail fixed={{ side:'master',width:280 }} showDetail={!!selected} onBack={() => setSelection(null)} backLabel="Employees"
         master={<>
