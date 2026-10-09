@@ -65,9 +65,10 @@ function identityHarness({ shared = true, platform = 'ios', role = 'employee', l
   };
   const provider = load('features/identity/EmployeeIdentityContext.tsx', imports, globals);
   const gates = load('features/identity/DeviceIdentityScreen.tsx', {
+    './AuthorityDiagnostic': { AuthorityDiagnostic: 'AuthorityDiagnostic' },
     react, 'react/jsx-runtime': jsx, 'react-native': native, './EmployeeIdentityContext': provider,
     '../../components/ui': { Button: 'Button', styles: {} }, '../../components/workspace': { Field: 'Field', WorkspaceHeader: 'Header', workspaceStyles: {} }, '../../theme/tokens': load('theme/tokens.ts'),
-  });
+  }, { __DEV__: false });
   function flushEffects(list) { for (const e of list) if (e.pending) e.cleanup?.(); for (const e of list) if (e.pending) { e.pending = false; e.cleanup = e.fn(); } }
   const h = {
     clock, requests, business, serverTime, operational, web, listeners,

@@ -4,6 +4,7 @@ import { Button, styles as ui } from "../../components/ui";
 import { Field, WorkspaceHeader, workspaceStyles as ws } from "../../components/workspace";
 import { theme as t } from "../../theme/tokens";
 import { useEmployeeIdentity } from "./EmployeeIdentityContext";
+import { AuthorityDiagnostic } from "./AuthorityDiagnostic";
 
 // The workspace gate.
 // - Not a shared device: the signed-in account's workspace (setup, personal use).
@@ -89,6 +90,7 @@ export function DeviceIdentityScreen() {
           {forgetControls(context)}
           {signOutControls(context)}
         </>}
+        {__DEV__ && <AuthorityDiagnostic />}
       </View>
     </ScrollView>
   </View>;

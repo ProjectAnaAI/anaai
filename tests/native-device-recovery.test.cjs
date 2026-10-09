@@ -68,9 +68,9 @@ function harness({ platform = 'ios', stored = { businessId: 'business', credenti
   const operational = compile('lib/operational-identity.ts', { './api': { ZudeApiError: ApiError } });
   let signedOut = 0;
   const contextImports = { ...shared, '../../lib/account-proof': proofModule, '../../lib/account-session': { signOutAccount: async () => { signedOut++; proofModule.clearAccountProof(); } }, '../../lib/operational-identity': operational, '../business/BusinessContext': { useBusiness: () => ({ business: { id: business, name: 'Business', role }, userId: 'account' }) }, '../../lib/employee-identity-api': api, '../../lib/api': { ZudeApiError: ApiError }, './EmployeeActivityContext': { EmployeeActivityContext: { Provider: 'ActivityProvider' } }, './device-vault': vault, './employee-inactivity': compile('features/identity/employee-inactivity.ts', {}, { Date, setTimeout: () => 2, clearTimeout() {} }) };
-  const screenImports = { ...shared, '../../components/ui': { Button: 'Button', styles: {} }, '../../components/workspace': { Field: 'Field', WorkspaceHeader: 'Header', workspaceStyles: {} }, '../../theme/tokens': { theme: { space: { xl: 24, lg: 16, sm: 8 } } }, './EmployeeIdentityContext': contextExports };
+  const screenImports = { './AuthorityDiagnostic': { AuthorityDiagnostic: 'AuthorityDiagnostic' }, ...shared, '../../components/ui': { Button: 'Button', styles: {} }, '../../components/workspace': { Field: 'Field', WorkspaceHeader: 'Header', workspaceStyles: {} }, '../../theme/tokens': { theme: { space: { xl: 24, lg: 16, sm: 8 } } }, './EmployeeIdentityContext': contextExports };
   Object.assign(contextExports, compile('features/identity/EmployeeIdentityContext.tsx', contextImports, { setTimeout: fn => { expire = fn; return 1; }, clearTimeout() {}, console }));
-  const screen = compile('features/identity/DeviceIdentityScreen.tsx', screenImports, { console });
+  const screen = compile('features/identity/DeviceIdentityScreen.tsx', screenImports, { console, __DEV__: false });
   function nodes(n) { if (!n || typeof n !== 'object') return []; if (Array.isArray(n)) return n.flatMap(nodes); return [n, ...nodes(n.props?.children)]; }
   let tree, gate;
   const h = {
