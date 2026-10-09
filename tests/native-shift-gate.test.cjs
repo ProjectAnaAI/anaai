@@ -26,6 +26,7 @@ function hooks() {
     react: {
       useState(initial) { const i = cursor++; if (!(i in states)) states[i] = typeof initial === 'function' ? initial() : initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v; }]; },
       useRef(initial) { const i = cursor++; if (!(i in states)) states[i] = { current: initial }; return states[i]; },
+      useLayoutEffect(fn, deps) { const i = ec++, old = effects[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) effects[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
       useEffect(fn, deps) { const i = ec++, old = effects[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) effects[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
     },
     run(render) { cursor = 0; ec = 0; const tree = render(); for (const e of effects) if (e.pending) { e.cleanup?.(); e.cleanup = e.fn(); e.pending = false; } return tree; },
@@ -35,35 +36,32 @@ const jsx = { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({
 function nodes(n) { if (!n || typeof n !== 'object') return []; if (Array.isArray(n)) return n.flatMap(nodes); return [n, ...['children'].flatMap(k => nodes(n.props?.[k]))]; }
 
 // ---- ShiftGate ----------------------------------------------------------------------------
-function gate({ responses, sharedMode = true, role = 'employee' } = {}) {
-  const h = hooks(), routes = [], fetches = [], locks = [], actions = [];
+function gate({ responses, sharedMode = true, role = 'employee', pathname = '/reports' } = {}) {
+  const h = hooks(), routes = [], fetches = [], actions = [], timers = [];
   let identity = { employee: { id: 'e1', name: 'Avery Employee', role }, expiresAt: 'session-1' };
+  let path = pathname;
   const queue = [...responses];
-  const api = {
-    async getTimeClock(business) { fetches.push(business); const next = queue.length > 1 ? queue.shift() : queue[0]; if (next instanceof Error) throw next; return next; },
-    async recordTimeAction(...a) { actions.push(a); throw Error('the gate never records time'); },
-  };
   const Gate = load('features/time/ShiftGate.tsx', {
-    react: h.react, 'react/jsx-runtime': jsx, 'react-native': { StyleSheet: { create: s => s }, View: 'View' },
-    'expo-router': { router: { replace: (r) => routes.push(r) } },
-    '../../components/ui': { Button: 'Button' }, '../../components/workspace': { Feedback: 'Feedback' },
-    '../../lib/api': { ZudeApiError: ApiError }, '../../lib/time-clock-api': api, '../../theme/tokens': load('theme/tokens.ts'),
-    '../business/BusinessContext': { useBusiness: () => ({ business: { id: B, name: 'Business', role: 'owner' } }) },
-    '../identity/EmployeeIdentityContext': { useEmployeeIdentity: () => ({ sharedMode, identity, managementRole: identity.employee.role === 'employee' ? 'staff' : identity.employee.role, lock: async () => { locks.push(1); } }) },
-    '../../navigation/items': load('navigation/items.ts'), './state': state,
-  });
+    react: h.react, 'react/jsx-runtime': jsx,
+    'react-native': { AppState: { addEventListener: (_, fn) => { g.background = fn; return { remove() {} }; } } },
+    'expo-router': { usePathname: () => path },
+    '../../lib/time-clock-api': { async getTimeClock(business) { fetches.push(business); const next = queue.length > 1 ? queue.shift() : queue[0]; if (next instanceof Error) throw next; return next; } },
+    '../business/BusinessContext': { useBusiness: () => ({ business: { id: B, name: 'Business', role: 'owner' }, userId: 'account' }) },
+    '../identity/EmployeeIdentityContext': { useEmployeeIdentity: () => ({ sharedMode, identity, managementRole: identity.employee.role === 'employee' ? 'staff' : identity.employee.role }) },
+    '../../lib/api': { ZudeApiError: ApiError },
+    '../../navigation/items': load('navigation/items.ts'), './ShiftAccessContext': { ShiftAccessContext: { Provider: 'ShiftProvider' } },
+  }, { setTimeout(fn, ms) { const timer = { fn, ms, cancelled: false }; timers.push(timer); return timer; }, clearTimeout(timer) { timer.cancelled = true; } });
   let tree;
   const g = {
-    routes, fetches, locks, actions,
-    render() { tree = h.run(() => Gate.ShiftGate({ children: 'WORKSPACE' })); return tree; },
-    async settle() { for (let i = 0; i < 4; i++) { await flush(); g.render(); } },
-    get tree() { return tree; },
-    workspace() { return tree === 'WORKSPACE'; },
-    landing() { return nodes(tree).find(n => n.type === 'ClockInLanding'); },
-    feedback() { return nodes(tree).find(n => n.type === 'Feedback'); },
-    // A new PIN session (Lock + PIN, expiry + PIN, or another employee).
-    newSession(next = {}) { identity = { employee: { id: next.id ?? 'e1', name: 'Avery Employee', role: next.role ?? role }, expiresAt: next.expiresAt ?? 'session-' + Math.random() }; },
+    routes, fetches, actions, timers,
+    render() { tree = h.run(() => Gate.ShiftGate({ children: 'WORKSPACE' })); const target = g.access.target; if (target && target !== path) { routes.push(target); path = target; } return tree; },
+    async settle() { for (let i = 0; i < 8; i++) { await flush(); g.render(); } },
+    get access() { return tree.props.value; }, get path() { return path; },
+    workspace() { return g.access.allowed; },
+    newSession(next = {}) { identity = { employee: { id: next.id ?? 'e1', name: 'Employee', role: next.role ?? role }, expiresAt: next.expiresAt ?? 'session-' + Math.random() }; },
     respond(...next) { queue.splice(0, queue.length, ...next); },
+    navigate(next) { path = next; g.render(); },
+    poll() { const t = timers.findLast(t => !t.cancelled); assert.ok(t); t.fn(); g.render(); },
   };
   return g;
 }
@@ -71,57 +69,94 @@ async function opened(options) { const g = gate(options); g.render(); await g.se
 
 for (const role of ['employee', 'manager', 'owner']) {
   for (const status of ['OFF_CLOCK', 'WORKING', 'ON_PAID_BREAK', 'ON_MEAL_BREAK']) {
-    test(`${role} PIN lands at its role destination with ${status} unchanged`, async () => {
-      const authoritative = view(status);
-      const before = JSON.stringify(authoritative);
+    test(`${role} PIN with ${status} obeys mandatory admission without time mutations`, async () => {
+      const authoritative = view(status), before = JSON.stringify(authoritative);
       const g = gate({ role, responses: [authoritative] });
-      g.render(); assert.equal(g.workspace(), false);
-      await g.settle();
-      const route = role === 'employee' ? '/appointments-today' : '/';
-      assert.equal(g.workspace(), true); assert.deepEqual(g.routes, [route]);
-      g.render(); await g.settle(); assert.deepEqual(g.routes, [route]);
-      g.newSession(); g.render(); assert.equal(g.workspace(), false);
-      await g.settle(); assert.deepEqual(g.routes, [route, route]);
-      assert.equal(g.fetches.length, 2); assert.equal(g.actions.length, 0);
-      assert.equal(JSON.stringify(authoritative), before);
+      g.render(); assert.equal(g.workspace(), false); await g.settle();
+      const route = status === 'WORKING' ? role === 'employee' ? '/appointments-today' : '/' : '/time-clock';
+      assert.equal(g.path, route); assert.equal(g.workspace(), status === 'WORKING');
+      assert.equal(g.access.requiredAction, status === 'OFF_CLOCK' ? 'clock-in' : status === 'WORKING' ? null : 'break-end');
+      g.newSession(); g.render(); assert.equal(g.workspace(), false); await g.settle();
+      assert.equal(g.path, route); assert.equal(g.workspace(), status === 'WORKING');
+      assert.equal(g.actions.length, 0); assert.equal(JSON.stringify(authoritative), before);
     });
   }
 }
-test('Switch User changes the role landing and cannot reuse the previous admission', async () => {
-  const g = await opened({ role: 'manager', responses: [view('WORKING')] });
-  g.newSession({ id: 'employee-b', role: 'employee' }); g.render();
-  assert.equal(g.workspace(), false); await g.settle();
-  assert.deepEqual(g.routes, ['/', '/appointments-today']); assert.equal(g.actions.length, 0);
+for (const [status, action] of [['OFF_CLOCK', 'clock-in'], ['ON_PAID_BREAK', 'break-end'], ['ON_MEAL_BREAK', 'break-end']]) {
+  for (const role of ['employee', 'manager', 'owner']) test(`${role}: successful ${action} must refresh and confirm WORKING`, async () => {
+    const g = await opened({ role, responses: [view(status)] });
+    const ticket = g.access.beginAction(); assert.ok(ticket); g.render(); assert.equal(g.workspace(), false);
+    let release; g.respond(new Promise(resolve => { release = resolve; }));
+    g.access.finishAction(ticket, action, view('WORKING')); g.render(); await flush();
+    assert.equal(g.workspace(), false, 'mutation response alone does not admit');
+    g.respond(view('WORKING')); release(view('WORKING')); await g.settle();
+    assert.equal(g.workspace(), true); assert.equal(g.path, role === 'employee' ? '/appointments-today' : '/');
+  });
+}
+test('failed admission action cannot release the gate even if a later GET says WORKING', async () => {
+  const g = await opened({ responses: [view('OFF_CLOCK')] });
+  const ticket = g.access.beginAction(); g.render(); g.respond(view('WORKING'));
+  g.access.finishAction(ticket, 'clock-in'); g.render(); await g.settle();
+  assert.equal(g.workspace(), false); assert.equal(g.path, '/time-clock'); assert.equal(g.access.requiredAction, 'clock-in');
 });
-test('a delayed old PIN-session read cannot replace the new employee landing', async () => {
-  let release;
-  const oldRead = new Promise(resolve => { release = resolve; });
-  const g = gate({ role: 'manager', responses: [oldRead, view('ON_MEAL_BREAK')] });
-  g.render();
-  g.newSession({ id: 'new-employee', role: 'employee' }); g.render(); await g.settle();
-  assert.deepEqual(g.routes, ['/appointments-today']);
-  release(view('WORKING')); await g.settle();
-  assert.deepEqual(g.routes, ['/appointments-today']); assert.equal(g.workspace(), true);
-  assert.equal(g.actions.length, 0);
+test('a non-WORKING post-action read keeps navigation gated', async () => {
+  const g = await opened({ responses: [view('ON_PAID_BREAK')] }); const ticket = g.access.beginAction(); g.render();
+  g.access.finishAction(ticket, 'break-end', view('WORKING')); g.render(); await g.settle();
+  assert.equal(g.workspace(), false); assert.equal(g.path, '/time-clock');
 });
-test('17. a state-fetch failure shows an error with Retry and never falls through to Today', async () => {
-  for (const error of [new ApiError(0, 'NETWORK_ERROR'), new ApiError(503, 'TIME_UNAVAILABLE'), new ApiError(0, 'INVALID_RESPONSE'), new ApiError(401, 'DEVICE_REVOKED')]) {
-    const g = await opened({ responses: [error] });
-    assert.equal(g.workspace(), false); assert.deepEqual(g.routes, []);
-    assert.equal(g.feedback().props.kind, 'error'); assert.ok(!JSON.stringify(g.tree).includes('private-provider-detail'));
-    g.respond(view('WORKING')); g.feedback().props.retry(); g.render();
-    assert.equal(g.feedback().props.kind, 'loading'); await g.settle();
-    assert.equal(g.workspace(), true, 'retry re-decides from the server');
+test('deep/sidebar/bottom/back paths cannot bypass the non-WORKING gate', async () => {
+  for (const status of ['OFF_CLOCK', 'ON_PAID_BREAK', 'ON_MEAL_BREAK']) {
+    const g = await opened({ responses: [view(status)] });
+    for (const path of ['/appointments-today', '/appointments', '/reports', '/my-time', '/', '/customers']) {
+      g.navigate(path); assert.equal(g.workspace(), false); await g.settle();
+      assert.equal(g.path, '/time-clock'); assert.equal(g.workspace(), false);
+    }
   }
-  const g = await opened({ responses: [new ApiError(0, 'NETWORK_ERROR')] });
-  nodes(g.tree).find(n => n.type === 'Button' && n.props.label === 'Lock').props.onPress();
-  assert.equal(g.locks.length, 1, 'the employee can always lock from the gate');
 });
-test('account mode (no shared device) is unchanged: workspace, no time request', async () => {
+test('WORKING navigation needs a fresh read; mounted screens are withdrawn on server break or read failure', async () => {
+  const g = await opened({ role: 'manager', responses: [view('WORKING')] });
+  let release; g.respond(new Promise(resolve => { release = resolve; })); g.navigate('/reports');
+  assert.equal(g.workspace(), false); g.respond(view('WORKING')); release(view('WORKING')); await g.settle();
+  assert.equal(g.path, '/reports'); assert.equal(g.workspace(), true);
+  g.respond(view('ON_MEAL_BREAK')); g.poll(); await g.settle();
+  assert.equal(g.workspace(), false); assert.equal(g.path, '/time-clock');
+  g.respond(new ApiError(503, 'TIME_UNAVAILABLE')); g.access.refresh(); g.render(); await g.settle();
+  assert.ok(g.access.error); assert.equal(g.workspace(), false);
+});
+test('read failures fail closed and Retry revalidates the current session', async () => {
+  for (const error of [new ApiError(0, 'NETWORK_ERROR'), new ApiError(503, 'TIME_UNAVAILABLE'), new ApiError(401, 'DEVICE_REVOKED')]) {
+    const g = await opened({ responses: [error] }); assert.equal(g.workspace(), false); assert.ok(g.access.error);
+    assert.equal(g.path, '/time-clock'); g.respond(view('WORKING')); g.access.refresh(); g.render(); await g.settle();
+    assert.equal(g.workspace(), true);
+  }
+});
+test('a stalled mounted-screen recheck times out closed; its late WORKING reply cannot re-admit', async () => {
+  const g = await opened({ role: 'manager', responses: [view('WORKING')] });
+  let release; g.respond(new Promise(resolve => { release = resolve; })); g.poll();
+  const timeout = g.timers.findLast(timer => !timer.cancelled && timer.ms === 20000); assert.ok(timeout);
+  timeout.fn(); g.render(); assert.equal(g.workspace(), false); assert.ok(g.access.error);
+  g.respond(new ApiError(0, 'NETWORK_ERROR')); release(view('WORKING')); await g.settle();
+  assert.equal(g.workspace(), false); assert.equal(g.path, '/time-clock');
+});
+test('old reads and action responses cannot unlock a replacement PIN identity', async () => {
+  let release; const g = gate({ role: 'manager', responses: [new Promise(resolve => { release = resolve; }), view('OFF_CLOCK')] });
+  g.render(); g.newSession({ id: 'employee-b', role: 'employee' }); g.render(); await g.settle();
+  release(view('WORKING')); await g.settle(); assert.equal(g.workspace(), false); assert.equal(g.path, '/time-clock');
+  const ticket = g.access.beginAction(); g.render(); g.newSession({ id: 'employee-c' }); g.render(); await g.settle();
+  g.access.finishAction(ticket, 'clock-in', view('WORKING')); g.render(); await g.settle();
+  assert.equal(g.workspace(), false); assert.equal(g.path, '/time-clock');
+});
+test('explicit Start Break invalidates WORKING before the action and requires End Break', async () => {
+  const g = await opened({ role: 'manager', responses: [view('WORKING')] }); g.navigate('/time-clock'); await g.settle();
+  const ticket = g.access.beginAction(); g.render(); assert.equal(g.workspace(), false);
+  g.respond(view('ON_PAID_BREAK')); g.access.finishAction(ticket, 'break-start', view('ON_PAID_BREAK')); g.render(); await g.settle();
+  assert.equal(g.workspace(), false); assert.equal(g.path, '/time-clock'); assert.equal(g.access.requiredAction, 'break-end');
+});
+test('account-only setup has no shared-session clock gate or automatic actions', async () => {
   const g = await opened({ sharedMode: false, responses: [view('OFF_CLOCK')] });
-  assert.equal(g.workspace(), true); assert.equal(g.fetches.length, 0); assert.deepEqual(g.routes, []);
+  assert.equal(g.workspace(), true); assert.equal(g.fetches.length, 0); assert.equal(g.actions.length, 0);
 });
-test('the gate is mounted between PIN identity and the workspace', () => {
+test('the gate stays between PIN identity and AppShell', () => {
   assert.match(fs.readFileSync(root + 'features/auth/AuthGate.tsx', 'utf8'), /<EmployeeIdentityGate><ShiftGate><AppShell \/><\/ShiftGate><\/EmployeeIdentityGate>/);
 });
 
@@ -228,6 +263,7 @@ test('18. a DEVICE_REVOKED / DEVICE_INVALID answer to the post-PIN fetch runs M0
 test('identity-required errors keep the gate closed and show only safe guidance', async () => {
   const g = await opened({ responses: [new ApiError(401, 'IDENTITY_REQUIRED')] });
   assert.equal(g.workspace(), false);
-  assert.equal(g.feedback().props.detail, state.timeMessage(new ApiError(401, 'IDENTITY_REQUIRED')));
-  assert.doesNotMatch(JSON.stringify(g.tree), /IDENTITY_REQUIRED|HTTP status|Diagnostic code|private-provider-detail/);
+  assert.equal(g.access.error.code, 'IDENTITY_REQUIRED');
+  assert.doesNotMatch(state.timeMessage(g.access.error), /IDENTITY_REQUIRED|HTTP status|Diagnostic code|private-provider-detail/);
+  assert.match(fs.readFileSync(root + 'navigation/AppShell.tsx', 'utf8'), /timeMessage\(shift.error\)/);
 });

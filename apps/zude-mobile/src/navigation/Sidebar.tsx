@@ -7,21 +7,22 @@ import type { BusinessRole } from "../lib/today-api";
 import { design as d, theme as t } from "../theme/tokens";
 import { visibleNavigation, type NativeRoute, type NavItem, capabilityLabel } from "./items";
 
-export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = false, role, businessName, onExpand, initialGroup }: {
+export function Sidebar({ activeLabel, onSelect, expanded = false, disabled = false, restrictedToClock = false, role, businessName, onExpand, initialGroup }: {
   activeLabel: string; onSelect: (route: NativeRoute) => void;
-  expanded?: boolean; disabled?: boolean; role: BusinessRole; businessName: string; onExpand?: (group: string) => void; initialGroup?: string;
+  expanded?: boolean; disabled?: boolean; restrictedToClock?: boolean; role: BusinessRole; businessName: string; onExpand?: (group: string) => void; initialGroup?: string;
 }) {
   const identity = useEmployeeIdentity();
   const scroll = useRef<ScrollView>(null);
   const [focused, setFocused] = useState<string | null>(null);
   function itemView(item: NavItem, utility = false) {
     const unavailable = item.state !== "AVAILABLE_NATIVE";
+    const shiftRestricted = restrictedToClock && item.label !== "Time Clock" && item.label !== "Lock";
     const selected = item.label === activeLabel;
     return <Pressable key={item.label} accessibilityRole="button" accessibilityLabel={`${item.label}${unavailable ? ", unavailable on this device" : ""}`}
-      accessibilityState={{ selected, disabled: disabled || unavailable }} disabled={disabled || unavailable}
-      onFocus={() => setFocused(item.label)} onBlur={() => setFocused(null)} onPress={() => { if (disabled || unavailable) return; if (item.label === "Lock") { void identity.lock(); return; } if (item.route) onSelect(item.route); }}
+      accessibilityState={{ selected, disabled: disabled || unavailable || shiftRestricted }} disabled={disabled || unavailable || shiftRestricted}
+      onFocus={() => setFocused(item.label)} onBlur={() => setFocused(null)} onPress={() => { if (disabled || unavailable || shiftRestricted) return; if (item.label === "Lock") { void identity.lock(); return; } if (item.route) onSelect(item.route); }}
       style={({ pressed }) => [s.item, expanded && s.expanded, utility && s.utility, selected && s.active, expanded && selected && s.expandedActive,
-        focused === item.label && s.focused, expanded && focused === item.label && s.expandedFocused, (disabled || unavailable) && ui.disabled, pressed && ui.pressed]}>
+        focused === item.label && s.focused, expanded && focused === item.label && s.expandedFocused, (disabled || unavailable || shiftRestricted) && ui.disabled, pressed && ui.pressed]}>
       <Icon name={item.icon} color={expanded ? d.color.textSecondary : selected ? t.colors.brandText : t.colors.shellMuted} size={20} />
       {!utility && <Text style={[s.label, expanded && s.expandedLabel, selected && s.selectedText, expanded && selected && s.expandedSelectedText]}>{item.label === "Appointments" && !expanded ? "Appts" : item.label}</Text>}
       {expanded && unavailable && <Text style={s.badge}>{capabilityLabel(item.state)}</Text>}

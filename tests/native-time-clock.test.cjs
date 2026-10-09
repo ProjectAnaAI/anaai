@@ -116,12 +116,13 @@ test('Time Clock and My Time are real routes for every role, including an employ
 });
 
 // ---- Rendered screens --------------------------------------------------------------------
-function screen(file, name, { data, error, sharedMode = true, identity = { employee: { id: 'e1', name: 'Avery Employee' }, expiresAt: 'x' }, fail, pending = false } = {}) {
+function screen(file, name, { data, error, sharedMode = true, identity = { employee: { id: 'e1', name: 'Avery Employee' }, expiresAt: 'x' }, fail, pending = false, admission } = {}) {
   const states = [], effects = [], calls = [], timers = [], locks = [];
   let cursor = 0, ec = 0, refreshes = 0, resourceKey, release, replaced, uuids = 0;
   const react = {
     useState(initial) { const i = cursor++; if (!(i in states)) states[i] = typeof initial === 'function' ? initial() : initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v; }]; },
     useRef(initial) { const i = cursor++; if (!(i in states)) states[i] = { current: initial }; return states[i]; },
+    useLayoutEffect(fn, deps) { const i = ec++, old = effects[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) effects[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
     useEffect(fn, deps) { const i = ec++, old = effects[i]; if (!old || deps.some((v, j) => v !== old.deps[j])) effects[i] = { fn, deps, pending: true, cleanup: old?.cleanup }; },
   };
   const api = {
@@ -139,6 +140,7 @@ function screen(file, name, { data, error, sharedMode = true, identity = { emplo
     '../business/BusinessContext': { useBusiness: () => ({ business: { id: B, name: 'Business', role: 'owner' }, userId: 'account' }) },
     '../identity/EmployeeIdentityContext': { useEmployeeIdentity: () => ({ sharedMode, identity, lock: async (notice) => { locks.push(notice); } }) },
     '../appointments/controls': { Notice: 'Notice' },
+    './ShiftAccessContext': { useShiftAccess: () => admission ?? ({ managed: false }) },
     './state': state,
     './useTimeResource': { useTimeResource(key, loader) { resourceKey = key; if (key) void loader(new AbortController().signal); return { data: key ? (replaced ?? data) : undefined, error: key ? error : undefined, loading: false, fetchedAt: Date.now(), refresh() { refreshes++; }, replace(v) { replaced = v; } }; } },
   }, { setInterval: (fn, ms) => { timers.push(ms); return timers.length; }, clearInterval() {} });
@@ -159,6 +161,8 @@ function screen(file, name, { data, error, sharedMode = true, identity = { emplo
     // Rendered text: each Text's children joined as React would display them.
     text() { return h.all().map(n => n.type === 'Text' ? [].concat(n.props.children).filter(v => typeof v === 'string' || typeof v === 'number').join('') : JSON.stringify(n.props)).join('\n'); },
     release() { release?.(); },
+    replaceIdentity(next) { identity = next; h.render(); },
+    unmount() { for (const effect of effects) effect.cleanup?.(); },
   };
   h.render();
   return h;
@@ -273,4 +277,43 @@ test('11-13. Clock Out still needs confirmation; a server-confirmed OFF_CLOCK en
   assert.equal(brk.locks.length, 0, 'other actions never lock');
   const source = fs.readFileSync(root + 'features/time/TimeClockScreen.tsx', 'utf8');
   assert.doesNotMatch(source, /forget|signOut|leaveSharedMode/, 'never forgets the device or signs the account out');
+});
+
+for (const [status, action, message] of [
+  ['OFF_CLOCK', 'clock-in', 'Clock in to continue.'],
+  ['ON_PAID_BREAK', 'break-end', 'End your paid break to continue.'],
+  ['ON_MEAL_BREAK', 'break-end', 'End your meal break to continue.'],
+]) test(`managed Time Clock reuses ${action}, shows mandatory guidance, and shares its sole server view`, async () => {
+  const completions = [], ticket = { scope: 'current', owner: {} };
+  const data = view({ state: status, shift: status === 'OFF_CLOCK' ? null : { ...working.shift, break: { type: status === 'ON_PAID_BREAK' ? 'PAID' : 'MEAL', startedAt: '2026-09-30T13:00:00Z', durationMs: 1000, intendedMinutes: 15 } } });
+  const access = { managed: true, allowed: false, data, loading: false, fetchedAt: Date.now(), requiredAction: action,
+    beginAction() { return ticket; }, finishAction(...args) { completions.push(args); }, refresh() {} };
+  const h = screen(...TC, { data, admission: access });
+  assert.equal(h.resourceKey, null, 'no second Time Clock GET/cache'); assert.match(h.text(), new RegExp(message.replace('.', '\\.')));
+  assert.equal(h.calls.length, 0, 'rendering/PIN admission writes nothing');
+  const label = action === 'clock-in' ? 'Clock In' : 'End Break';
+  const press = h.button(label).props.onPress; press(); press(); h.render(); await flush(); h.render();
+  assert.equal(h.calls.length, 1, 'repeated presses do not create another action');
+  assert.equal(completions.length, 1); assert.equal(completions[0][0], ticket); assert.equal(completions[0][1], action);
+  assert.equal(completions[0][2].state, 'WORKING');
+  assert.equal(access.allowed, false, 'screen cannot grant admission from a mutation response');
+});
+test('managed action failure stays on Time Clock with the existing error and no admission grant', async () => {
+  const finishes = [], ticket = { scope: 'current', owner: {} }, data = view();
+  const access = { managed: true, allowed: false, data, loading: false, fetchedAt: Date.now(), requiredAction: 'clock-in', beginAction: () => ticket, finishAction(...a) { finishes.push(a); }, refresh() {} };
+  const h = screen(...TC, { data, admission: access, fail: new ApiError(503, 'TIME_UNAVAILABLE') });
+  h.click('Clock In'); await flush(); h.render();
+  assert.equal(finishes.length, 1); assert.equal(finishes[0][2], undefined); assert.equal(access.allowed, false);
+  assert.ok(h.all().some(n => n.type === 'Notice' && n.props.error)); assert.ok(h.button('Clock In'));
+});
+test('old Clock Out response cannot lock a newly switched employee', async () => {
+  const h = screen(...TC, { data: working, pending: true });
+  h.click('Clock Out'); h.click('Yes, Clock Out');
+  h.replaceIdentity({ employee: { id: 'employee-b', name: 'Employee B' }, expiresAt: 'new-session' });
+  h.release(); await flush(); h.render();
+  assert.equal(h.locks.length, 0); assert.equal(h.calls.length, 1);
+});
+test('an unmounted clock action cannot lock a replacement workspace', async () => {
+  const h = screen(...TC, { data: working, pending: true }); h.click('Clock Out'); h.click('Yes, Clock Out');
+  h.unmount(); h.release(); await flush(); assert.equal(h.locks.length, 0);
 });

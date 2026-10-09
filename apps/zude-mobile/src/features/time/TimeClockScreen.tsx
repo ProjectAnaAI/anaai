@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { Badge, Button, styles as ui } from "../../components/ui";
@@ -9,6 +9,7 @@ import { useBusiness } from "../business/BusinessContext";
 import { useEmployeeIdentity } from "../identity/EmployeeIdentityContext";
 import { Notice } from "../appointments/controls";
 import { BREAK_OPTIONS, actionsFor, breakLabel, formatDuration, formatTime, onBreak, outcomeUnknown, overIntended, requestKeyFor, running, stateLabel, timeMessage, type PendingRequest } from "./state";
+import { useShiftAccess, type ShiftActionTicket } from "./ShiftAccessContext";
 import { useTimeResource } from "./useTimeResource";
 
 const DONE: Record<TimeAction, string> = {
@@ -25,7 +26,11 @@ export function TimeClockScreen() {
   const { sharedMode, identity, lock } = useEmployeeIdentity();
   const employee = sharedMode ? identity?.employee ?? null : null;
   const key = employee ? `${userId}:${business.id}:${employee.id}:${identity?.expiresAt}:time-clock` : null;
-  const clock = useTimeResource(key, (signal) => getTimeClock(business.id, signal));
+  const admission = useShiftAccess();
+  const localClock = useTimeResource(admission.managed ? null : key, (signal) => getTimeClock(business.id, signal));
+  const clock = admission.managed ? admission : localClock;
+  const owner = useRef(key);
+  useLayoutEffect(() => { owner.current = key; }, [key]);
   const [busy, setBusy] = useState<TimeAction | null>(null);
   const [chooser, setChooser] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
@@ -45,12 +50,15 @@ export function TimeClockScreen() {
   }, [live]);
 
   async function act(action: TimeAction, breakType?: BreakType) {
-    if (submitting.current) return;
+    if (submitting.current || !alive.current || owner.current !== key) return;
+    const ticket: ShiftActionTicket | null = admission.managed ? admission.beginAction() : null;
+    if (admission.managed && !ticket) return;
     submitting.current = true; setBusy(action); setNotice(null);
     const request = requestKeyFor(pending.current, `${action}:${breakType ?? ""}`, randomUUID);
     pending.current = request;
     try {
       const result = await recordTimeAction(business.id, action, request.key, breakType);
+      if (!alive.current || owner.current !== key) return;
       pending.current = null;
       // Shared-device privacy: once the server confirms OFF_CLOCK, end this
       // employee's PIN session and return to the universal PIN keypad. The
@@ -61,14 +69,17 @@ export function TimeClockScreen() {
         return;
       }
       if (!alive.current) return;
-      clock.replace(result); setNow(Date.now()); setChooser(false); setConfirmOut(false);
+      if (ticket) admission.finishAction(ticket, action, result);
+      else localClock.replace(result); setNow(Date.now()); setChooser(false); setConfirmOut(false);
       setNotice({ message: DONE[action] });
     } catch (error) {
+      if (!alive.current || owner.current !== key) return;
+      if (ticket) admission.finishAction(ticket, action);
       // Keep the key only when the server may have recorded the action.
       if (!outcomeUnknown(error)) pending.current = null;
       if (!alive.current) return;
       setNotice({ message: timeMessage(error), error: true });
-      clock.refresh();
+      if (!ticket) clock.refresh();
     } finally {
       submitting.current = false;
       if (alive.current) setBusy(null);
@@ -89,8 +100,9 @@ export function TimeClockScreen() {
   return <View style={ws.page}>{header}
     <SplitWorkspace main={<StatusPanel view={view} fetchedAt={clock.fetchedAt} now={now} busy={busy} chooser={chooser} confirmOut={confirmOut} notice={notice}
       stale={clock.error ? timeMessage(clock.error) : ""}
+      checking={clock.loading || !!clock.error} requiredMessage={admission.requiredMessage} requiredAction={admission.managed ? admission.requiredAction : null}
       onAction={(action) => {
-        if (busy) return;
+        if (busy || clock.loading) return;
         setNotice(null);
         if (action === "break-start") { setChooser(true); setConfirmOut(false); return; }
         if (action === "clock-out") { setConfirmOut(true); setChooser(false); return; }
@@ -102,9 +114,9 @@ export function TimeClockScreen() {
   </View>;
 }
 
-function StatusPanel({ view, fetchedAt, now, busy, chooser, confirmOut, notice, stale, onAction, onBreak: chooseBreak, onCancelBreak, onClockOut, onCancelClockOut }: {
+function StatusPanel({ view, fetchedAt, now, busy, chooser, confirmOut, notice, stale, checking, requiredAction, requiredMessage, onAction, onBreak: chooseBreak, onCancelBreak, onClockOut, onCancelClockOut }: {
   view: TimeClockView; fetchedAt: number; now: number; busy: TimeAction | null; chooser: boolean; confirmOut: boolean;
-  notice: { message: string; error?: boolean } | null; stale: string;
+  notice: { message: string; error?: boolean } | null; stale: string; checking: boolean; requiredAction: "clock-in" | "break-end" | null; requiredMessage?: string;
   onAction: (action: TimeAction) => void; onBreak: (type: BreakType) => void; onCancelBreak: () => void; onClockOut: () => void; onCancelClockOut: () => void;
 }) {
   const shift = view.shift;
@@ -118,6 +130,7 @@ function StatusPanel({ view, fetchedAt, now, busy, chooser, confirmOut, notice, 
       <Text accessibilityRole="header" style={s.name}>{view.employee.name}</Text>
       <Badge label={stateLabel(view.state)} tone={tone} />
     </View>
+    {requiredAction && <Text accessibilityLiveRegion="polite" style={ui.body}>{requiredMessage ?? (requiredAction === "clock-in" ? "Clock in to continue." : view.state === "ON_MEAL_BREAK" ? "End your meal break to continue." : "End your paid break to continue.")}</Text>}
     {!!stale && <Notice message={`Showing your last confirmed status. ${stale}`} error />}
     {shift ? <View style={s.metrics}>
       <Metric label="Clocked in" value={formatTime(shift.clockInAt, view.timezone)} />
@@ -133,22 +146,22 @@ function StatusPanel({ view, fetchedAt, now, busy, chooser, confirmOut, notice, 
     {chooser ? <View style={s.choice}>
       <Text style={ui.strong}>Choose your break</Text>
       {BREAK_OPTIONS.map((option) => <Pressable key={option.type} accessibilityRole="button" accessibilityLabel={`${option.label}, ${option.minutes} minutes, ${option.detail}`}
-        accessibilityState={{ disabled: !!busy, busy: busy === "break-start" }} disabled={!!busy} onPress={() => chooseBreak(option.type)}
+        accessibilityState={{ disabled: !!busy, busy: busy === "break-start" }} disabled={!!busy || checking} onPress={() => chooseBreak(option.type)}
         style={({ pressed }) => [s.option, !!busy && ui.disabled, pressed && ui.pressed]}>
         <View style={ui.grow}><Text style={ui.strong}>{option.label}</Text><Text style={ui.meta}>{option.minutes} minutes · {option.detail}</Text></View>
       </Pressable>)}
-      <Button label="Cancel" secondary disabled={!!busy} onPress={onCancelBreak} />
+      <Button label="Cancel" secondary disabled={!!busy || checking} onPress={onCancelBreak} />
     </View> : confirmOut ? <View style={s.choice}>
       <Text style={ui.strong}>Clock out now?</Text>
       {current && <Text style={ui.body}>This also ends your {breakLabel(current.type)}.</Text>}
-      <Button label="Yes, Clock Out" busy={busy === "clock-out"} disabled={!!busy} onPress={onClockOut} />
-      <Button label="Stay Clocked In" secondary disabled={!!busy} onPress={onCancelClockOut} />
+      <Button label="Yes, Clock Out" busy={busy === "clock-out"} disabled={!!busy || checking} onPress={onClockOut} />
+      <Button label="Stay Clocked In" secondary disabled={!!busy || checking} onPress={onCancelClockOut} />
     </View> : <View style={s.actions}>
-      {actionsFor(view.state).map((action) => <View key={action} style={s.action}>
-        {action === "clock-in" ? <Button label="Clock In" icon="log-in" busy={busy === action} disabled={!!busy} onPress={() => onAction(action)} />
-          : action === "break-start" ? <Button label="Start Break" icon="coffee" secondary busy={busy === action} disabled={!!busy} onPress={() => onAction(action)} />
-          : action === "break-end" ? <Button label="End Break" icon="play" busy={busy === action} disabled={!!busy} onPress={() => onAction(action)} />
-          : <Button label="Clock Out" icon="log-out" secondary busy={busy === action} disabled={!!busy} onPress={() => onAction(action)} />}
+      {(requiredAction && view.state === "WORKING" ? [requiredAction] : actionsFor(view.state)).map((action) => <View key={action} style={s.action}>
+        {action === "clock-in" ? <Button label="Clock In" icon="log-in" busy={busy === action} disabled={!!busy || checking} onPress={() => onAction(action)} />
+          : action === "break-start" ? <Button label="Start Break" icon="coffee" secondary busy={busy === action} disabled={!!busy || checking} onPress={() => onAction(action)} />
+          : action === "break-end" ? <Button label="End Break" icon="play" busy={busy === action} disabled={!!busy || checking} onPress={() => onAction(action)} />
+          : <Button label="Clock Out" icon="log-out" secondary busy={busy === action} disabled={!!busy || checking} onPress={() => onAction(action)} />}
       </View>)}
     </View>}
     <Text style={ui.meta}>Times are recorded by ZUDE, not this iPad. Locking ZUDE does not clock you out.</Text>

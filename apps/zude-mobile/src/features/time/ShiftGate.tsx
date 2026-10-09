@@ -1,163 +1,145 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { StyleSheet, View } from "react-native";
-import { router } from "expo-router";
-import { Button } from "../../components/ui";
-import { Feedback } from "../../components/workspace";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { AppState } from "react-native";
+import { usePathname } from "expo-router";
 import { ZudeApiError } from "../../lib/api";
-import {
-  getTimeClock,
-} from "../../lib/time-clock-api";
-import { theme as t } from "../../theme/tokens";
+import { getTimeClock, type TimeClockView } from "../../lib/time-clock-api";
+import { defaultWorkspaceRoute } from "../../navigation/items";
 import { useBusiness } from "../business/BusinessContext";
 import { useEmployeeIdentity } from "../identity/EmployeeIdentityContext";
-import { defaultWorkspaceRoute } from "../../navigation/items";
-import { timeMessage } from "./state";
+import { ShiftAccessContext, type AdmissionAction, type ShiftAccess, type ShiftActionTicket } from "./ShiftAccessContext";
 
-type Decision =
-  | { key: string; status: "error"; error: unknown }
-  | { key: string; status: "admitted"; route: "/" | "/appointments-today" };
+type Read = {
+  owner: object; scope: string; path: string; revision: number;
+  status: "ready" | "error"; data?: TimeClockView; error?: unknown; at: number;
+};
+// One server-backed decision for the whole shared workspace and its clock screen.
+// Route changes and explicit actions invalidate admission synchronously. Polls
+// observe changes on mounted screens without resetting an unchanged WORKING UI.
+// A poll failure withdraws admission; no local display timer can grant it.
+export function ShiftGate({ children }: { children: ReactNode }) {
+  const { business, userId } = useBusiness();
+  const { sharedMode, identity, managementRole } = useEmployeeIdentity();
+  const path = usePathname();
+  const scope = sharedMode && identity
+    ? `${userId}:${business.id}:${identity.employee.id}:${identity.expiresAt}:${managementRole}` : null;
+  const live = useRef({ scope, owner: identity });
+  useLayoutEffect(() => { live.current = { scope, owner: identity }; }, [scope, identity]);
+  const [read, setRead] = useState<Read | null>(null);
+  const [request, setRequest] = useState({ revision: 0, background: false });
+  const [action, setAction] = useState<ShiftActionTicket | null>(null);
+  const sequence = useRef(0);
+  const activeRead = useRef<AbortController | null>(null);
+  const activeAction = useRef<ShiftActionTicket | null>(null);
+  const [mandatory, setMandatory] = useState<{ owner: object; action: AdmissionAction; message: string } | null>(null);
+  const successfulAdmission = useRef<object | null>(null);
+  const [landed, setLanded] = useState<object | null>(null);
+  const current = read?.scope === scope && read.owner === identity ? read : null;
+  const actionCurrent = action?.owner === identity && action?.scope === scope;
+  const ready = !!current && current.path === path && current.status === "ready" &&
+    (current.revision === request.revision || request.background) && !actionCurrent;
+  const requiredAction = mandatory?.owner === identity ? mandatory.action : null;
+  const working = ready && current?.data?.state === "WORKING" && !requiredAction;
+  const landing = defaultWorkspaceRoute(managementRole);
+  const needsLanding = landed !== identity;
+  const allowed = scope === null || (working && (!needsLanding || path === landing));
 
-// Validate the current PIN session against the authoritative time-clock read.
-// Landing is role-based for every shift state; admission never mutates time.
-// Failed reads remain closed, and each new PIN session gets its own decision.
-// Account mode (not a shared device, no PIN identity) is unchanged.
-export function ShiftGate({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const { business } = useBusiness();
-  const { sharedMode, identity, lock, managementRole } =
-    useEmployeeIdentity();
-
-  const key =
-    sharedMode && identity
-      ? `${business.id}:${identity.employee.id}:${identity.expiresAt}:${managementRole}`
-      : null;
-
-  const [decision, setDecision] =
-    useState<Decision | null>(null);
-  const [attempt, setAttempt] = useState(0);
-  const navigated = useRef<string | null>(null);
-
-  const current =
-    decision?.key === key ? decision : null;
+  function refresh(background = false) {
+    if (scope === null || live.current.scope !== scope || live.current.owner !== identity || actionCurrent) return;
+    sequence.current++;
+    activeRead.current?.abort();
+    setRequest(value => ({ revision: value.revision + 1, background }));
+  }
 
   useEffect(() => {
-    if (key === null) {
-      return;
-    }
-
+    if (scope === null || !identity || actionCurrent) return;
+    const owner = identity;
     const controller = new AbortController();
-    let cancelled = false;
-
-    void getTimeClock(
-      business.id,
-      controller.signal,
-    ).then(
-      () => {
-        if (!cancelled) {
-          setDecision({ key, status: "admitted", route: defaultWorkspaceRoute(managementRole) });
-        }
-      },
-      (error: unknown) => {
-        if (
-          cancelled ||
-          (error instanceof ZudeApiError &&
-            error.code === "CANCELLED")
-        ) {
-          return;
-        }
-
-        setDecision({
-          key,
-          status: "error",
-          error,
-        });
-      },
-    );
-
-    return () => {
-      cancelled = true;
+    const version = ++sequence.current;
+    activeRead.current = controller;
+    const valid = () => !controller.signal.aborted && version === sequence.current &&
+      live.current.scope === scope && live.current.owner === owner && !(activeAction.current?.owner === owner && activeAction.current.scope === scope);
+    const timeout = setTimeout(() => {
+      if (!valid()) return;
       controller.abort();
-    };
-  }, [key, attempt, business.id, managementRole]);
+      setRead(previous => ({ owner, scope, path, revision: request.revision, status: "error",
+        error: new ZudeApiError(0, "NETWORK_ERROR", "Unable to verify your time clock. Retry."),
+        data: previous?.owner === owner ? previous.data : undefined, at: previous?.owner === owner ? previous.at : 0 }));
+    }, 20_000);
+    void getTimeClock(business.id, controller.signal).then(data => {
+      if (!valid()) return;
+      if (data.state !== "WORKING") {
+        setMandatory({ owner, action: data.state === "OFF_CLOCK" ? "clock-in" : "break-end",
+          message: data.state === "OFF_CLOCK" ? "Clock in to continue." : data.state === "ON_MEAL_BREAK" ? "End your meal break to continue." : "End your paid break to continue." });
+        successfulAdmission.current = null;
+      } else if (successfulAdmission.current === owner) {
+        setMandatory(null);
+        successfulAdmission.current = null;
+      }
+      if (data.state === "WORKING" && path === defaultWorkspaceRoute(managementRole)) setLanded(owner);
+      setRead({ owner, scope, path, revision: request.revision, status: "ready", data, at: Date.now() });
+    }, error => {
+      if (valid()) setRead(previous => ({ owner, scope, path, revision: request.revision, status: "error", error,
+        data: previous?.owner === owner ? previous.data : undefined, at: previous?.owner === owner ? previous.at : 0 }));
+    }).finally(() => clearTimeout(timeout));
+    return () => { controller.abort(); clearTimeout(timeout); };
+  }, [scope, identity, path, request.revision, request.background, business.id, actionCurrent, managementRole]);
 
-  // Enter the decided destination once per employee session.
-  const admittedRoute =
-    current?.status === "admitted"
-      ? current.route
-      : null;
+  // Remote changes are re-read, never inferred from elapsed break/display time.
+  useEffect(() => {
+    if (!scope || !identity || !ready || current?.revision !== request.revision) return;
+    const timer = setTimeout(() => {
+      if (live.current.owner !== identity || live.current.scope !== scope || activeAction.current?.owner === identity && activeAction.current.scope === scope) return;
+      sequence.current++;
+      setRequest(value => ({ revision: value.revision + 1, background: true }));
+    }, 30_000);
+    return () => clearTimeout(timer);
+  }, [scope, identity, ready, current?.revision, request.revision]);
 
   useEffect(() => {
-    if (
-      key === null ||
-      admittedRoute === null ||
-      navigated.current === key
-    ) {
-      return;
-    }
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active" && scope && live.current.owner === identity && !(activeAction.current?.owner === identity && activeAction.current.scope === scope)) {
+        sequence.current++;
+        activeRead.current?.abort();
+        setRequest(value => ({ revision: value.revision + 1, background: false }));
+      }
+    });
+    return () => subscription.remove();
+  }, [scope, identity]);
 
-    navigated.current = key;
-    router.replace(admittedRoute);
-  }, [key, admittedRoute]);
+  useEffect(() => () => { sequence.current++; activeRead.current?.abort(); }, []);
 
-  if (key === null) {
-    return children;
-  }
-
-  if (current?.status === "admitted") {
-    return children;
-  }
-
-  const leave = (
-    <Button
-      label="Lock"
-      icon="lock"
-      secondary
-      onPress={() => void lock()}
-    />
-  );
-
-  return (
-    <View style={s.page}>
-      {current?.status === "error" ? (
-        <Feedback
-          kind="error"
-          title="ZUDE couldn’t check your time clock"
-          detail={timeMessage(
-            current.error,
-          )}
-          retry={() => {
-            setDecision(null);
-            setAttempt((value) => value + 1);
-          }}
-        />
-      ) : (
-        <Feedback
-          kind="loading"
-          title="Checking your time clock"
-        />
-      )}
-
-      <View style={s.actions}>{leave}</View>
-    </View>
-  );
+  const access: ShiftAccess = {
+    managed: scope !== null, allowed, data: current?.data, error: current?.revision === request.revision && current.path === path ? current.error : undefined,
+    loading: scope !== null && (!current || current.path !== path ||
+      current.revision !== request.revision && !request.background || !!actionCurrent), fetchedAt: current?.at ?? 0,
+    target: scope === null ? null : current?.status === "error" || requiredAction || ready && !working
+      ? "/time-clock" : working && needsLanding ? landing : null,
+    requiredAction, requiredMessage: mandatory?.owner === identity ? mandatory.message : undefined,
+    refresh: () => refresh(),
+    beginAction() {
+      if (!scope || !identity || live.current.owner !== identity || live.current.scope !== scope || !ready || activeAction.current?.owner === identity && activeAction.current.scope === scope) return null;
+      const ticket = { owner: identity, scope };
+      sequence.current++;
+      activeRead.current?.abort();
+      activeAction.current = ticket;
+      setAction(ticket);
+      return ticket;
+    },
+    finishAction(ticket, action, result) {
+      if (activeAction.current !== ticket || live.current.owner !== ticket.owner || live.current.scope !== ticket.scope) return;
+      if (result && (action === "clock-in" || action === "break-end") && result.state === "WORKING") {
+        successfulAdmission.current = ticket.owner;
+        setLanded(null);
+      }
+      activeAction.current = null;
+      setAction(null);
+      sequence.current++;
+      // Mutation responses can update neither admission nor its source of truth:
+      // only this subsequent GET may confirm WORKING and release the gate.
+      setRequest(value => ({ revision: value.revision + 1, background: false }));
+    },
+  };
+  // AppShell always mounts its navigator, but never renders an operational Slot
+  // without this decision. This also permits safe cold/deep-link replacement.
+  return <ShiftAccessContext.Provider value={access}>{children}</ShiftAccessContext.Provider>;
 }
-
-const s = StyleSheet.create({
-  page: {
-    flex: 1,
-    justifyContent: "center",
-    backgroundColor: t.colors.workspace,
-    padding: t.space.xl,
-  },
-  actions: {
-    alignItems: "center",
-  },
-});

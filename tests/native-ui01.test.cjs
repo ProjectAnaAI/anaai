@@ -92,6 +92,7 @@ function shell(role = 'manager') {
     return { 'react-native': rn, 'expo-router': { Navigator: 'Navigator', Slot: 'Slot', usePathname: () => '/', router: { replace: value => routes.push(value) } },
       'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }, 'expo-status-bar': { StatusBar: 'StatusBar' },
       '../components/ui': { IconButton: 'IconButton' }, '../components/operations': kit,
+      '../features/time/ShiftAccessContext': { useShiftAccess: () => ({ managed: false, allowed: true, target: null }) }, '../features/time/TimeClockScreen': { TimeClockScreen: 'GuardedTimeClock' }, '../components/workspace': { Feedback: 'Feedback' }, '../features/time/state': { timeMessage: () => 'Clock unavailable' },
       '../features/business/BusinessContext': { useBusiness: () => context }, '../features/identity/EmployeeIdentityContext': { useEmployeeIdentity: () => context },
       '../theme/tokens': tokens, './handoff': { appointmentHandoff: () => ({ start: () => 'token', customer() {} }) }, './items': navigation,
       './WorkspaceContext': { WorkspaceContext: { Provider: 'Provider' } }, './Sidebar': originalSidebar,

@@ -10,6 +10,10 @@ import { design as d } from "../theme/tokens";
 import type { Customer } from "../lib/appointments-api";
 import { appointmentHandoff } from "./handoff";
 import { activeNavigationLabel, primaryTabs, shellDestination, type NativeRoute } from "./items";
+import { TimeClockScreen } from "../features/time/TimeClockScreen";
+import { useShiftAccess } from "../features/time/ShiftAccessContext";
+import { Feedback } from "../components/workspace";
+import { timeMessage } from "../features/time/state";
 import { Sidebar } from "./Sidebar";
 import { WorkspaceContext } from "./WorkspaceContext";
 
@@ -17,8 +21,10 @@ export function AppShell() {
   const { business, userId } = useBusiness();
   const pathname = usePathname();
   const { managementRole, identity, sharedMode, lock, recordEmployeeActivity } = useEmployeeIdentity();
+  const shift = useShiftAccess();
+  const restricted = shift.managed && !shift.allowed;
   const permissions = sharedMode ? identity?.permissions ?? [] : null;
-  const destination = shellDestination(managementRole, pathname, permissions);
+  const destination = shift.target ?? shellDestination(managementRole, pathname, permissions);
   useEffect(() => { if (destination !== pathname) router.replace(destination); }, [destination, pathname]);
   const identityLabel = identity?.employee.name ?? (managementRole === "owner" ? "Owner account" : managementRole === "manager" ? "Manager account" : "My account");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -27,11 +33,11 @@ export function AppShell() {
   function switchUser() { setMenuOpen(false); void lock(); }
   const [handoff] = useState(appointmentHandoff);
   function select(route: NativeRoute) {
-    if (navigationLocked) return;
+    if (navigationLocked || restricted && route !== "/time-clock") return;
     setMenuOpen(false); router.replace(route);
   }
   function startAppointment(customer: Customer) {
-    if (navigationLocked) return;
+    if (navigationLocked || restricted) return;
     const token = handoff.start(business.id, customer);
     router.replace({ pathname: "/appointments", params: { compose: "new", customer: token } });
   }
@@ -42,13 +48,21 @@ export function AppShell() {
     <StatusBar style="dark" />
     <ZudeHeader business={business.name} identity={identityLabel} disabled={navigationLocked} onAccount={openMenu} menuOpen={menuOpen} onSwitchUser={sharedMode && identity ? switchUser : undefined} />
     <View style={o.page}>
-      <WorkspaceContext.Provider value={{ navigationLocked, setNavigationLocked, startAppointment, appointmentCustomer: handoff.customer }}>
-        {destination === pathname
+      <WorkspaceContext.Provider value={{ navigationLocked: navigationLocked || restricted, setNavigationLocked, startAppointment, appointmentCustomer: handoff.customer }}>
+        {shift.managed && pathname === "/time-clock"
+          ? <TimeClockScreen key={`${userId}:${business.id}:${identity?.employee.id}:${identity?.expiresAt}`} />
+          : restricted
+            ? <View style={o.grow}>
+                <Feedback kind={shift.error ? "error" : "loading"} title={shift.error ? "ZUDE couldn’t check your time clock" : "Checking your time clock"}
+                  detail={shift.error ? timeMessage(shift.error) : undefined} retry={shift.error ? shift.refresh : undefined} />
+                <Action quiet label="Lock" onPress={switchUser} />
+              </View>
+            : destination === pathname
           ? <Slot key={`${userId}:${business.id}:${managementRole}:${identity?.employee.id ?? "account"}`} />
           : <Text style={o.body}>Opening {managementRole === "staff" ? "Today’s Appointments" : "Today"}…</Text>}
       </WorkspaceContext.Provider>
     </View>
-    <BottomNavigation tabs={primaryTabs(managementRole)} pathname={pathname} onSelect={select} disabled={navigationLocked} />
+    <BottomNavigation tabs={primaryTabs(managementRole)} pathname={pathname} onSelect={select} disabled={navigationLocked || restricted} />
     <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
       <View style={s.menuBackdrop}
         onStartShouldSetResponderCapture={() => !recordEmployeeActivity()}
@@ -61,7 +75,7 @@ export function AppShell() {
               <Action quiet label="Close menu" onPress={() => setMenuOpen(false)} />
             </View>
             <Sidebar expanded activeLabel={activeNavigationLabel(pathname)} onSelect={select}
-              role={managementRole} businessName={business.name} disabled={navigationLocked} />
+              role={managementRole} businessName={business.name} disabled={navigationLocked} restrictedToClock={restricted} />
           </View>
         </SafeAreaView>
       </View>

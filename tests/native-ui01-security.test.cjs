@@ -110,6 +110,7 @@ function shellHarness({ role = 'manager', pathname = '/', identitySource } = {})
     const originalSidebar = { Sidebar: props => jsx.jsx('View', { testID: 'original-sidebar', children: jsx.jsx(sidebar.Sidebar, props) }) };
     return { 'react-native': rn, 'expo-router': { Navigator: 'Navigator', Slot: 'Slot', usePathname: () => route, router: { replace(value) { replacements.push(value); route = typeof value === 'string' ? value : value.pathname; } } },
       'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }, 'expo-status-bar': { StatusBar: 'StatusBar' }, '../components/operations': kit,
+      '../features/time/ShiftAccessContext': { useShiftAccess: () => context.shiftAccess ?? ({ managed: false, allowed: true, target: null }) }, '../features/time/TimeClockScreen': { TimeClockScreen: 'GuardedTimeClock' }, '../components/workspace': { Feedback: 'Feedback' }, '../features/time/state': { timeMessage: () => 'Clock unavailable' },
       '../features/business/BusinessContext': { useBusiness: () => context }, '../features/identity/EmployeeIdentityContext': { useEmployeeIdentity: () => identitySource?.context ?? context },
       '../theme/tokens': tokens, './handoff': { appointmentHandoff: () => ({ start: () => 'token', customer() {} }) }, './items': nav, './Sidebar': originalSidebar, './WorkspaceContext': { WorkspaceContext: { Provider: 'Provider' } },
     };
@@ -352,5 +353,41 @@ test('staff cold root lands on appointment Today and the menu selects only that 
   assert.equal(nav.activeNavigationLabel('/appointments-today'), 'Today');
   assert.equal(nav.activeNavigationLabel('/'), '', 'workforce Today is not Operations Today');
   assert.equal(nav.navigationGroups[0].items.filter(item => item.route === '/appointments-today').length, 1);
+  h.dispose();
+});
+
+test('mandatory shift gate withholds operational Slots and blocks bottom/sidebar/handoff while keeping identity controls', () => {
+  for (const role of ['staff', 'manager', 'owner']) {
+    for (const pathname of ['/appointments', '/reports', '/appointments-today', '/customers', '/my-time', '/']) {
+      const h = shellHarness({ role, pathname });
+      h.contextRef.shiftAccess = { managed: true, allowed: false, loading: false, target: '/time-clock', refresh() {} };
+      h.render(); h.render();
+      assert.equal(h.currentRoute(), '/time-clock'); assert.ok(!h.nodes().some(n => n.type === 'Slot'));
+      assert.ok(h.nodes().some(n => n.type === 'GuardedTimeClock'));
+      for (const tab of h.nodes().filter(n => n.props?.accessibilityRole === 'tab')) {
+        assert.equal(tab.props.disabled, true);
+        const before = h.replacements.length; tab.props.onPress(); h.render();
+        assert.equal(h.currentRoute(), '/time-clock');
+        if (tab.props.accessibilityLabel !== 'Clock') assert.equal(h.replacements.length, before);
+      }
+      const identityLabel = 'Ayut Alexandra Montgomery Fernández · Open account menu';
+      h.press(identityLabel);
+      for (const button of h.menuNodes().filter(n => n.type === 'Pressable')) {
+        if (button.props.accessibilityLabel === 'Time Clock' || button.props.accessibilityLabel === 'Lock') assert.equal(button.props.disabled, false);
+        else { assert.equal(button.props.disabled, true); const before = h.replacements.length; button.props.onPress(); h.render(); assert.equal(h.replacements.length, before); }
+      }
+      assert.equal(h.nodes().find(n => n.props?.accessibilityLabel === 'Switch User').props.disabled, false);
+      const provider = h.nodes().find(n => n.type === 'Provider'); const before = h.replacements.length;
+      provider.props.value.startAppointment({ id: 'customer' }); h.render(); assert.equal(h.replacements.length, before);
+      h.dispose();
+    }
+  }
+});
+test('a gate failure withholds an already mounted operational page and retains retry/lock controls', () => {
+  const h = shellHarness({ pathname: '/reports' }); assert.ok(h.nodes().some(n => n.type === 'Slot'));
+  let retried = false; h.contextRef.shiftAccess = { managed: true, allowed: false, target: null, error: Error('private error'), refresh() { retried = true; } };
+  h.render(); assert.ok(!h.nodes().some(n => n.type === 'Slot'));
+  const feedback = h.nodes().find(n => n.type === 'Feedback'); assert.equal(feedback.props.kind, 'error');
+  feedback.props.retry(); assert.equal(retried, true); assert.ok(h.nodes().some(n => n.props?.accessibilityLabel === 'Lock'));
   h.dispose();
 });
