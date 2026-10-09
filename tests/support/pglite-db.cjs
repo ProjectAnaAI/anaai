@@ -26,7 +26,7 @@ const BOOT = `
 // PostgREST-shaped values: ISO timestamps (microseconds kept), int8 as number,
 // dates as YYYY-MM-DD.
 const iso = (text) => text.replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00');
-async function openDatabase(lib, { m06 = true } = {}) {
+async function openDatabase(lib, { m06 = true, workforce = m06 } = {}) {
   const db = new lib.PGlite({ parsers: { 1184: iso, 20: Number, 1082: (text) => text } });
   await db.exec(`set timezone = 'UTC';` + BOOT);
   await db.exec(fs.readFileSync(path.join(migrations, '202609290001_m04_team_device_identity.sql'), 'utf8'));
@@ -38,6 +38,7 @@ async function openDatabase(lib, { m06 = true } = {}) {
   if (m06) await db.exec(fs.readFileSync(path.join(migrations, '202610060002_m06_issue_resolutions.sql'), 'utf8'));
   if (m06) await db.exec(fs.readFileSync(path.join(migrations, '202610060003_m06_audit_history.sql'), 'utf8'));
   if (m06) await db.exec(fs.readFileSync(path.join(migrations, '202610060004_m06_time_reports.sql'), 'utf8'));
+  if (workforce) await db.exec(fs.readFileSync(path.join(migrations, '202610080001_wf01_workforce_visibility.sql'), 'utf8'));
   return db;
 }
 // Runs one statement as a role (default service_role), like the server's

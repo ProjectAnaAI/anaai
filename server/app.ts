@@ -1,3 +1,4 @@
+import * as workforce from "./handlers/workforce";
 import * as timeReports from "./handlers/time-reports";
 import * as audit from "./handlers/audit";
 import * as timeIssues from "./handlers/time-issues";
@@ -81,6 +82,8 @@ export function createApp() {
   // M06 Slice 4: immutable time corrections (backend only).
   api.post("/management/timesheets/:employeeId/corrections/preview", webHandler(timesheets.PREVIEW_CORRECTION));
   api.post("/management/timesheets/:employeeId/corrections", webHandler(timesheets.COMMIT_CORRECTION));
+  api.get("/management/workforce", webHandler(workforce.GET));
+  api.get("/management/time-reports/directory", webHandler(timeReports.DIRECTORY));
   api.get("/management/time-reports", webHandler(timeReports.GET));
   api.post("/management/time-reports/export", webHandler(timeReports.EXPORT));
   api.get("/management/audit", webHandler(audit.GET));

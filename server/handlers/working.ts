@@ -16,6 +16,7 @@ export async function GET(request: Request) {
     if (new URL(request.url).search) return readFailure(400, "INVALID_REQUEST", "This working roster does not accept filters.");
     const ledger = await workingLedger(createSupabaseServiceClient(), member.context.businessId);
     const employees = ledger.employees.flatMap(({ employee, latest, events }) => {
+      if(managed.authority.role!=='owner' && employee.role!=='employee' && !(managed.authority.mode==='shared-device' && employee.role==='manager' && employee.id===managed.authority.employeeId))return [];
       const state = clockState(latest);
       if (!employee.isActive && state === "OFF_CLOCK") return [];
       return [{ employee, state, stateStartedAt: latest?.occurred_at ?? null,

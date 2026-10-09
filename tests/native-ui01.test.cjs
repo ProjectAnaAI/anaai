@@ -17,9 +17,9 @@ function today({ rows = fixture, issues = [], cursor = null, rosterError = false
     context.business.timezone = 'America/Los_Angeles'; context.identity.employee.name = 'Manager';
     const rn = { ...native, Pressable: 'Pressable', useWindowDimensions: () => ({ width: 1024, height: 768, fontScale: 1 }) };
     const kit = load('components/operations.tsx', { react, 'react-native': rn, 'react/jsx-runtime': jsx, './workspace': { Brand: 'OriginalBrand' }, '../theme/tokens': tokens });
-    return { 'react-native': rn, 'expo-router': { router: { replace: route => calls.push(route) } }, '../../components/operations': kit, '../../theme/tokens': tokens,
+    return { 'react-native': rn, 'expo-router': { router: { replace: route => calls.push(route) } }, '../../components/operations': kit, '../../theme/tokens': tokens, '../../navigation/reviewContext': load('navigation/reviewContext.ts'),
       '../identity/EmployeeIdentityContext': { useEmployeeIdentity: () => context },
-      '../../lib/working-api': { getWorking: async (businessId, signal) => { calls.push({ source: 'working', businessId, signal }); if (rosterError) throw Error('secret error'); return { businessId, timezone: context.business.timezone, snapshotAt: instant, employees: rows }; } },
+      '../../lib/workforce-api': { getWorkforce: async (businessId, signal) => { calls.push({ source: 'working', businessId, signal }); if (rosterError) throw Error('secret error'); return { businessId, timezone: context.business.timezone, snapshotAt: instant,date:'2026-10-07',exceptions:[],employees:rows.map(row=>({employeeId:row.employee.id,employee:row.employee.name,employeeRole:row.employee.role||'employee',isActive:!row.inactiveOpenShift,state:row.state,activeWorkMs:3000000,paidBreakMs:0,mealBreakMs:600000,workedMs:3000000,finalPaidMs:3000000,open:row.state!=='OFF_CLOCK',corrected:false})) }; } },
       '../../lib/time-issues-api': { getIssues: async (businessId, status, requestCursor, signal) => { calls.push({ source: 'issues', businessId, status, cursor: requestCursor, signal }); if (issueError) throw Error('secret error'); return { businessId, issues, nextCursor: cursor }; } },
     };
   }, 'ManagerTodayScreen');
@@ -42,30 +42,30 @@ test('UI01 branding remains available outside the header; employee report entry 
 });
 test('UI01 renders supplied working, paid break, meal break and off states; summaries filter without recomputation', async () => {
   const h = today(); await h.flush();
-  for (const text of ['Working', 'Paid break', 'Meal break', 'Off', 'Clocked in', 'Break since', 'elapsed', 'on break', 'Sherlyn', 'Anika']) assert.ok(h.text().includes(text), text);
-  assert.ok(h.nodes().some(n => n.props?.accessibilityLabel === '2 Working'));
-  click(h, '2 Working'); assert.ok(h.text().includes('Sherlyn')); assert.ok(!h.text().includes('Anika'));
+  for (const text of ['Working Now','On Break','Worked Earlier','Active Work','Final Paid Hours','Sherlyn','Anika']) assert.ok(h.text().includes(text), text);
+  assert.ok(h.nodes().some(n => n.props?.accessibilityLabel === '2 Working Now'));
+  click(h, '2 Working Now'); assert.ok(h.text().includes('Sherlyn')); assert.ok(!h.text().includes('Anika'));
   click(h, 'Show all'); assert.ok(h.text().includes('Anika'));
   assert.equal(h.routes.filter(c => c.source === 'working').length, 1);
   assert.equal(h.routes.find(c => c.source === 'issues').status, 'open');
-  click(h, 'Sherlyn, Working. View time'); assert.equal(h.routes.at(-1), '/timesheets'); h.dispose();
+  click(h, 'Sherlyn, Working Now. View time'); assert.equal(h.routes.at(-1).pathname, '/timesheets'); h.dispose();
 });
 test('UI01 calm state requires both successful current resources', async () => {
-  const h = today(); assert.ok(!h.text().includes('Everything looks good')); await h.flush();
-  assert.ok(h.text().includes('Everything looks good')); assert.ok(h.text().includes('No time issues need your attention.'));
-  click(h, 'Refresh Today'); assert.ok(!h.text().includes('Everything looks good')); await h.flush(); h.dispose();
-  for (const options of [{ rosterError: true }, { issueError: true }]) { const h = today(options); await h.flush(); assert.ok(!h.text().includes('Everything looks good')); assert.ok(!h.text().includes('secret error')); h.dispose(); }
+  const h = today(); assert.ok(!h.text().includes('No unresolved employee reports')); await h.flush();
+  assert.ok(h.text().includes('No unresolved employee reports')); assert.ok(h.text().includes('Other time records may still need review.'));
+  click(h, 'Refresh Today'); assert.ok(!h.text().includes('No unresolved employee reports')); await h.flush(); h.dispose();
+  for (const options of [{ rosterError: true }, { issueError: true }]) { const h = today(options); await h.flush(); assert.ok(!h.text().includes('No unresolved employee reports')); assert.ok(!h.text().includes('secret error')); h.dispose(); }
 });
 test('UI01 evidence from existing reports and inactive open shifts leads to existing review; no invented judgment', async () => {
   const row = { ...employee('x', 'WORKING', 'Inactive person'), inactiveOpenShift: true };
   const h = today({ rows: [...fixture, row], issues: [{ id: 'issue', employee_id: '0', employee_name: 'Sherlyn', note: 'Forgot to clock out' }] }); await h.flush();
   for (const text of ['Reported time issue', 'Forgot to clock out', 'shift still open']) assert.ok(h.text().includes(text));
-  assert.ok(!h.text().includes('Everything looks good'));
+  assert.ok(!h.text().includes('No unresolved employee reports'));
   for (const text of ['Unusually late', 'Suspicious shift', 'Needs correction']) assert.ok(!h.text().includes(text));
-  click(h, 'Review reported issue'); assert.equal(h.routes.at(-1), '/time-issues'); click(h, 'Review time'); assert.equal(h.routes.at(-1), '/timesheets'); h.dispose();
+  click(h, 'Review reported issue'); assert.equal(h.routes.at(-1).pathname, '/time-issues'); assert.equal(h.routes.at(-1).params.issueId, 'issue'); click(h, 'Review time'); assert.equal(h.routes.at(-1).params.employeeId, 'x'); h.dispose();
 });
 test('UI01 issue continuation is explicitly bounded and cannot imply calm', async () => {
-  const h = today({ cursor: 'next-page' }); await h.flush(); assert.ok(!h.text().includes('Everything looks good')); assert.ok(h.text().includes('More reports are available')); h.dispose();
+  const h = today({ cursor: 'next-page' }); await h.flush(); assert.ok(!h.text().includes('No unresolved employee reports')); assert.ok(h.text().includes('More reports are available')); h.dispose();
 });
 test('UI01 long names remain intact with shrinkable layout and wrap rather than fixed row heights', async () => {
   const name = 'Sherlyn Alexandria Montgomery Fernández with a very long employee name';
@@ -153,4 +153,10 @@ test('UI01 controls expose pressed, selected, keyboard focus and disabled states
   tab.props.onFocus(); h.render(); tab = h.nodes().find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Today');
   assert.ok(tab.props.style({ pressed: false }).some(s => s?.borderColor === tokens.design.color.focus));
   h.lockNavigation(); assert.ok(h.nodes().find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Today').props.accessibilityState.disabled); h.dispose();
+});
+
+test('WF01 Today renders role/day hours, labels worked-earlier correctly, and self drilldown uses My Time',async()=>{
+ const own={...employee('manager','WORKING','Manager self'),employee:{id:'manager',name:'Manager self',role:'manager',isActive:true}};
+ const owner={...employee('owner','OFF_CLOCK','Owner earlier'),employee:{id:'owner',name:'Owner earlier',role:'owner',isActive:true}};
+ const h=today({rows:[own,owner]});await h.flush();assert.ok(h.text().includes('Today’s Workforce'));assert.ok(h.text().includes('manager'));assert.ok(h.text().includes('owner'));assert.ok(h.text().includes('Worked Earlier'));assert.ok(h.text().includes('Provisional'));assert.ok(!h.nodes().some(n=>n.props.horizontal));click(h,'Manager self, Working Now. View time');assert.equal(h.routes.at(-1),'/my-time');h.dispose();
 });

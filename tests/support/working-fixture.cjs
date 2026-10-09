@@ -62,9 +62,9 @@ function workingClient(db, hooks, queries) {
     return q;
   }};
 }
-async function fixture(t, { serviceFactory = workingClient } = {}) {
+async function fixture(t, { serviceFactory = workingClient, workforce = true } = {}) {
   const lib=loadPGlite(); assert.ok(lib,'Required Slice 2 SQL tests need ZUDE_PGLITE_MODULE');
-  const db=await openDatabase(lib); t.after(()=>db.close());
+  const db=await openDatabase(lib,{workforce}); t.after(()=>db.close());
   const business=uuid(),other=uuid(),account=uuid();
   await db.query("insert into public.businesses(id,name,timezone) values ($1,'Main','America/Los_Angeles'),($2,'Other','UTC')",[business,other]);
   await db.query('insert into auth.users(id) values ($1)',[account]);

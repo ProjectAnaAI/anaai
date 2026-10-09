@@ -1,0 +1,10 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');const {load,ApiError}=require('./support/native-management.cjs');
+const base={employeeId:'manager-self',employee:'Manager Self',employeeRole:'manager',state:'WORKING',isActive:true,open:true,corrected:false,workedMs:3600000,activeWorkMs:3000000,paidBreakMs:600000,mealBreakMs:1800000,finalPaidMs:3600000};
+test('WF01 native daily contract rejects wrong business/date, negative/inconsistent totals, duplicates and malformed states',async()=>{
+ let data={businessId:'b',date:'2026-10-08',timezone:'America/Los_Angeles',snapshotAt:'2026-10-08T19:00:00Z',employees:[base],exceptions:[]};const api=load('lib/workforce-api.ts',{'./api':{ZudeApiError:ApiError,apiGet:async()=>data},'./operational-identity':{operationalRequest:(_,send)=>send({})}});const signal=new AbortController().signal;
+ const value=await api.getWorkforce('b',signal);assert.equal(value.employees[0].activeWorkMs+value.employees[0].paidBreakMs,value.employees[0].finalPaidMs);
+ const valid=data;for(const patch of [{businessId:'other'},{date:'2026-02-30'},{timezone:null},{employees:[base,base]},{employees:[{...base,activeWorkMs:-1}]},{employees:[{...base,finalPaidMs:2}]},{employees:[{...base,state:'invented'}]}]){data={...valid,...patch};await assert.rejects(api.getWorkforce('b',signal));}data=valid;await assert.rejects(api.getWorkforce('b',signal,'2026-10-07'));
+});
+test('WF01 report filter directory uses reporting endpoint and preserves authorized manager entry',async()=>{
+ let path;const data={businessId:'b',employees:[{id:'self',name:'Manager',role:'manager',isActive:true}]};const api=load('lib/time-reports-api.ts',{'./api':{ZudeApiError:ApiError,apiGet:async(url)=>{path=url;return data;}},'./operational-identity':{operationalRequest:(_,send)=>send({})}});const result=await api.getReportDirectory('b',new AbortController().signal);assert.equal(path,'/api/management/time-reports/directory');assert.equal(result.employees[0].role,'manager');
+});
